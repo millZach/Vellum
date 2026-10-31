@@ -1,0 +1,674 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Never merge to main; kept as the tag prototype/canvas-screen.
+  Question: what should Vellum's canvas screen look like on the iPhone Duo unfolded (951 x 669 pt)?
+  Three structurally different variants of one canvas, switchable with ?variant=A|B|C and the bar at the bottom.
+  The canvas itself is shared and live: Pencil (or mouse) draws, fingers pan and pinch (mouse: wheel zooms, right-drag pans).
+  All drawings, folders and projects here are made up.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Vellum canvas screen — prototype</title>
+<style>
+  :root { --ink:#1d1d1f; --mute:#6b6b70; --line:#d9d4c9; --paper:#f3efe6; --panel:rgba(252,250,246,.94); --accent:#2f5d8a;
+          --red:#d6342c; --green:#1f9d55; --blue:#2563eb; --sketch:#3a3a3a; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:#1b1b1d; overflow:hidden; font:13px/1.3 -apple-system,system-ui,"SF Pro Text",Segoe UI,sans-serif; color:var(--ink); touch-action:none; }
+  #stageWrap { position:absolute; inset:0 0 40px 0; display:flex; align-items:center; justify-content:center; }
+  #stage { position:absolute; width:951px; height:669px; transform-origin:0 0; background:var(--paper); overflow:hidden; border-radius:14px; }
+  #cv { position:absolute; inset:0; width:951px; height:669px; touch-action:none; }
+  #chrome { position:absolute; inset:0; pointer-events:none; }
+  #chrome > * , #shared > * { pointer-events:auto; }
+  #shared { position:absolute; inset:0; pointer-events:none; }
+  button { font:inherit; color:inherit; border:0; background:none; cursor:pointer; }
+  select { font:inherit; }
+  .panel { background:var(--panel); border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.08); backdrop-filter:blur(8px); }
+  .ic { display:inline-flex; align-items:center; justify-content:center; }
+  .on { background:#e6edf5 !important; color:var(--accent) !important; }
+  .chip { display:inline-block; width:20px; height:20px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--line); }
+  .chip.sel { box-shadow:0 0 0 2px var(--ink); }
+  .primary { background:var(--accent); color:#fff; border-radius:9px; padding:7px 12px; font-weight:600; }
+  .ghost { border:1px solid var(--line); border-radius:9px; padding:6px 11px; background:#fff; }
+  .rec { color:var(--red); }
+  /* switcher, not part of the design */
+  #switcher { position:fixed; left:50%; bottom:5px; transform:translateX(-50%); display:flex; gap:8px; align-items:center; background:#000; color:#fff;
+              border-radius:20px; padding:4px 6px; font:12px system-ui; z-index:99; white-space:nowrap; max-width:98vw; }
+  #switcher button { color:#fff; font-size:16px; width:30px; height:28px; border-radius:14px; background:#333; }
+  #switcher .lbl { font-weight:700; }
+  #switcher .st { color:#aaa; overflow:hidden; text-overflow:ellipsis; }
+  /* modals */
+  .scrim { position:absolute; inset:0; background:rgba(20,20,20,.28); display:flex; align-items:center; justify-content:center; pointer-events:auto; }
+  .modal { width:560px; max-height:600px; overflow:auto; background:#fffdf9; border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,.25); padding:16px 18px; }
+  .modal h2 { font-size:17px; margin:0 0 10px; }
+  .modal .row { display:flex; gap:8px; align-items:center; margin:8px 0; }
+  .kind { flex:1; border:1px solid var(--line); border-radius:12px; padding:9px; text-align:left; background:#fff; }
+  .kind b { display:block; font-size:13px; } .kind span { color:var(--mute); font-size:11.5px; }
+  .kind.sel { border-color:var(--accent); box-shadow:0 0 0 2px #c9d9ea; }
+  .list button { display:flex; width:100%; text-align:left; padding:8px 6px; border-bottom:1px solid #eee5d6; gap:10px; align-items:center; }
+  .list button:hover { background:#f6f1e7; }
+  .tag { font-size:11px; padding:1px 6px; border-radius:6px; background:#eee8dc; color:#555; }
+  .toast { position:absolute; left:50%; transform:translateX(-50%); padding:7px 12px; border-radius:10px; background:rgba(29,29,31,.86); color:#fff; font-size:12.5px; white-space:nowrap; pointer-events:none; }
+  .pop { position:absolute; display:flex; gap:4px; padding:4px; border-radius:10px; background:#1d1d1f; color:#fff; pointer-events:auto; }
+  .pop button { color:#fff; padding:6px 9px; border-radius:7px; font-size:12px; } .pop button:hover { background:#3a3a3c; }
+  .opts { position:absolute; left:50%; transform:translateX(-50%); display:flex; gap:8px; align-items:center; padding:6px 10px; border-radius:10px; font-size:12px; pointer-events:auto; }
+  .job { position:absolute; width:290px; border-radius:12px; padding:10px 12px; font-size:12.5px; pointer-events:auto; }
+  .job .q { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+  textarea, input[type=text], input[type=search] { font:inherit; border:1px solid var(--line); border-radius:8px; padding:7px 8px; width:100%; background:#fff; }
+  [data-live] { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  #textEdit { position:absolute; display:none; z-index:5; font:15px -apple-system,system-ui,sans-serif; border:1px dashed var(--accent); background:rgba(255,255,255,.85); padding:3px 5px; min-width:160px; pointer-events:auto; }
+</style>
+</head>
+<body>
+<div id="stageWrap"><div id="stage">
+  <canvas id="cv"></canvas>
+  <div id="chrome"></div>
+  <div id="shared"></div>
+  <input id="textEdit" type="text" placeholder="Type, or write with the Pencil">
+</div></div>
+<div id="switcher"><button id="prev" aria-label="Previous variant">◀</button><span class="lbl" id="vlabel"></span><button id="next" aria-label="Next variant">▶</button><span class="st" id="vstate"></span></div>
+<script>
+"use strict";
+const W = 951, H = 669;
+const VARIANTS = { A: 'Drafting rail', B: 'Pen palette', C: 'Ribbon + sheet set' };
+const COLORS = { red:'#d6342c', green:'#1f9d55', blue:'#2563eb', sketch:'#3a3a3a' };
+const COLOR_MEANING = { red:'Add', green:'Delete', blue:'Note', sketch:'Sketch' };
+const SCALES = [ ['1/8" = 1\'-0"',96], ['3/16" = 1\'-0"',64], ['1/4" = 1\'-0"',48], ['3/8" = 1\'-0"',32], ['1/2" = 1\'-0"',24], ['3/4" = 1\'-0"',16],
+                 ['1" = 1\'-0"',12], ['1-1/2" = 1\'-0"',8], ['3" = 1\'-0"',4], ['1" = 10\'',120], ['1" = 20\'',240], ['1" = 50\'',600], ['Full size 1:1',1] ];
+const PAPERS = { '11×17':[17,11], '24×36':[36,24], '30×42':[42,30], '8.5×11':[11,8.5] };
+const scaleLabel = k => (SCALES.find(s => s[1] === k) || ['1:' + k])[0];
+
+// ---------- made-up drawing index ----------
+const INDEX = [
+  { num:'P-101', title:'Feedwater P&ID', rev:'2', scale:48, scaleText:'1/4" = 1\'-0"', proj:'Riverside Plant (example)', pdf:true,  kind:'pid',   pw:36, ph:24 },
+  { num:'P-102', title:'Steam drum P&ID', rev:'0', scale:null, scaleText:'AS NOTED', proj:'Riverside Plant (example)', pdf:true,  kind:'pid',   pw:36, ph:24 },
+  { num:'A-301', title:'Control room arrangement', rev:'0', scale:24, scaleText:'1/2" = 1\'-0"', proj:'Riverside Plant (example)', pdf:true, kind:'panel', pw:36, ph:24 },
+  { num:'E-201', title:'MCC-4 one-line', rev:'1', scale:0, scaleText:'NTS', proj:'Riverside Plant (example)', pdf:false, kind:'loop', pw:17, ph:11 },
+  { num:'L-1042', title:'FT-1042 loop drawing', rev:'1', scale:0, scaleText:'NTS', proj:'Riverside Plant (example)', pdf:true,  kind:'loop',  pw:17, ph:11 },
+  { num:'P-210', title:'Chemical feed P&ID', rev:'4', scale:64, scaleText:'3/16" = 1\'-0"', proj:'Hilltop Mill (example)', pdf:false, kind:'pid', pw:36, ph:24 },
+];
+const PROJECT_FOLDER = p => `Dropbox / Projects / ${p} / Drawings`;
+
+// ---------- state ----------
+const params = new URLSearchParams(location.search);
+const S = {
+  variant: VARIANTS[params.get('variant')] ? params.get('variant') : 'A',
+  tool:'pen', color:'red', units:'ftin', ribbonTab:'Draw', paletteMore:false,
+  view:{ cx:0, cy:0, z:1 },
+  sheets:[], strokes:[], texts:[], dims:[], frames:[],
+  measure:null, pending:null, win:null, winPop:null, sel:null, lasso:null,
+  framePreset:{ paper:'24×36', scale:48 },
+  recording:null, job:null, modal:null, cursor:null, saved:'Saved · synced to Dropbox',
+};
+const undo = [];
+const snap = () => { undo.push(JSON.stringify({ s:S.strokes, t:S.texts, d:S.dims, f:S.frames, sh:S.sheets })); if (undo.length > 60) undo.shift(); dirty(); };
+function doUndo() { const u = undo.pop(); if (!u) return; const o = JSON.parse(u); S.strokes=o.s; S.texts=o.t; S.dims=o.d; S.frames=o.f; S.sheets=o.sh; S.sel=null; draw(); chrome(); }
+function dirty() { S.saved = 'Saving on the Duo…'; clearTimeout(dirty.t); dirty.t = setTimeout(() => { S.saved = 'Saved · synced to Dropbox'; live(); }, 700); }
+
+function addSheet(e, x, y, scale) {
+  const nts = scale === 0;
+  const k = nts ? 1 : scale;
+  const s = { id: Math.random().toString(36).slice(2,7), num:e.num, title:e.title, rev:e.rev, proj:e.proj, kind:e.kind, pw:e.pw, ph:e.ph, scale:k, nts, x, y, result:e.result||false };
+  S.sheets.push(s); return s;
+}
+const sheetW = s => s.pw * s.scale, sheetH = s => s.ph * s.scale;
+
+// seed canvas: two scaled sheets and one NTS sheet, plus a little markup
+addSheet(INDEX[0], 0, 0, 48);
+addSheet(INDEX[2], 1900, 0, 24);
+addSheet(INDEX[4], 1900, 700, 0);
+S.strokes.push({ c:'red', w:3, hl:false, pts: cloud(860, 380, 210, 120) });
+S.strokes.push({ c:'red', w:3, hl:false, pts: [[760,460],[980,460]] });
+S.strokes.push({ c:'red', w:3, hl:false, pts: bowtie(870, 460, 22) });
+S.strokes.push({ c:'green', w:3, hl:false, pts: [[1180,300],[1260,380]] });
+S.strokes.push({ c:'green', w:3, hl:false, pts: [[1260,300],[1180,380]] });
+S.texts.push({ x:760, y:330, size:26, c:'blue', text:'Add bypass around FCV-101 w/ 2" gate valves' });
+S.frames.push({ x:2330, y:40, w:36*12, h:24*12, paper:'24×36', scale:12 });
+function cloud(cx, cy, w, h) { const p=[]; const n=26; for (let i=0;i<=n;i++){ const a=i/n*Math.PI*2; const r=1+0.06*Math.sin(i*Math.PI); p.push([cx+Math.cos(a)*w/2*r, cy+Math.sin(a)*h/2*r]); } return p; }
+function bowtie(cx, cy, s) { return [[cx-s,cy-s*.6],[cx+s,cy+s*.6],[cx+s,cy-s*.6],[cx-s,cy+s*.6],[cx-s,cy-s*.6]]; }
+
+// ---------- units ----------
+function fmt(inches, nts) {
+  if (nts) return (Math.round(inches * 16) / 16).toFixed(2) + '" NTS';
+  if (S.units === 'mm') { const mm = inches * 25.4; return mm >= 10000 ? (mm/1000).toFixed(2) + ' m' : Math.round(mm) + ' mm'; }
+  if (S.units === 'ft') return (inches / 12).toFixed(2) + "'";
+  const neg = inches < 0; inches = Math.abs(inches);
+  let ft = Math.floor(inches / 12); let rem = Math.round((inches - ft * 12) * 2) / 2;
+  if (rem >= 12) { ft++; rem = 0; }
+  const whole = Math.floor(rem), half = rem - whole ? ' 1/2' : '';
+  return (neg?'-':'') + `${ft}'-${whole}${half}"`;
+}
+const UNIT_LABEL = { ftin:'Feet and inches', ft:'Decimal feet', mm:'Metric' };
+function niceLen(px) { // world inches whose screen length is about px
+  const target = px / S.view.z;
+  const c = S.units === 'mm' ? [1,2,5,10,20,50,100,200,500,1000,2000,5000,10000,20000,50000,100000].map(m => m/25.4)
+                             : [1,2,6,12,24,60,120,240,600,1200,2400,6000,12000,24000,60000,120000];
+  for (const v of c) if (v >= target) return v; return c[c.length-1];
+}
+
+const LAYOUT = { A:{ toastTop:58, jobAt:{ right:96, bottom:50 }, optsTop:58, inset:{ l:70, r:92, t:56, b:50 } },
+                 B:{ toastTop:60, jobAt:{ right:14, bottom:96 }, optsTop:60, inset:{ l:10, r:10, t:70, b:84 } },
+                 C:{ toastTop:98, jobAt:{ right:12, bottom:42 }, optsTop:98, inset:{ l:212, r:8, t:96, b:38 } } };
+// ---------- view ----------
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let R = 1;
+function fit() {
+  const sw = innerWidth, sh = innerHeight - 40;
+  const k = Math.min(sw / W, sh / H);
+  const st = document.getElementById('stage');
+  st.style.transform = `scale(${k})`; st.style.left = (sw - W*k)/2 + 'px'; st.style.top = (sh - H*k)/2 + 'px';
+  R = (devicePixelRatio || 1) * k;
+  cv.width = Math.round(W * R); cv.height = Math.round(H * R);
+  draw();
+}
+const toWorld = (sx, sy) => [ (sx - W/2) / S.view.z + S.view.cx, (sy - H/2) / S.view.z + S.view.cy ];
+const toScreen = (wx, wy) => [ (wx - S.view.cx) * S.view.z + W/2, (wy - S.view.cy) * S.view.z + H/2 ];
+function zoomTo(x0, y0, x1, y1, pad = 0.9) { // fits the region into the part of the screen the variant's chrome leaves free
+  const i = LAYOUT[S.variant].inset, aw = W - i.l - i.r, ah = H - i.t - i.b;
+  S.view.z = Math.min(aw / Math.max(1, x1 - x0), ah / Math.max(1, y1 - y0)) * pad;
+  S.view.cx = (x0 + x1) / 2 - ((i.l - i.r) / 2) / S.view.z; S.view.cy = (y0 + y1) / 2 - ((i.t - i.b) / 2) / S.view.z; draw(); live();
+}
+function extents() {
+  let a=[Infinity,Infinity,-Infinity,-Infinity];
+  for (const s of S.sheets) { a[0]=Math.min(a[0],s.x); a[1]=Math.min(a[1],s.y); a[2]=Math.max(a[2],s.x+sheetW(s)); a[3]=Math.max(a[3],s.y+sheetH(s)); }
+  for (const f of S.frames) { a[0]=Math.min(a[0],f.x); a[1]=Math.min(a[1],f.y); a[2]=Math.max(a[2],f.x+f.w); a[3]=Math.max(a[3],f.y+f.h); }
+  for (const st of S.strokes) for (const p of st.pts) { a[0]=Math.min(a[0],p[0]); a[1]=Math.min(a[1],p[1]); a[2]=Math.max(a[2],p[0]); a[3]=Math.max(a[3],p[1]); }
+  if (!isFinite(a[0])) a = [-500,-500,500,500];
+  zoomTo(a[0], a[1], a[2], a[3]);
+}
+function zoomAt(sx, sy, f) {
+  const [wx, wy] = toWorld(sx, sy);
+  S.view.z = Math.min(400, Math.max(0.004, S.view.z * f));
+  S.view.cx = wx - (sx - W/2) / S.view.z; S.view.cy = wy - (sy - H/2) / S.view.z; draw(); live();
+}
+
+// ---------- drawing ----------
+let raf = 0;
+function draw() { if (!raf) raf = requestAnimationFrame(render); }
+function render() {
+  raf = 0; const z = S.view.z;
+  ctx.setTransform(1,0,0,1,0,0); ctx.fillStyle = '#f3efe6'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.setTransform(R*z, 0, 0, R*z, R*(W/2 - S.view.cx*z), R*(H/2 - S.view.cy*z));
+  grid();
+  for (const s of S.sheets) drawSheet(s);
+  for (const f of S.frames) drawFrame(f);
+  for (const st of S.strokes) drawStroke(st, S.sel && S.sel.strokes.includes(st));
+  for (const t of S.texts) drawText(t, S.sel && S.sel.texts.includes(t));
+  for (const d of S.dims) drawDim(d, true);
+  if (S.measure) drawDim(S.measure, false);
+  if (S.pending && S.pending.b) drawDim(S.pending, S.pending.kind === 'dim');
+  if (S.win) { ctx.save(); ctx.setLineDash([6/z,4/z]); ctx.strokeStyle = '#2f5d8a'; ctx.lineWidth = 1.2/z; ctx.fillStyle='rgba(47,93,138,.07)';
+    const [x0,y0,x1,y1] = rectOf(S.win); ctx.fillRect(x0,y0,x1-x0,y1-y0); ctx.strokeRect(x0,y0,x1-x0,y1-y0); ctx.restore(); }
+  if (S.lasso) { ctx.save(); ctx.setLineDash([5/z,4/z]); ctx.strokeStyle='#2f5d8a'; ctx.lineWidth=1.2/z; ctx.beginPath(); S.lasso.forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke(); ctx.restore(); }
+  if (S.sel) { const b = selBox(); if (b) { ctx.save(); ctx.setLineDash([5/z,4/z]); ctx.strokeStyle='#2f5d8a'; ctx.lineWidth=1.2/z; ctx.strokeRect(b[0]-6/z,b[1]-6/z,b[2]-b[0]+12/z,b[3]-b[1]+12/z); ctx.restore(); } }
+}
+function grid() {
+  const z = S.view.z, step = niceLen(28), major = step * (S.units === 'mm' ? 10 : (step < 12 ? 12/step : 10));
+  const [x0,y0] = toWorld(0,0), [x1,y1] = toWorld(W,H);
+  ctx.lineWidth = 1/z;
+  for (const [sp, col] of [[step,'rgba(120,110,90,.10)'],[major,'rgba(120,110,90,.20)']]) {
+    if (sp * z < 6) continue; ctx.strokeStyle = col; ctx.beginPath();
+    for (let x = Math.floor(x0/sp)*sp; x < x1; x += sp) { ctx.moveTo(x,y0); ctx.lineTo(x,y1); }
+    for (let y = Math.floor(y0/sp)*sp; y < y1; y += sp) { ctx.moveTo(x0,y); ctx.lineTo(x1,y); }
+    ctx.stroke();
+  }
+}
+function drawSheet(s) {
+  const z = S.view.z, k = s.scale;
+  ctx.save(); ctx.translate(s.x, s.y); ctx.scale(k, k);
+  const pz = z * k; // screen px per paper inch
+  ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowBlur = 8; ctx.fillStyle = '#fff'; ctx.fillRect(0,0,s.pw,s.ph); ctx.shadowBlur = 0;
+  const lw = Math.max(0.014, 0.6 / pz); ctx.lineWidth = lw; ctx.strokeStyle = '#222';
+  ctx.strokeRect(0.5,0.5,s.pw-1,s.ph-1);
+  const tbw = Math.min(7, s.pw*0.42), tbh = Math.min(2, s.ph*0.18), tx = s.pw-0.5-tbw, ty = s.ph-0.5-tbh;
+  ctx.strokeRect(tx,ty,tbw,tbh); ctx.beginPath(); ctx.moveTo(tx,ty+tbh*.45); ctx.lineTo(tx+tbw,ty+tbh*.45); ctx.moveTo(tx+tbw*.62,ty+tbh*.45); ctx.lineTo(tx+tbw*.62,ty+tbh); ctx.stroke();
+  if (pz * 0.3 > 3) {
+    ctx.fillStyle = '#222'; ctx.font = `600 ${tbh*0.2}px system-ui`; ctx.fillText(`${s.title}`, tx+0.15, ty+tbh*0.3);
+    ctx.font = `${tbh*0.13}px system-ui`; ctx.fillText(`${s.proj}`, tx+0.15, ty+tbh*0.65);
+    ctx.fillText(`SCALE: ${s.nts ? 'NTS' : scaleLabel(s.scale)}`, tx+0.15, ty+tbh*0.88);
+    ctx.font = `700 ${tbh*0.24}px system-ui`; ctx.fillText(`${s.num}`, tx+tbw*.66, ty+tbh*0.75);
+    ctx.font = `${tbh*0.12}px system-ui`; ctx.fillText(`REV ${s.rev}`, tx+tbw*.66, ty+tbh*0.92);
+  }
+  ctx.lineWidth = lw * 1.1;
+  if (s.kind === 'pid') pid(s, pz); else if (s.kind === 'panel') panel(s, pz); else loop(s, pz);
+  if (s.result) { // the redlined revision: the bypass drawn properly with a valve block, inside a revision cloud
+    ctx.strokeStyle = '#222'; line(15.8, 7.5, 15.8, 9.6); line(15.8, 9.6, 20.4, 9.6); line(20.4, 9.6, 20.4, 7.5); valve(17, 9.6, 0.35); valve(19.2, 9.6, 0.35);
+    ctx.strokeStyle = '#d6342c'; ctx.lineWidth = Math.max(0.03, 1.2/pz); ctx.beginPath(); cloud(18.1, 8.7, 6.4, 3.4).forEach((p,i)=> i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke();
+    label('REV 3 · BYPASS ADDED (VELLUM)', 15.4, 11, 0.28, pz); }
+  ctx.restore();
+  // label above the sheet, constant screen size
+  const [sx, sy] = toScreen(s.x, s.y);
+  ctx.save(); ctx.setTransform(R,0,0,R,0,0); ctx.font = '600 11px system-ui'; ctx.fillStyle = s.nts ? '#8a5a00' : '#2f5d8a';
+  ctx.fillText(`${s.num}  ·  ${s.nts ? 'NTS · printed size' : scaleLabel(s.scale)}${s.result ? '  ·  REV 3 · RESULT OF REDLINE' : ''}`, sx, sy - 6); ctx.restore();
+}
+function line(a,b,c,d){ ctx.beginPath(); ctx.moveTo(a,b); ctx.lineTo(c,d); ctx.stroke(); }
+function circ(x,y,r){ ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke(); }
+function valve(x,y,s){ ctx.beginPath(); ctx.moveTo(x-s,y-s*.6); ctx.lineTo(x+s,y+s*.6); ctx.lineTo(x+s,y-s*.6); ctx.lineTo(x-s,y+s*.6); ctx.closePath(); ctx.stroke(); }
+function label(t,x,y,size,pz){ if (pz*size < 3) return; ctx.fillStyle='#222'; ctx.font = `${size}px system-ui`; ctx.fillText(t,x,y); }
+function pid(s,pz) {
+  ctx.strokeRect(2,3,4,9); label('DA-1 DEAERATOR',2,2.6,0.3,pz);
+  line(6,7.5,31,7.5); line(12,7.5,12,14); line(12,14,26,14); line(26,14,26,7.5); line(20,7.5,20,3.5); line(20,3.5,31,3.5);
+  for (const x of [9,15.5,22.5,28]) valve(x,7.5,0.35);
+  valve(17,14,0.35); valve(24,3.5,0.35);
+  ctx.strokeRect(13.2,12.6,1.6,1.4); label('P-1A',13.25,15,0.3,pz);
+  for (const [x,y,t] of [[15.5,5.8,'FT'],[22.5,5.8,'FCV'],[28,5.8,'PT'],[17,16,'LT']]) { circ(x,y,0.45); label(t,x-0.27,y+0.1,0.28,pz); line(x,y+0.45,x,y<10?7.15:14.35); }
+  label('4"-FW-101',7,7.2,0.25,pz); label('3"-FW-104',21,3.2,0.25,pz);
+}
+function panel(s,pz) {
+  ctx.strokeRect(3,2,12,9); label('CONTROL ROOM',3,1.6,0.35,pz);
+  for (let i=0;i<4;i++) ctx.strokeRect(4+i*2.6,3,2.2,1.2);
+  ctx.strokeRect(4,8,4,2); ctx.strokeRect(9,8,5,2); label('DCS CAB-1',4.2,9.1,0.3,pz); label('MARSHALLING',9.2,9.1,0.3,pz);
+  ctx.strokeRect(18,2,14,10); for (let x=19;x<31;x+=2) ctx.strokeRect(x,3,1.5,8); label('EQUIPMENT ROOM',18,1.6,0.35,pz);
+}
+function loop(s,pz) {
+  ctx.strokeRect(1,1.2,3.5,6); ctx.strokeRect(6.5,1.2,3,6); ctx.strokeRect(11.5,1.2,4,6);
+  label('FIELD',1.2,1,0.25,pz); label('JB-12',6.6,1,0.25,pz); label('DCS',11.6,1,0.25,pz);
+  for (let i=0;i<5;i++){ const y=2+i*1.1; line(4.5,y,6.5,y); line(9.5,y,11.5,y); }
+  circ(2.7,4,0.55); label('FT 1042',2.2,4.1,0.22,pz);
+}
+function drawFrame(f) {
+  const z = S.view.z; ctx.save(); ctx.setLineDash([8/z,5/z]); ctx.lineWidth = 1.5/z; ctx.strokeStyle = '#7a4fb3'; ctx.strokeRect(f.x,f.y,f.w,f.h); ctx.restore();
+  const [sx,sy] = toScreen(f.x, f.y + f.h);
+  ctx.save(); ctx.setTransform(R,0,0,R,0,0); ctx.fillStyle = '#7a4fb3'; ctx.font = '600 11px system-ui'; ctx.fillText(`Frame · ${f.paper} at ${scaleLabel(f.scale)}`, sx+4, sy+14); ctx.restore();
+}
+function drawStroke(st, selected) {
+  const z = S.view.z; if (st.pts.length < 1) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = COLORS[st.c]; ctx.globalAlpha = st.hl ? 0.28 : 1; ctx.lineWidth = Math.max(st.w, 0.8/z);
+  if (selected) { ctx.shadowColor = '#2f5d8a'; ctx.shadowBlur = 6; }
+  ctx.beginPath(); st.pts.forEach((p,i) => i ? ctx.lineTo(p[0],p[1]) : ctx.moveTo(p[0],p[1])); if (st.pts.length === 1) ctx.lineTo(st.pts[0][0]+0.01, st.pts[0][1]); ctx.stroke(); ctx.restore();
+}
+function drawText(t, selected) {
+  const z = S.view.z; if (t.size * z < 2) return;
+  ctx.save(); ctx.font = `${t.size}px system-ui`; ctx.fillStyle = COLORS[t.c] || '#222'; ctx.fillText(t.text, t.x, t.y);
+  if (selected) { ctx.strokeStyle='#2f5d8a'; ctx.lineWidth=1/z; ctx.strokeRect(t.x-2/z, t.y-t.size, ctx.measureText(t.text).width+4/z, t.size*1.3); }
+  ctx.restore();
+}
+function onNts(p) { return S.sheets.find(s => s.nts && p[0]>=s.x && p[0]<=s.x+sheetW(s) && p[1]>=s.y && p[1]<=s.y+sheetH(s)); }
+function drawDim(d, kept) {
+  const z = S.view.z, a = d.a, b = d.b; if (!b) return;
+  const len = Math.hypot(b[0]-a[0], b[1]-a[1]); const nts = onNts(a) && onNts(b);
+  ctx.save(); ctx.strokeStyle = kept ? '#1d1d1f' : '#c2410c'; ctx.lineWidth = 1.2/z; if (!kept) ctx.setLineDash([6/z,4/z]);
+  ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); ctx.setLineDash([]);
+  const nx = -(b[1]-a[1])/(len||1), ny = (b[0]-a[0])/(len||1), t = 7/z;
+  for (const p of [a,b]) { ctx.beginPath(); ctx.moveTo(p[0]+nx*t, p[1]+ny*t); ctx.lineTo(p[0]-nx*t, p[1]-ny*t); ctx.stroke(); }
+  ctx.restore();
+  const m = toScreen((a[0]+b[0])/2, (a[1]+b[1])/2); const txt = fmt(len, !!nts);
+  ctx.save(); ctx.setTransform(R,0,0,R,0,0); ctx.font = '600 12px system-ui'; const w = ctx.measureText(txt).width + 10;
+  ctx.fillStyle = kept ? 'rgba(255,255,255,.92)' : '#c2410c'; ctx.fillRect(m[0]-w/2, m[1]-18, w, 17);
+  ctx.fillStyle = kept ? '#1d1d1f' : '#fff'; ctx.fillText(txt, m[0]-w/2+5, m[1]-5); ctx.restore();
+}
+const rectOf = r => [Math.min(r.a[0],r.b[0]), Math.min(r.a[1],r.b[1]), Math.max(r.a[0],r.b[0]), Math.max(r.a[1],r.b[1])];
+function selBox() {
+  if (!S.sel) return null; let a=[Infinity,Infinity,-Infinity,-Infinity];
+  for (const st of S.sel.strokes) for (const p of st.pts) { a[0]=Math.min(a[0],p[0]); a[1]=Math.min(a[1],p[1]); a[2]=Math.max(a[2],p[0]); a[3]=Math.max(a[3],p[1]); }
+  for (const t of S.sel.texts) { a[0]=Math.min(a[0],t.x); a[1]=Math.min(a[1],t.y-t.size); a[2]=Math.max(a[2],t.x+t.text.length*t.size*0.5); a[3]=Math.max(a[3],t.y); }
+  return isFinite(a[0]) ? a : null;
+}
+function inPoly(p, poly) { let c=false; for (let i=0,j=poly.length-1;i<poly.length;j=i++) { const [xi,yi]=poly[i],[xj,yj]=poly[j]; if (((yi>p[1])!==(yj>p[1])) && (p[0] < (xj-xi)*(p[1]-yi)/(yj-yi)+xi)) c=!c; } return c; }
+
+// ---------- input ----------
+const pointers = new Map(); let gesture = null, cur = null, holdT = 0;
+function stagePt(e) { const r = cv.getBoundingClientRect(); return [ (e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H ]; }
+cv.addEventListener('contextmenu', e => e.preventDefault());
+cv.addEventListener('wheel', e => { e.preventDefault(); const [sx,sy] = stagePt(e); zoomAt(sx, sy, Math.exp(-e.deltaY * 0.0015)); }, { passive:false });
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId); const sp = stagePt(e); pointers.set(e.pointerId, { sp, type:e.pointerType });
+  closePop();
+  const touches = [...pointers.values()].filter(p => p.type === 'touch');
+  if (e.pointerType === 'touch' || e.button === 2 || e.button === 1 || S.tool === 'hand') {
+    if (cur && e.pointerType === 'touch') cur = null; // a second finger cancels drawing intent
+    gesture = { start: touches.length >= 2 ? pinchInfo() : { sp, view:{...S.view} } , pinch: touches.length >= 2 };
+    return;
+  }
+  const w = toWorld(...sp); startTool(w, sp);
+});
+cv.addEventListener('pointermove', e => {
+  const sp = stagePt(e); const p = pointers.get(e.pointerId);
+  S.cursor = toWorld(...sp); live();
+  if (!p) { if (S.pending && !S.pending.b0) { S.pending.b = S.cursor; draw(); } return; }
+  p.sp = sp;
+  if (gesture) {
+    const touches = [...pointers.values()].filter(q => q.type === 'touch');
+    if (touches.length >= 2) { if (!gesture.pinch) gesture = { start: pinchInfo(), pinch:true }; const now = pinchInfo(); const st = gesture.start;
+      S.view.z = Math.min(400, Math.max(0.004, st.view.z * now.d / st.d));
+      S.view.cx = st.w[0] - (now.c[0] - W/2) / S.view.z; S.view.cy = st.w[1] - (now.c[1] - H/2) / S.view.z; }
+    else if (!gesture.pinch) { const st = gesture.start; S.view.cx = st.view.cx - (sp[0]-st.sp[0]) / S.view.z; S.view.cy = st.view.cy - (sp[1]-st.sp[1]) / S.view.z; }
+    draw(); live(); return;
+  }
+  moveTool(toWorld(...sp), sp);
+});
+const endPtr = e => { const had = pointers.has(e.pointerId); pointers.delete(e.pointerId); if (gesture) { if (pointers.size === 0) gesture = null; return; } if (had) endTool(toWorld(...stagePt(e)), stagePt(e)); };
+cv.addEventListener('pointerup', endPtr); cv.addEventListener('pointercancel', endPtr);
+function pinchInfo() { const t = [...pointers.values()].filter(p => p.type === 'touch').slice(0,2).map(p => p.sp);
+  const c = [(t[0][0]+t[1][0])/2, (t[0][1]+t[1][1])/2]; return { c, d: Math.hypot(t[0][0]-t[1][0], t[0][1]-t[1][1]) || 1, w: toWorld(...c), view:{...S.view} }; }
+
+function startTool(w, sp) {
+  const z = S.view.z; const t = S.tool;
+  if (t === 'pen' || t === 'hl' || t === 'line') { snap(); cur = { c:S.color, w:(t==='hl'?16:2.4)/z, hl:t==='hl', pts:[w], straight:t==='line' }; S.strokes.push(cur); armHold(); draw(); }
+  else if (t === 'eraser') { snap(); erase(w); cur = { erasing:true }; }
+  else if (t === 'measure' || t === 'dim') {
+    if (!S.pending) { S.pending = { a:w, b:null, kind:t }; S.measure = null; }
+    else { S.pending.b = w; S.pending.b0 = true; finishMeasure(); }
+    chrome(); draw();
+  }
+  else if (t === 'window') { S.win = { a:w, b:w }; cur = { win:true }; }
+  else if (t === 'lasso') {
+    const b = selBox(); const pad = 10/z;
+    if (S.sel && b && w[0]>b[0]-pad && w[0]<b[2]+pad && w[1]>b[1]-pad && w[1]<b[3]+pad) { snap(); cur = { moving:true, last:w }; return; }
+    S.sel = null; S.lasso = [w]; cur = { lasso:true }; draw();
+  }
+  else if (t === 'text') { openText(w, sp); }
+  else if (t === 'frame') { snap(); const [pw,ph] = PAPERS[S.framePreset.paper]; const k = S.framePreset.scale;
+    S.frames.push({ x:w[0]-pw*k/2, y:w[1]-ph*k/2, w:pw*k, h:ph*k, paper:S.framePreset.paper, scale:k }); toast(`Frame placed: ${S.framePreset.paper} at ${scaleLabel(k)}`); chrome(); draw(); }
+}
+function moveTool(w, sp) {
+  if (!cur) { if (S.pending && !S.pending.b0) { S.pending.b = w; draw(); } return; }
+  if (cur.erasing) { erase(w); return; }
+  if (cur.win) { S.win.b = w; draw(); return; }
+  if (cur.lasso) { S.lasso.push(w); draw(); return; }
+  if (cur.moving) { const dx = w[0]-cur.last[0], dy = w[1]-cur.last[1]; cur.last = w; for (const st of S.sel.strokes) st.pts = st.pts.map(p => [p[0]+dx,p[1]+dy]); for (const t of S.sel.texts) { t.x+=dx; t.y+=dy; } draw(); return; }
+  if (cur.pts) { if (cur.snapped) { cur.pts[cur.pts.length-1] = w; if (cur.rect) cur.pts = rectPts(cur.rect0, w); } else if (cur.straight) { cur.pts = [cur.pts[0], w]; } else { cur.pts.push(w); armHold(); } draw(); }
+}
+function endTool(w, sp) {
+  clearTimeout(holdT);
+  if (!cur) return;
+  if (cur.win) { const [x0,y0,x1,y1] = rectOf(S.win); if ((x1-x0)*S.view.z < 8) { S.win = null; draw(); } else { S.winPop = sp; chrome(); } }
+  if (cur.lasso) { const poly = S.lasso; S.lasso = null;
+    const strokes = S.strokes.filter(st => st.pts.every(p => inPoly(p, poly))); const texts = S.texts.filter(t => inPoly([t.x,t.y], poly));
+    S.sel = (strokes.length || texts.length) ? { strokes, texts, at:sp } : null; chrome(); draw(); }
+  if (cur.moving) { S.sel.at = sp; chrome(); }
+  if (cur.pts && cur.pts.length < 2 && !cur.hl) cur.pts.push([cur.pts[0][0]+0.01, cur.pts[0][1]]);
+  cur = null; draw();
+}
+function armHold() { clearTimeout(holdT); holdT = setTimeout(() => { // hold at the end of a stroke: snap to a straight line or a rectangle
+  if (!cur || !cur.pts || cur.pts.length < 6 || cur.hl) return;
+  const a = cur.pts[0], b = cur.pts[cur.pts.length-1];
+  const span = Math.hypot(b[0]-a[0], b[1]-a[1]); let ext = 0; for (const p of cur.pts) ext = Math.max(ext, Math.hypot(p[0]-a[0], p[1]-a[1]));
+  if (span < ext * 0.25) { // came back near the start: a closed shape -> rectangle of its bounds
+    const xs = cur.pts.map(p=>p[0]), ys = cur.pts.map(p=>p[1]); cur.rect = true; cur.rect0 = [Math.min(...xs), Math.min(...ys)];
+    cur.pts = rectPts(cur.rect0, [Math.max(...xs), Math.max(...ys)]); }
+  else cur.pts = [a, b];
+  cur.snapped = true; toast(cur.rect ? 'Snapped to a rectangle' : 'Snapped to a straight line'); draw();
+}, 480); }
+const rectPts = (a, b) => [a,[b[0],a[1]],b,[a[0],b[1]],a];
+function erase(w) { const r = 12 / S.view.z; const n0 = S.strokes.length + S.texts.length + S.dims.length;
+  S.strokes = S.strokes.filter(st => !st.pts.some(p => Math.hypot(p[0]-w[0], p[1]-w[1]) < r + st.w));
+  S.texts = S.texts.filter(t => !(w[0]>t.x && w[0]<t.x+t.text.length*t.size*0.5 && w[1]<t.y && w[1]>t.y-t.size));
+  S.dims = S.dims.filter(d => !(Math.hypot(d.a[0]-w[0],d.a[1]-w[1])<r*2 || Math.hypot(d.b[0]-w[0],d.b[1]-w[1])<r*2));
+  if (S.strokes.length + S.texts.length + S.dims.length !== n0) draw(); }
+function finishMeasure() { const p = S.pending; S.pending = null;
+  const len = Math.hypot(p.b[0]-p.a[0], p.b[1]-p.a[1]); const nts = onNts(p.a) && onNts(p.b);
+  if (p.kind === 'dim') { snap(); S.dims.push({ a:p.a, b:p.b }); toast(`Dimension kept: ${fmt(len, !!nts)}`); }
+  else { S.measure = { a:p.a, b:p.b }; toast(`Measured ${fmt(len, !!nts)}${nts ? ' (sheet is not to scale)' : ''}`); }
+}
+function setTool(t) { S.tool = t; S.pending = null; S.measure = null; S.win = null; S.winPop = null; if (t !== 'lasso') S.sel = null; chrome(); draw(); }
+
+// text boxes
+const te = document.getElementById('textEdit'); let teAt = null;
+function openText(w, sp) { teAt = w; te.style.display = 'block'; te.style.left = sp[0] + 'px'; te.style.top = (sp[1] - 16) + 'px'; te.value = ''; setTimeout(() => te.focus(), 0); }
+function commitText() { if (te.style.display === 'none') return; te.style.display = 'none'; const v = te.value.trim(); if (v && teAt) { snap(); S.texts.push({ x:teAt[0], y:teAt[1], size:15/S.view.z, c: S.color === 'sketch' ? 'sketch' : S.color, text:v }); draw(); } teAt = null; }
+te.addEventListener('keydown', e => { if (e.key === 'Enter') commitText(); if (e.key === 'Escape') { te.value=''; commitText(); } });
+te.addEventListener('blur', commitText);
+
+// ---------- shared overlays ----------
+let toastMsg = null, toastT = 0;
+function toast(m) { toastMsg = m; clearTimeout(toastT); toastT = setTimeout(() => { toastMsg = null; shared(); }, 2200); shared(); }
+function closePop() { if (S.winPop || (S.sel && S.sel.at)) { S.winPop = null; if (S.sel) S.sel.at = null; shared(); } }
+function prompt() {
+  const t = S.tool;
+  if (t === 'measure' || t === 'dim') return S.pending ? 'Tap the second point' : (t === 'dim' ? 'Dimension: tap the first point' : 'Measure: tap the first point');
+  return { pen:'Draw with the Pencil. Hold at the end of a stroke to snap it straight', hl:'Highlight with the Pencil', eraser:'Erase whole strokes',
+    line:'Draw a straight line', lasso: S.sel ? 'Drag the selection to move it' : 'Circle ink or text to select it', text:'Tap where the text box goes',
+    frame:`Tap to place a ${S.framePreset.paper} frame at ${scaleLabel(S.framePreset.scale)}`, window:'Drag a window around a region', hand:'Drag to pan' }[t] || '';
+}
+function shared() {
+  const L = LAYOUT[S.variant]; let h = '';
+  if (S.recording) h += `<div class="toast" style="top:${L.toastTop - (S.variant==='C'?0:44)}px;background:#b42318;pointer-events:auto">● Recording a meeting on this canvas · ${mmss()} <button data-act="rec" style="color:#fff;text-decoration:underline;margin-left:6px">Stop</button></div>`;
+  if (toastMsg) h += `<div class="toast" style="top:${L.toastTop + (S.recording && S.variant==='C' ? 34 : 0)}px">${toastMsg}</div>`;
+  if (S.tool === 'frame') h += `<div class="opts panel" style="top:${L.optsTop + 38}px">Frame <select data-act="fpaper">${Object.keys(PAPERS).map(p => `<option ${p===S.framePreset.paper?'selected':''}>${p}</option>`).join('')}</select> at
+     <select data-act="fscale">${SCALES.map(s => `<option value="${s[1]}" ${s[1]===S.framePreset.scale?'selected':''}>${s[0]}</option>`).join('')}</select></div>`;
+  if (S.winPop) h += `<div class="pop" style="left:${Math.min(S.winPop[0], W-330)}px;top:${Math.min(S.winPop[1]+8, H-60)}px"><button data-act="winzoom">Zoom to window</button><button data-act="winframe">Make a frame here</button><button data-act="winsend">Send this window…</button><button data-act="winclear">✕</button></div>`;
+  if (S.sel && S.sel.at) h += `<div class="pop" style="left:${Math.min(S.sel.at[0], W-260)}px;top:${Math.min(S.sel.at[1]+8, H-60)}px"><span style="padding:6px 6px;color:#aaa;font-size:12px">${S.sel.strokes.length + S.sel.texts.length} selected</span><button data-act="seldup">Duplicate</button><button data-act="seldel">Delete</button><button data-act="selsend">Send…</button></div>`;
+  if (S.job) h += jobCard(L.jobAt);
+  if (S.modal) h += modal();
+  document.getElementById('shared').innerHTML = h;
+}
+const mmss = () => { const s = Math.floor((Date.now() - S.recording) / 1000); return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; };
+setInterval(() => { if (S.recording) shared(); }, 1000);
+
+// ---------- jobs (faked) ----------
+const KINDS = { summarize:['Summarize','Notes and action items from the ink, text and markups'], create:['Create drawing','A new DWG from what you sketched, with proper blocks'],
+                redline:['Redline the DWG','Apply your markups to the DWG this sheet came from, as a new clouded revision'], instruction:['Instruction','Write what you want done'] };
+function jobCard(at) {
+  const j = S.job; const pos = Object.entries(at).map(([k,v]) => `${k}:${v}px`).join(';');
+  let body = `<div style="display:flex;justify-content:space-between"><b>${KINDS[j.kind][0]}</b><button data-act="jobclose" aria-label="Hide">✕</button></div><div style="color:#555;margin-top:2px">${j.status}</div>`;
+  if (j.question) body += `<div style="margin-top:6px"><b>The thread asks:</b> ${j.question}</div><div class="q">${j.options.map((o,i) => `<button class="ghost" data-act="jobans" data-i="${i}">${o}</button>`).join('')}</div>`;
+  if (j.done && j.kind !== 'summarize') body += `<div class="q"><button class="primary" data-act="jobplace">Place result beside the sheet</button></div>`;
+  return `<div class="job panel" style="${pos}">${body}</div>`;
+}
+function startJob(o) {
+  S.modal = null; S.job = { ...o, status:'Waiting for the laptop…' }; shared();
+  setTimeout(() => { S.job.status = `Watcher started a thread in ${o.folder.split(' / ')[2]}. Working…`; shared(); }, 1400);
+  setTimeout(() => {
+    if (o.kind === 'redline') { S.job.status = 'Waiting for your answer'; S.job.question = 'Two DWGs match P-101 in the drawing index. Which one is current?'; S.job.options = ['P-101 Feedwater P&ID.dwg (rev 2)','P-101 old/P-101.dwg (rev 1)']; }
+    else finishJob(); shared(); }, 3600);
+}
+function finishJob() { const j = S.job; j.done = true; j.question = null;
+  if (j.kind === 'summarize') { snap(); const s = S.sheets[0]; S.texts.push({ x:s.x, y:s.y + sheetH(s) + 60, size:30, c:'sketch', text:'Summary: add 2" bypass around FCV-101 (gate valves both sides); delete PT on 3" line; check P-1A suction.' }); j.status = 'Done. The summary is on the canvas and in the project folder.'; draw(); }
+  else j.status = j.kind === 'redline' ? 'Done: P-101 rev 3 (Vellum).dwg and its PDF are in the project folder. Each change is clouded.' : 'Done. The result is in the project folder.';
+  shared(); }
+
+// ---------- modals ----------
+function modal() {
+  const m = S.modal;
+  if (m.type === 'send') {
+    const k = m.kind; const sheet = S.sheets[0];
+    return `<div class="scrim" data-act="scrim"><div class="modal" data-stop>
+      <h2>Send to an agent</h2>
+      <div class="row">${Object.entries(KINDS).map(([id,[t,d]]) => `<button class="kind ${k===id?'sel':''}" data-act="kind" data-k="${id}"><b>${t}</b><span>${d}</span></button>`).join('')}</div>
+      <div class="row"><span style="width:110px;color:#555">What goes</span><select data-act="scope" style="flex:1">${['Whole canvas','Frame · 24×36 at 1" = 1\'-0"', m.window ? 'The window you drew' : null, 'Sheet P-101 with its markups'].filter(Boolean).map(s => `<option ${m.scope===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      <div class="row"><span style="width:110px;color:#555">Project folder</span><span style="flex:1"><b>${PROJECT_FOLDER(sheet.proj)}</b><br><span style="color:#777;font-size:11.5px">Suggested from where P-101 came from</span></span><button class="ghost" data-act="noop">Change</button></div>
+      ${k==='redline' ? `<div class="row"><span style="width:110px;color:#555">DWG</span><span style="flex:1">Found through the drawing index: <b>P-101 Feedwater P&amp;ID.dwg</b>. The original is never changed.</span></div>` : ''}
+      ${k==='create' ? `<div class="row"><span style="width:110px;color:#555">Template drawing</span><select style="flex:1"><option>Choose from the drawing index…</option>${INDEX.map(e => `<option>${e.num} ${e.title}</option>`).join('')}</select></div>` : ''}
+      <div class="row"><span style="width:110px;color:#555">${k==='instruction' ? 'Instruction' : 'Note (optional)'}</span><textarea rows="2" placeholder="${k==='instruction' ? 'What should the agent do?' : 'Anything the agent should know'}"></textarea></div>
+      <div class="row" style="color:#666;font-size:12px">Red ink = add · green = delete · blue = note. Watcher starts a thread on the laptop. If the laptop is off, the job waits on the Duo.</div>
+      <div class="row" style="justify-content:flex-end"><button class="ghost" data-act="close">Cancel</button><button class="primary" data-act="dosend">Send to Watcher</button></div>
+    </div></div>`;
+  }
+  if (m.type === 'add') {
+    const q = (m.q || '').toLowerCase(); const hits = INDEX.filter(e => !q || (e.num+' '+e.title+' '+e.proj).toLowerCase().includes(q));
+    return `<div class="scrim" data-act="scrim"><div class="modal" data-stop>
+      <h2>Add a sheet</h2>
+      <input type="search" data-act="q" placeholder="Search the drawing index: number, title, project" value="${m.q||''}">
+      <div style="color:#777;font-size:11.5px;margin:6px 0">Searches the index the laptop keeps in Dropbox. Works offline.</div>
+      <div class="list">${hits.map(e => `<button data-act="pick" data-num="${e.num}"><b style="width:58px">${e.num}</b><span style="flex:1">${e.title}<br><span style="color:#777;font-size:11.5px">${e.proj} · rev ${e.rev}</span></span><span class="tag">${e.scaleText}</span><span class="tag">${e.pdf ? 'PDF' : 'DWG only · plots on open'}</span></button>`).join('')}</div>
+      <div class="row" style="justify-content:space-between"><button class="ghost" data-act="noop">Browse Dropbox folders…</button><button class="ghost" data-act="close">Cancel</button></div>
+    </div></div>`;
+  }
+  if (m.type === 'scale') {
+    const e = m.entry;
+    if (m.plotting) return `<div class="scrim"><div class="modal" style="width:420px"><h2>Plotting ${e.num} on the laptop…</h2><div style="color:#555">This DWG has no PDF yet. The laptop plots it with AutoCAD and keeps the PDF in Dropbox / Vellum.</div></div></div>`;
+    const body = e.scale === 0 ? `<p>The title block says <b>NTS</b>. It goes on at its printed size (${e.ph}×${e.pw}), and lengths on it read as printed inches marked NTS.</p>`
+      : e.scale ? `<p>The title block says <b>SCALE: ${e.scaleText}</b>. On the canvas it will cover ${fmt(e.pw*e.scale)} × ${fmt(e.ph*e.scale)}.</p>`
+      : `<p>The title block says <b>${e.scaleText}</b>, so Vellum can't tell the scale. Type it or pick one:</p><div class="row" style="flex-wrap:wrap">${SCALES.slice(0,9).map(s => `<button class="ghost" data-act="pickscale" data-k="${s[1]}" ${m.k===s[1]?'style="border-color:#2f5d8a;color:#2f5d8a"':''}>${s[0]}</button>`).join('')}</div>`;
+    return `<div class="scrim" data-act="scrim"><div class="modal" data-stop style="width:470px"><h2>${e.num} ${e.title}</h2>${body}
+      <div class="row" style="justify-content:flex-end"><button class="ghost" data-act="close">Cancel</button>${e.scale ? '<button class="ghost" data-act="noop">Change scale</button>' : ''}<button class="primary" data-act="place" ${(e.scale===null && !m.k) ? 'disabled style="opacity:.5"' : ''}>Place sheet</button></div></div></div>`;
+  }
+  if (m.type === 'library') {
+    return `<div class="scrim" data-act="scrim"><div class="modal" data-stop><h2>Vellum</h2>
+      <div class="row">${['Canvases','Drawings','Jobs','Meetings'].map((t,i) => `<button class="ghost ${i===0?'on':''}">${t}</button>`).join('')}</div>
+      <div class="list"><button><b style="flex:1">Boiler 4 walkdown</b><span class="tag">open</span></button><button><span style="flex:1">Control room rework</span><span class="tag">Oct 28</span></button><button><span style="flex:1">MCC-4 meeting notes</span><span class="tag">Oct 24 · meeting</span></button></div>
+      <div class="row" style="justify-content:flex-end"><button class="ghost" data-act="close">Close</button></div></div></div>`;
+  }
+  return '';
+}
+function pickEntry(num) { const e = INDEX.find(x => x.num === num); if (!e.pdf) { S.modal = { type:'scale', entry:e, plotting:true }; shared(); setTimeout(() => { if (S.modal && S.modal.entry === e) { S.modal = { type:'scale', entry:e }; shared(); } }, 1600); }
+  else S.modal = { type:'scale', entry:e }; shared(); }
+function placeEntry() { const m = S.modal; const e = m.entry; const k = e.scale === null ? m.k : e.scale; snap();
+  let x = 0; for (const s of S.sheets) x = Math.max(x, s.x + sheetW(s)); x += 150;
+  const s = addSheet(e, x, 0, k); S.modal = null; shared(); chrome(); zoomTo(s.x, s.y, s.x + sheetW(s), s.y + sheetH(s), 0.8); toast(`${e.num} placed at ${s.nts ? 'printed size (NTS)' : scaleLabel(k)}`); }
+
+// ---------- actions ----------
+document.getElementById('stage').addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return; const a = el.dataset.act;
+  if (a === 'scrim' && e.target !== el) return; // clicks inside the modal box
+  const A = {
+    tool: () => setTool(el.dataset.t), color: () => { S.color = el.dataset.c; if (!['pen','hl','line','text'].includes(S.tool)) S.tool = 'pen'; chrome(); },
+    undo: doUndo, extents, units: () => { S.units = ({ftin:'ft',ft:'mm',mm:'ftin'})[S.units]; chrome(); draw(); },
+    rec: () => { S.recording = S.recording ? null : Date.now(); if (!S.recording) toast('Recording saved on the Duo. The laptop transcribes it when it can.'); chrome(); shared(); },
+    send: () => { S.modal = { type:'send', kind: el.dataset.k || 'summarize', scope:'Whole canvas' }; shared(); },
+    add: () => { S.modal = { type:'add', q:'' }; shared(); }, library: () => { S.modal = { type:'library' }; shared(); },
+    close: () => { S.modal = null; shared(); }, scrim: () => { S.modal = null; shared(); }, noop: () => toast('Not part of this prototype'),
+    kind: () => { S.modal.kind = el.dataset.k; shared(); }, dosend: () => startJob({ kind:S.modal.kind, folder:PROJECT_FOLDER(S.sheets[0].proj) }),
+    pick: () => pickEntry(el.dataset.num), pickscale: () => { S.modal.k = +el.dataset.k; shared(); }, place: () => { if (S.modal.entry.scale !== null || S.modal.k) placeEntry(); },
+    winzoom: () => { const [x0,y0,x1,y1] = rectOf(S.win); S.win = null; S.winPop = null; zoomTo(x0,y0,x1,y1,0.95); shared(); },
+    winframe: () => { snap(); const [x0,y0,x1,y1] = rectOf(S.win); const [pw,ph] = PAPERS[S.framePreset.paper]; const k = SCALES.map(s=>s[1]).filter(k => k>=1).sort((a,b)=>a-b).find(k => pw*k >= (x1-x0) && ph*k >= (y1-y0)) || 600;
+      S.frames.push({ x:x0, y:y0, w:pw*k, h:ph*k, paper:S.framePreset.paper, scale:k }); S.win = null; S.winPop = null; toast(`Frame: ${S.framePreset.paper} at ${scaleLabel(k)} fits the window`); shared(); chrome(); draw(); },
+    winsend: () => { S.winPop = null; S.modal = { type:'send', kind:'summarize', scope:'The window you drew', window:true }; shared(); },
+    winclear: () => { S.win = null; S.winPop = null; shared(); draw(); },
+    seldel: () => { snap(); S.strokes = S.strokes.filter(s => !S.sel.strokes.includes(s)); S.texts = S.texts.filter(t => !S.sel.texts.includes(t)); S.sel = null; shared(); draw(); },
+    seldup: () => { snap(); const d = 30/S.view.z; const ns = S.sel.strokes.map(s => ({...s, pts:s.pts.map(p=>[p[0]+d,p[1]+d])})); const nt = S.sel.texts.map(t => ({...t, x:t.x+d, y:t.y+d})); S.strokes.push(...ns); S.texts.push(...nt); S.sel = { strokes:ns, texts:nt, at:S.sel.at }; shared(); draw(); },
+    selsend: () => { S.modal = { type:'send', kind:'summarize', scope:'Whole canvas' }; S.sel.at = null; shared(); },
+    jobans: () => { S.job.question = null; S.job.status = 'Thanks. Working…'; shared(); setTimeout(finishJob, 2000); },
+    jobclose: () => { S.job = null; shared(); },
+    jobplace: () => { snap(); const src = S.sheets[0]; const s = addSheet({ ...INDEX[0], rev:'3', title:'Feedwater P&ID (Vellum rev 3)', result:true }, src.x, src.y + sheetH(src) + 220, src.scale); S.job = null; shared(); zoomTo(src.x, src.y, src.x+sheetW(src), s.y+sheetH(s)); },
+    rtab: () => { S.ribbonTab = el.dataset.t; chrome(); }, more: () => { S.paletteMore = !S.paletteMore; chrome(); },
+    zoomsheet: () => { const s = S.sheets.find(x => x.id === el.dataset.id); zoomTo(s.x, s.y, s.x+sheetW(s), s.y+sheetH(s)); },
+    zoomframe: () => { const f = S.frames[+el.dataset.i]; zoomTo(f.x, f.y, f.x+f.w, f.y+f.h); },
+    tab: () => toast('Other tabs are not part of this prototype'),
+  };
+  if (A[a]) { e.stopPropagation(); A[a](); }
+});
+document.getElementById('stage').addEventListener('change', e => {
+  const a = e.target.dataset.act;
+  if (a === 'fpaper') { S.framePreset.paper = e.target.value; chrome(); }
+  if (a === 'fscale') { S.framePreset.scale = +e.target.value; chrome(); }
+  if (a === 'unitsel') { S.units = e.target.value; chrome(); draw(); }
+  if (a === 'scope') S.modal.scope = e.target.value;
+});
+document.getElementById('stage').addEventListener('input', e => { if (e.target.dataset.act === 'q') { S.modal.q = e.target.value; const pos = e.target.selectionStart; shared(); const n = document.querySelector('[data-act="q"]'); n.focus(); n.setSelectionRange(pos,pos); } });
+
+// ---------- icons ----------
+const ICON = {
+  pen:'<path d="M4 20l4-1 11-11-3-3L5 16z M14 6l3 3"/>', hl:'<path d="M6 14l7-7 4 4-7 7H6z M4 20h12"/>', eraser:'<path d="M8 19l-4-4 9-9 6 6-7 7z M10 19h10"/>',
+  line:'<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>', lasso:'<path d="M12 5c5 0 8 2 8 5s-3 5-8 5-8-2-8-5 3-5 8-5z" stroke-dasharray="2.5 2"/><path d="M7 14c-1.5 2 0 4.5 2 5"/>',
+  text:'<path d="M5 6h14 M12 6v13 M9 19h6"/>', measure:'<path d="M3 15l12-12 6 6-12 12z M7 11l2 2 M10 8l2 2 M13 5l2 2"/>', dim:'<path d="M4 7v10 M20 7v10 M4 12h16 M7 10l-3 2 3 2 M17 10l3 2-3 2"/>',
+  frame:'<rect x="3.5" y="5" width="17" height="14" rx="1"/><path d="M13 15h7.5 M13 15v4"/>', window:'<rect x="4" y="5" width="16" height="14" stroke-dasharray="3 2"/>',
+  hand:'<path d="M8 13V6a1.5 1.5 0 013 0v5 M11 11V4.5a1.5 1.5 0 013 0V11 M14 11V6a1.5 1.5 0 013 0v7c0 4-3 7-6 7s-5-2-7-6l-1-2a1.5 1.5 0 012.5-1.5L8 13"/>',
+  plus:'<path d="M12 5v14 M5 12h14"/>', rec:'<circle cx="12" cy="12" r="6.5" fill="currentColor" stroke="none"/>', stop:'<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>',
+  send:'<path d="M4 12l16-7-6 16-3-7z M11 14l9-9"/>', extents:'<path d="M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5"/>', undo:'<path d="M9 14L4 9l5-5 M4 9h10a6 6 0 010 12h-3"/>',
+  menu:'<path d="M4 7h16 M4 12h16 M4 17h16"/>', canvases:'<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 15c2-4 5-6 8-7"/>', drawings:'<path d="M7 3h10v14H7z M4 6v15h12"/>',
+  jobs:'<path d="M5 12l4 4 10-10"/>', meetings:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0 M12 18v3"/>', search:'<circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/>', more:'<circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/>',
+  chev:'<path d="M15 6l-6 6 6 6"/>',
+};
+const svg = (n, s = 22) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[n]}</svg>`;
+const TOOLS = [['pen','Pen'],['hl','Highlighter'],['eraser','Eraser'],['line','Line and shape'],['lasso','Lasso'],['text','Text box'],['measure','Measure'],['dim','Dimension'],['frame','Frame'],['window','Window']];
+const tbtn = (t, label, style = '') => `<button class="ic ${S.tool===t?'on':''}" data-act="tool" data-t="${t}" title="${label}" aria-label="${label}" style="${style}">${svg(t)}</button>`;
+const chips = (gap = 8) => Object.keys(COLORS).map(c => `<button data-act="color" data-c="${c}" title="${COLOR_MEANING[c]}" aria-label="${COLOR_MEANING[c]} ink" style="display:flex;flex-direction:column;align-items:center;gap:2px;margin:0 ${gap/2}px"><span class="chip ${S.color===c?'sel':''}" style="background:${COLORS[c]}"></span></button>`).join('');
+const unitSelect = () => `<select data-act="unitsel" aria-label="Canvas units">${Object.entries(UNIT_LABEL).map(([k,v]) => `<option value="${k}" ${S.units===k?'selected':''}>${v}</option>`).join('')}</select>`;
+
+// ---------- variant chrome ----------
+function chrome() {
+  const v = S.variant; let h = '';
+  if (v === 'A') {
+    // left tool rail, top title and actions, bottom status bar, iOS tab rail on the right
+    h += `<div class="panel" style="position:absolute;left:8px;top:8px;bottom:8px;width:54px;border-radius:14px;display:flex;flex-direction:column;align-items:center;padding:6px 0;gap:2px">
+      ${TOOLS.slice(0,4).map(([t,l]) => tbtn(t,l,'width:42px;height:38px;border-radius:9px')).join('')}
+      <div style="height:1px;width:32px;background:var(--line);margin:4px 0"></div>
+      ${TOOLS.slice(4,6).map(([t,l]) => tbtn(t,l,'width:42px;height:38px;border-radius:9px')).join('')}
+      <div style="height:1px;width:32px;background:var(--line);margin:4px 0"></div>
+      ${TOOLS.slice(6).map(([t,l]) => tbtn(t,l,'width:42px;height:38px;border-radius:9px')).join('')}
+      <div style="flex:1"></div>
+      <div style="display:flex;flex-direction:column;gap:9px;align-items:center;margin-bottom:6px">${Object.keys(COLORS).map(c => `<button data-act="color" data-c="${c}" title="${COLOR_MEANING[c]}" aria-label="${COLOR_MEANING[c]} ink"><span class="chip ${S.color===c?'sel':''}" style="background:${COLORS[c]}"></span></button>`).join('')}</div>
+    </div>
+    <div class="panel" style="position:absolute;left:70px;top:8px;height:40px;border-radius:12px;display:flex;align-items:center;gap:10px;padding:0 12px">
+      <b>Boiler 4 walkdown</b><span style="color:#888">·</span>${unitSelect()}
+      <button class="ic" data-act="undo" title="Undo" aria-label="Undo">${svg('undo',20)}</button></div>
+    <div style="position:absolute;right:92px;top:8px;display:flex;gap:8px">
+      <button class="ghost" data-act="add">${svg('plus',16)} Add sheet</button>
+      <button class="ghost ${S.recording?'rec':''}" data-act="rec">${svg(S.recording?'stop':'rec',16)} ${S.recording?'Stop':'Record'}</button>
+      <button class="primary" data-act="send">${svg('send',16)} Send</button></div>
+    <div class="panel" style="position:absolute;left:70px;right:92px;bottom:8px;height:34px;border-radius:11px;display:flex;align-items:center;gap:14px;padding:0 12px;font-size:12px;color:#444">
+      <span data-live="coords" style="min-width:150px;font-variant-numeric:tabular-nums"></span><span data-live="bar"></span>
+      <span style="flex:1;color:#777" data-live="prompt"></span>
+      <span style="color:#777">${S.sheets.length} sheets · ${S.frames.length} frame${S.frames.length===1?'':'s'}</span>
+      <button class="ic" data-act="extents" title="Zoom to everything" aria-label="Zoom to everything">${svg('extents',18)}</button>
+      <span data-live="saved" style="color:#2f7a4f"></span></div>
+    <div class="panel" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);width:72px;border-radius:22px;display:flex;flex-direction:column;gap:4px;padding:8px 4px">
+      ${[['canvases','Canvases'],['drawings','Drawings'],['jobs','Jobs'],['meetings','Meetings']].map(([i,l],n) => `<button data-act="tab" class="${n===0?'on':''}" style="display:flex;flex-direction:column;align-items:center;padding:7px 0;border-radius:14px;font-size:10.5px;color:#555">${svg(i,20)}${l}</button>`).join('')}</div>`;
+  }
+  if (v === 'B') {
+    // full-bleed canvas, one floating palette by the pen hand, three round actions, almost nothing else
+    const round = (act, icon, label, extra = '') => `<button data-act="${act}" class="panel ic" aria-label="${label}" title="${label}" style="width:46px;height:46px;border-radius:23px;${extra}">${svg(icon,22)}</button>`;
+    h += `<div style="position:absolute;left:12px;top:12px;display:flex;gap:10px;align-items:center">${round('library','menu','Canvases, drawings, jobs and meetings')}
+        <span style="font-weight:600;font-size:15px;text-shadow:0 1px 0 #fff">Boiler 4 walkdown</span></div>
+      <div style="position:absolute;right:12px;top:12px;display:flex;gap:10px">${round('add','plus','Add a sheet')}${round('rec', S.recording?'stop':'rec', S.recording?'Stop recording':'Record a meeting', 'color:var(--red)')}${round('send','send','Send to an agent','background:var(--accent);color:#fff;border-color:var(--accent)')}</div>
+      <div class="panel" style="position:absolute;left:50%;bottom:14px;transform:translateX(-50%);border-radius:${S.paletteMore?18:30}px;padding:6px 10px;display:flex;flex-direction:column;align-items:center;gap:6px">
+        ${S.paletteMore ? `<div style="display:flex;gap:2px">${TOOLS.slice(3).map(([t,l]) => tbtn(t,l,'width:44px;height:40px;border-radius:12px')).join('')}${`<button class="ic" data-act="undo" aria-label="Undo" title="Undo" style="width:44px;height:40px">${svg('undo')}</button>`}<button class="ic" data-act="extents" aria-label="Zoom to everything" title="Zoom to everything" style="width:44px;height:40px">${svg('extents')}</button></div><div style="height:1px;align-self:stretch;background:var(--line)"></div>` : ''}
+        <div style="display:flex;align-items:center;gap:4px">${chips(10)}<div style="width:1px;height:28px;background:var(--line);margin:0 6px"></div>
+          ${TOOLS.slice(0,3).map(([t,l]) => tbtn(t,l,'width:48px;height:44px;border-radius:22px')).join('')}
+          <button class="ic ${S.paletteMore?'on':''}" data-act="more" aria-label="More tools" title="More tools" style="width:48px;height:44px;border-radius:22px">${svg('more')}</button></div>
+      </div>
+      <button data-act="units" class="panel" style="position:absolute;left:12px;bottom:14px;border-radius:12px;padding:6px 10px;font-size:12px;text-align:left"><span data-live="bar"></span><br><span style="color:#777">${UNIT_LABEL[S.units]} · tap to change</span></button>
+      <div style="position:absolute;right:14px;bottom:18px;font-size:11.5px;color:#2f7a4f;text-shadow:0 1px 0 #fff" data-live="saved"></div>
+      <div style="position:absolute;right:14px;bottom:36px;font-size:11.5px;color:#666;font-variant-numeric:tabular-nums;text-shadow:0 1px 0 #fff" data-live="coords"></div>`;
+  }
+  if (v === 'C') {
+    // ribbon of named tabs on top, a sheet-set panel on the left, an AutoCAD-like command line at the bottom
+    const big = (act, icon, label, attrs = '', on = false) => `<button class="${on?'on':''}" data-act="${act}" ${attrs} style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:62px;padding:4px 6px;border-radius:9px;font-size:11px;color:#333">${svg(icon,22)}${label}</button>`;
+    const rib = {
+      Draw: TOOLS.slice(0,6).map(([t,l]) => big('tool', t, l, `data-t="${t}"`, S.tool===t)).join('') + `<div style="width:1px;height:44px;background:var(--line);margin:0 6px"></div>` +
+            Object.keys(COLORS).map(c => `<button data-act="color" data-c="${c}" style="display:flex;flex-direction:column;align-items:center;gap:3px;min-width:52px;font-size:11px;color:#333;padding:4px;border-radius:9px" class="${S.color===c?'on':''}"><span class="chip" style="background:${COLORS[c]}"></span>${COLOR_MEANING[c]}</button>`).join(''),
+      Annotate: big('tool','measure','Measure','data-t="measure"',S.tool==='measure') + big('tool','dim','Dimension','data-t="dim"',S.tool==='dim') + big('tool','text','Text box','data-t="text"',S.tool==='text') + `<div style="display:flex;flex-direction:column;justify-content:center;margin-left:10px;font-size:11px;color:#555">Canvas units ${unitSelect()}</div>`,
+      Sheets: big('add','plus','Add sheet') + big('add','search','Search index') + big('tool','frame','Frame','data-t="frame"',S.tool==='frame') + big('tool','window','Window','data-t="window"',S.tool==='window') + big('extents','extents','Extents'),
+      Meeting: big('rec', S.recording?'stop':'rec', S.recording?'Stop':'Record', 'style="color:var(--red)"') + `<div style="display:flex;align-items:center;margin-left:8px;color:#555;font-size:12px;max-width:420px">${S.recording ? 'Recording on this canvas. Keep writing; the summary reads your ink too.' : 'Records the room through the Duo’s mic onto this canvas. A phone call recording can be shared in from the Phone app.'}</div>`,
+      Send: Object.entries(KINDS).map(([k,[t]]) => big('send', k==='summarize'?'jobs':k==='create'?'drawings':k==='redline'?'pen':'text', t, `data-k="${k}"`)).join(''),
+    };
+    h += `<div class="panel" style="position:absolute;left:0;right:0;top:0;height:90px;border-width:0 0 1px 0;border-radius:0">
+        <div style="display:flex;align-items:center;gap:2px;height:32px;padding:0 8px;border-bottom:1px solid #ece5d8">
+          <button class="ic" data-act="library" aria-label="Canvases, drawings, jobs and meetings" style="width:34px;height:28px">${svg('menu',18)}</button>
+          <b style="margin:0 12px 0 4px">Boiler 4 walkdown</b>
+          ${Object.keys(rib).map(t => `<button data-act="rtab" data-t="${t}" style="padding:5px 12px;border-radius:8px;font-weight:${S.ribbonTab===t?700:500};${S.ribbonTab===t?'background:#e6edf5;color:var(--accent)':''}">${t}</button>`).join('')}
+          <div style="flex:1"></div><button class="ic" data-act="undo" aria-label="Undo" title="Undo" style="width:34px;height:28px">${svg('undo',18)}</button>
+          <button class="primary" data-act="send" style="padding:4px 12px">Send…</button></div>
+        <div style="display:flex;align-items:center;gap:2px;height:57px;padding:0 8px">${rib[S.ribbonTab]}</div></div>
+      <div class="panel" style="position:absolute;left:0;top:90px;bottom:0;width:206px;border-width:0 1px 0 0;border-radius:0;display:flex;flex-direction:column">
+        <div style="padding:10px 12px 4px;font-weight:700">Sheet set</div>
+        <div style="flex:1;overflow:auto">${S.sheets.map(s => `<button data-act="zoomsheet" data-id="${s.id}" style="display:block;width:100%;text-align:left;padding:7px 12px;border-bottom:1px solid #eee5d6"><b>${s.num}</b> ${s.title}<br><span style="font-size:11px;color:${s.nts?'#8a5a00':'#2f5d8a'}">${s.nts?'NTS · printed size':scaleLabel(s.scale)}${s.result?' · result':''}</span></button>`).join('')}
+          ${S.frames.map((f,i) => `<button data-act="zoomframe" data-i="${i}" style="display:block;width:100%;text-align:left;padding:7px 12px;border-bottom:1px solid #eee5d6;color:#7a4fb3"><b>Frame ${i+1}</b> ${f.paper}<br><span style="font-size:11px">${scaleLabel(f.scale)}</span></button>`).join('')}</div>
+        <div style="padding:8px 10px;border-top:1px solid var(--line)"><button class="ghost" data-act="add" style="width:100%">${svg('search',14)} Search drawings…</button></div></div>
+      <div class="panel" style="position:absolute;left:206px;right:0;bottom:0;height:32px;border-width:1px 0 0 0;border-radius:0;display:flex;align-items:center;gap:14px;padding:0 10px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#333">
+        <span style="color:#2f5d8a;font-weight:700">${S.tool.toUpperCase()}</span><span data-live="prompt" style="flex:1"></span><span data-live="bar" style="font-family:system-ui"></span><span data-live="coords" style="min-width:150px"></span><span data-live="saved" style="font-family:system-ui;color:#2f7a4f"></span></div>`;
+  }
+  document.getElementById('chrome').innerHTML = h;
+  shared(); live();
+  document.getElementById('vlabel').textContent = `${S.variant} — ${VARIANTS[S.variant]}`;
+}
+function live() {
+  const bar = niceLen(90); const px = Math.round(bar * S.view.z);
+  const c = S.cursor ? `X ${fmt(S.cursor[0])}  Y ${fmt(-S.cursor[1])}` : '';
+  for (const el of document.querySelectorAll('[data-live]')) {
+    const k = el.dataset.live;
+    if (k === 'coords') el.textContent = c;
+    if (k === 'prompt') el.textContent = prompt();
+    if (k === 'saved') el.textContent = S.saved;
+    if (k === 'bar') el.innerHTML = `<span style="display:inline-block;vertical-align:middle;width:${px}px;height:6px;border:1.5px solid #333;border-top:0;margin-right:6px"></span>${fmt(bar)}`;
+  }
+  document.getElementById('vstate').textContent = `tool ${S.tool} · ink ${COLOR_MEANING[S.color]} · ${UNIT_LABEL[S.units]} · ${S.strokes.length} strokes, ${S.texts.length} text, ${S.dims.length} dims, ${S.frames.length} frames${S.recording?' · recording':''}${S.job?' · job: '+S.job.status:''}`;
+}
+
+// ---------- switcher ----------
+function setVariant(v) { S.variant = v; const u = new URL(location); u.searchParams.set('variant', v); history.replaceState(null, '', u); chrome(); extents(); }
+const keys = Object.keys(VARIANTS);
+document.getElementById('prev').onclick = () => setVariant(keys[(keys.indexOf(S.variant) + keys.length - 1) % keys.length]);
+document.getElementById('next').onclick = () => setVariant(keys[(keys.indexOf(S.variant) + 1) % keys.length]);
+addEventListener('keydown', e => { if (e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') document.getElementById('prev').click(); if (e.key === 'ArrowRight') document.getElementById('next').click();
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z') { e.preventDefault(); doUndo(); } });
+addEventListener('resize', fit);
+fit(); chrome(); extents();
+</script>
+</body>
+</html>

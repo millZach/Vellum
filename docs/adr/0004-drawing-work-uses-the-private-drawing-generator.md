@@ -1,0 +1,3 @@
+# Drawing work on the laptop uses the private automated-drawing-generator, which stays out of Vellum
+
+Zach's private repository `millZach/automated-drawing-generator` already turns project data into loop drawings, IO lists, BOMs and L5X, rewrites loop-sheet DXFs, checks its output by plotting through AutoCAD's own `accoreconsole`, and holds a library of attributed loop-drawing blocks. A "create drawing" or redline job runs on the laptop as a thread that uses that repository and its block library. Vellum's code does not import it, and none of its blocks, client names or project data are copied into Vellum, which is public.

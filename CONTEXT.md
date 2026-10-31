@@ -24,6 +24,18 @@ _Avoid_: PDF (the file), page, underlay
 The ratio between a sheet's printed size and the real world, such as 1/4" = 1'-0". It is what turns a printed length into a real one.
 _Avoid_: zoom, ratio
 
+**NTS sheet**:
+A sheet that is not to scale, such as a loop drawing or a schematic. It is placed at its printed size, and lengths read on it are printed lengths marked NTS, never real ones.
+_Avoid_: unscaled PDF
+
+**Frame**:
+A rectangle on the canvas with a paper size and a drawing scale, such as 24 × 36 at 1/4" = 1'-0", that Zach lays work out inside. A frame prints, exports or goes to an agent as one sheet, like a layout viewport in AutoCAD.
+_Avoid_: layout, viewport, page, border
+
+**Canvas units**:
+The units a canvas shows lengths in, chosen per canvas: feet and inches, decimal feet or metric.
+_Avoid_: precision, format
+
 **Measure**:
 A length read off the canvas between two points, in real-world units, that is not kept.
 _Avoid_: dimension (a dimension stays on the canvas)
@@ -44,3 +56,31 @@ Zach's iPhone Duo, the one device Vellum runs on. Unfolded, it is a 951 × 669 p
 **Laptop**:
 Zach's Windows laptop, where AutoCAD, Dropbox and Sotto run, and where agent work happens.
 _Avoid_: PC, desktop, computer (in Sotto, a computer is any machine with a host)
+
+**Project folder**:
+The Dropbox folder of the job a sheet's PDF came from, such as a client project's folder. A job's thread runs there.
+_Avoid_: workspace, repo, directory
+
+## Agent work
+
+**Job**:
+One request Zach sends from Vellum for agent work, such as summarize or create drawing, with the canvas content it is about. A job becomes one thread in Sotto.
+_Avoid_: task, request, ticket
+
+**Job folder**:
+The Dropbox folder that holds what a job sends (its sheets, frames, ink and notes) and what its thread returns.
+_Avoid_: inbox, outbox, export
+
+**Watcher**:
+Sotto's per-computer agent, which starts and watches threads. Vellum hands it each job.
+_Avoid_: dispatcher, orchestrator
+
+## Meetings
+
+**Meeting**:
+A recording Vellum makes through the Duo's microphone, or a phone call recording shared into it, with the transcript and summary made from it.
+_Avoid_: call (a call is recorded by the Phone app or Meeting Coach), session, note
+
+**Meeting summary**:
+The notes made from a meeting's transcript on the laptop, the way Meeting Coach summarizes a call.
+_Avoid_: minutes, recap

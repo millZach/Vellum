@@ -5,5 +5,8 @@ Zach asked for a canvas he can "zoom way out" on, "like in AutoCAD model view", 
 ## Consequences
 
 - Sheets at different drawing scales come out at very different sizes on one canvas. That is the model working, not a bug.
-- Every sheet needs a drawing scale before it is placed. How Vellum gets it, and what happens to a sheet that is not to scale (a loop drawing marked NTS), is its own decision.
+- Every sheet needs a drawing scale before it is placed. Vellum reads the SCALE from the PDF's title block and Zach confirms it. When there is none it can read (a scan, "AS NOTED", several scales on one sheet), Vellum asks him to type one, offering common scales.
+- A sheet that is not to scale is an NTS sheet: placed at its printed size, its lengths shown as printed lengths marked NTS.
+- Each canvas chooses its units: feet and inches, decimal feet or metric. A new canvas starts in feet and inches.
+- A frame (a paper size at a drawing scale) is how a region of model space becomes one printable, sendable sheet again, as a layout viewport does in AutoCAD.
 - "Print size" means a sheet prints at its paper size when it is printed at its drawing scale.

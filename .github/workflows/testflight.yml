@@ -7,9 +7,7 @@ name: TestFlight
 
 on:
   push:
-    # TEMPORARY: feat/testflight proves the upload before this file is on main, where workflow_dispatch needs it.
-    # Removed before merge.
-    branches: [main, feat/testflight]
+    branches: [main]
     # A change to this workflow is proved by a build too.
     paths: ['apps/ios/**', '.github/workflows/testflight.yml']
   workflow_dispatch:

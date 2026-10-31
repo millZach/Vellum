@@ -1,0 +1,44 @@
+# XcodeGen spec for the Vellum app. Scripts/generate-project.sh turns it into Vellum.xcodeproj with the pinned XcodeGen
+# version; the .xcodeproj is generated, gitignored and never edited by hand. Signing is off here: the simulator build
+# is unsigned, and TestFlight (ticket #4) signs in its own workflow.
+name: Vellum
+options:
+  bundleIdPrefix: com.millzach
+  deploymentTarget:
+    # The iPhone Duo runs iOS 27.2, but the Duo simulator on GitHub's xcode-27 runner is iOS 27.1, so 27.1 is the
+    # highest target the app can be proved on in the simulator.
+    iOS: "27.1"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  VellumCore:
+    path: .
+targets:
+  Vellum:
+    type: application
+    platform: iOS
+    sources:
+      - Vellum
+    dependencies:
+      - package: VellumCore
+    scheme: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.millzach.vellum
+        PRODUCT_NAME: Vellum
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Vellum
+        INFOPLIST_KEY_LSRequiresIPhoneOS: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
+        # The Duo is used unfolded, a 951 x 669 point landscape screen; folded, portrait still has to read.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait"
+        ENABLE_PREVIEWS: YES
+        CODE_SIGN_STYLE: Automatic

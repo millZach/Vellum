@@ -18,19 +18,24 @@ This is a brief, not a specification. It names what is expensive to get wrong an
 
 ## Where things are
 
-There is no app code yet. Planned: `apps/ios/`, a SwiftUI app with a `VellumCore` Swift package that holds everything testable without a device (canvas model, units, PDF placement, the job format sent to Sotto), with its own XCTest suite. Sotto's `apps/ios/` is the pattern to copy.
+- `apps/ios/Vellum/`: the SwiftUI app, the iOS tab bar with Canvases, Drawings, Jobs and Meetings. Bundle identifier `com.millzach.vellum`, iPhone only, iOS 27.1 and up.
+- `apps/ios/Sources/VellumCore/` and `apps/ios/Tests/VellumCoreTests/`: the `VellumCore` Swift package (`apps/ios/Package.swift`), everything testable without a device (canvas model, canvas units, sheet placement, the job format sent to Sotto), with its XCTest suite. It imports neither SwiftUI nor UIKit, so it also builds with Forge's Linux Swift.
+- `apps/ios/project.yml`: the XcodeGen spec. `apps/ios/Scripts/generate-project.sh` generates `Vellum.xcodeproj` from it with a pinned, checksummed XcodeGen; the project is gitignored, so change `project.yml`, never a `.pbxproj`.
+- `.github/workflows/ci.yml`: CI. Sotto's `apps/ios/` is the pattern it and the app follow.
 
 ## Run, test and prove
 
 Forge has no Mac. iOS builds and tests run on GitHub's macOS runners, the way Sotto's iPhone client does. CI never runs on Zach's laptop.
 
-- Unit tests: `swift test` in the `VellumCore` package (macOS runner).
-- Build: `xcodebuild` for the iOS simulator, unsigned (macOS runner).
+- Unit tests: `swift test` in `apps/ios` runs the `VellumCore` suite. It runs on Forge too; run it there before pushing.
+- Build: `sh apps/ios/Scripts/build-simulator.sh` generates the project and builds the app for the iOS simulator, unsigned (`CODE_SIGNING_ALLOWED=NO`).
+- `sh apps/ios/Scripts/verify.sh` runs both, the same gates CI runs, for someone on a Mac.
+- CI runs on GitHub's hosted `xcode-27` image with Xcode 27.2 (the iOS 27.2 SDK), selected with `DEVELOPER_DIR`. That image's iPhone Duo simulator is iOS 27.1, which is why the app targets iOS 27.1.
 - Prove a visible change on the iPhone Duo simulator, unfolded (951×669 points). Prove anything that touches drawing on the real Duo with the Apple Pencil, through a TestFlight build.
 
 ## The merge bar
 
-CI is added with the first test. Until then nothing merges without Zach's word. Once it exists, its macOS job is green before merge.
+Both macOS jobs in `.github/workflows/ci.yml` are green on the pull request's latest commit before merge: **VellumCore tests (macOS)** and **iOS simulator build (macOS)**.
 
 Pull requests go through the merge train: post `READY TO MERGE #N`, wait for `GO MERGE`, merge, then post `MERGED #N <sha>`. After pushing, end your turn rather than watching CI.
 

@@ -71,9 +71,31 @@ _Avoid_: task, request, ticket
 The Dropbox folder that holds what a job sends (its sheets, frames, ink and notes) and what its thread returns.
 _Avoid_: inbox, outbox, export
 
+**Job kind**:
+What a job asks for: summarize, create drawing, redline, or a free-text instruction Zach writes himself.
+_Avoid_: action, mode, command
+
+**Redline**:
+A job that applies Zach's markups on a sheet to the DWG the sheet came from, in a new revision of that DWG with each change in a revision cloud. The original DWG is never changed.
+_Avoid_: markup (the markup is Zach's ink), update, edit
+
 **Watcher**:
 Sotto's per-computer agent, which starts and watches threads. Vellum hands it each job.
 _Avoid_: dispatcher, orchestrator
+
+## Drawings
+
+**Drawing**:
+A CAD file (DWG) in Zach's Dropbox, with any PDF plotted from it.
+_Avoid_: sheet (a sheet is a placed PDF page), file, plan
+
+**Drawing index**:
+The searchable list of every drawing in Zach's Dropbox: where it is, its project, its title block fields, which PDF is its plot, and a thumbnail. Choosing a drawing from a search opens it in Vellum.
+_Avoid_: catalog, database, register
+
+**Laptop indexer**:
+The tool on the laptop that keeps the drawing index up to date and plots a drawing to PDF when Vellum asks for one that has none.
+_Avoid_: agent (agents run jobs), sync, service
 
 ## Meetings
 

@@ -1,0 +1,101 @@
+[
+  {
+    "Appearances" : {
+      "ISAppearanceTintable" : 10,
+      "UIAppearanceAny" : 0,
+      "UIAppearanceDark" : 1
+    },
+    "AssetStorageVersion" : "Xcode 27.2 (27B48) via AssetCatalogAgent-AssetRuntime",
+    "Authoring Tool" : "@(#)PROGRAM:CoreThemeDefinition  PROJECT:CoreThemeDefinition-664 [LAR] [IIO-2851.1.8][LAR] AppleJPEG[1][32]  CMPhoto[1][222]] [IR-120(hw)]",
+    "CoreUIVersion" : 1011,
+    "DumpToolVersion" : 1010,
+    "Key Format" : [
+      "kCRThemeAppearanceName",
+      "kCRThemeLocalizationName",
+      "kCRThemeScaleName",
+      "kCRThemeIdiomName",
+      "kCRThemeSubtypeName",
+      "kCRThemeDimension2Name",
+      "kCRThemeIdentifierName",
+      "kCRThemeElementName",
+      "kCRThemePartName"
+    ],
+    "MainVersion" : "@(#)PROGRAM:CoreUI  PROJECT:CoreUI-1011.4 [LAR]",
+    "Platform" : "ios",
+    "PlatformVersion" : "27.1",
+    "SchemaVersion" : 2,
+    "StorageVersion" : 17,
+    "Timestamp" : 1793488978
+  },
+  {
+    "AssetType" : "Icon Image",
+    "BitsPerComponent" : 8,
+    "ColorModel" : "RGB",
+    "Colorspace" : "srgb",
+    "Compression" : "lzfse",
+    "Encoding" : "ARGB",
+    "Icon Index" : 1,
+    "Idiom" : "phone",
+    "Name" : "AppIcon",
+    "NameIdentifier" : 6849,
+    "Opaque" : true,
+    "PixelHeight" : 1024,
+    "PixelWidth" : 1024,
+    "RenditionName" : "AppIcon-1024.png",
+    "Scale" : 1,
+    "SHA1Digest" : "38BD809D94906C856A91B82AB796878E1F058218226A43D53F00A71CB07907F2",
+    "SizeOnDisk" : 37323
+  },
+  {
+    "Appearance" : "UIAppearanceDark",
+    "AssetType" : "Icon Image",
+    "BitsPerComponent" : 8,
+    "ColorModel" : "RGB",
+    "Colorspace" : "srgb",
+    "Compression" : "lzfse",
+    "Encoding" : "ARGB",
+    "Icon Index" : 1,
+    "Idiom" : "phone",
+    "Name" : "AppIcon",
+    "NameIdentifier" : 6849,
+    "Opaque" : true,
+    "PixelHeight" : 1024,
+    "PixelWidth" : 1024,
+    "RenditionName" : "AppIcon-1024-dark.png",
+    "Scale" : 1,
+    "SHA1Digest" : "17DB3419576E6F2D8CC10F29E67B5F3631E07EACF0A90EB3AFCFD3C482445A5A",
+    "SizeOnDisk" : 16506
+  },
+  {
+    "Appearance" : "ISAppearanceTintable",
+    "AssetType" : "Icon Image",
+    "BitsPerComponent" : 8,
+    "ColorModel" : "Monochrome",
+    "Colorspace" : "gray gamma 22",
+    "Compression" : "lzfse",
+    "Encoding" : "Gray",
+    "Icon Index" : 1,
+    "Idiom" : "phone",
+    "Name" : "AppIcon",
+    "NameIdentifier" : 6849,
+    "Opaque" : true,
+    "PixelHeight" : 1024,
+    "PixelWidth" : 1024,
+    "RenditionName" : "AppIcon-1024-tinted.png",
+    "Scale" : 1,
+    "SHA1Digest" : "15B4C5E60C7C937B8F8C1D7EDF95687BE77DA16CA88D935C1FB2B56C8F5D73F3",
+    "SizeOnDisk" : 9869
+  },
+  {
+    "AssetType" : "MultiSized Image",
+    "Idiom" : "phone",
+    "Name" : "AppIcon",
+    "NameIdentifier" : 6849,
+    "Scale" : 1,
+    "SHA1Digest" : "8E49D581FF1D34636A0ECFFD14AD9B1285DB705B1278A7F599E196C35454BDA3",
+    "SizeOnDisk" : 236,
+    "Sizes" : [
+      "1024x1024 index:1 idiom:phone"
+    ]
+  }
+]

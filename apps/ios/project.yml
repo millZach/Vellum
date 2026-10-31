@@ -1,6 +1,6 @@
 # XcodeGen spec for the Vellum app. Scripts/generate-project.sh turns it into Vellum.xcodeproj with the pinned XcodeGen
-# version; the .xcodeproj is generated, gitignored and never edited by hand. Signing is off here: the simulator build
-# is unsigned, and TestFlight (ticket #4) signs in its own workflow.
+# version; the .xcodeproj is generated, gitignored and never edited by hand. No team is named here: the simulator build
+# is unsigned, and Scripts/testflight.sh passes the team as a build setting when it archives for TestFlight.
 name: Vellum
 options:
   bundleIdPrefix: com.millzach
@@ -13,6 +13,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
+    # The build number for TestFlight comes from the workflow run (Scripts/testflight.sh); this one is for local builds.
     CURRENT_PROJECT_VERSION: "1"
 packages:
   VellumCore:
@@ -40,5 +41,6 @@ targets:
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         # The Duo is used unfolded, a 951 x 669 point landscape screen; folded, portrait still has to read.
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: YES
         CODE_SIGN_STYLE: Automatic

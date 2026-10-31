@@ -32,6 +32,7 @@ Forge has no Mac. iOS builds and tests run on GitHub's macOS runners, the way So
 - `sh apps/ios/Scripts/verify.sh` runs both, the same gates CI runs, for someone on a Mac.
 - CI runs on GitHub's hosted `xcode-27` image with Xcode 27.2 (the iOS 27.2 SDK), selected with `DEVELOPER_DIR`. That image's iPhone Duo simulator is iOS 27.1, which is why the app targets iOS 27.1.
 - Prove a visible change on the iPhone Duo simulator, unfolded (951×669 points). Prove anything that touches drawing on the real Duo with the Apple Pencil, through a TestFlight build.
+- A build reaches the Duo through TestFlight: `.github/workflows/testflight.yml` archives, signs, uploads and waits for App Store Connect to process the build on every push to `main` that changes `apps/ios/`, or by hand with `gh workflow run testflight.yml --ref <branch>`. `docs/testflight.md` says where its secrets live and how the Duo installs the build.
 
 ## The merge bar
 

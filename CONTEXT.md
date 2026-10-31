@@ -28,6 +28,14 @@ _Avoid_: PDF (the file), page, underlay
 The ratio between a sheet's printed size and the real world, such as 1/4" = 1'-0". It is what turns a printed length into a real one.
 _Avoid_: zoom, ratio
 
+**Printed length**:
+A length as it is printed on paper, such as the 3 1/2" between two marks on a sheet. A drawing scale turns it into a real length; on an NTS sheet it stays a printed length and is shown marked NTS.
+_Avoid_: paper length, plotted length
+
+**Paper size**:
+The printed width and height of a sheet's PDF page or of a frame, such as 24 × 36 or 8.5 × 11.
+_Avoid_: sheet size, page size
+
 **NTS sheet**:
 A sheet that is not to scale, such as a loop drawing or a schematic. It is placed at its printed size, and lengths read on it are printed lengths marked NTS, never real ones.
 _Avoid_: unscaled PDF

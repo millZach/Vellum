@@ -1,14 +1,27 @@
 /// One unbounded drawing surface measured in real-world lengths, the way AutoCAD's model space is (ADR-0002): its
-/// canvas units, and the sheets and frames placed on it.
+/// name, its canvas units, the sheets and frames placed on it, and its ink.
+///
+/// SwiftUI has a `Canvas` view too; app code that imports both writes `VellumCore.Canvas`.
 public struct Canvas: Hashable, Sendable {
+    public var name: String
     public var units: CanvasUnits
     public var sheets: [Sheet]
     public var frames: [Frame]
+    public var ink: Ink
 
-    public init(units: CanvasUnits = .default, sheets: [Sheet] = [], frames: [Frame] = []) {
+    public init(name: String = "Untitled canvas", units: CanvasUnits = .default, sheets: [Sheet] = [],
+                frames: [Frame] = [], ink: Ink = Ink()) {
+        self.name = name
         self.units = units
         self.sheets = sheets
         self.frames = frames
+        self.ink = ink
+    }
+
+    /// The rectangle everything on the canvas covers (sheets, frames and ink), for zoom to everything; nil for an
+    /// empty canvas.
+    public var extents: CanvasRect? {
+        CanvasRect.union(sheets.map(\.bounds) + frames.map(\.bounds) + ink.strokes.compactMap(\.bounds))
     }
 
     /// The length between two points on the canvas. It is real wherever the canvas is real, across any number of

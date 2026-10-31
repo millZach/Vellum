@@ -1,5 +1,5 @@
 #!/bin/sh
-# Captures every tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
+# Captures the canvas screen and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
 # app. The fold is moved by Scripts/duo/posture.m, a simulator-side tool that calls SpringBoard's display tool service,
 # the way Sotto captured its Duo layouts (Sotto tag prototype/iphone-duo-layout).
 # usage: capture-duo.sh [output folder]   (default .build-captures)
@@ -38,15 +38,26 @@ sleep 2
 # The unfolded inner screen is display 3; the cover screen, folded, is display 1.
 display=3
 
+# capture <name> <launch arguments...>: relaunch the app unfolded and screenshot the inner display.
+capture() {
+  name=$1; shift
+  xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  xcrun simctl launch "$udid" "$bundle" "$@" >/dev/null
+  sleep "${WAIT:-6}"
+  file="$out/unfolded-$name-$appearance.png"
+  xcrun simctl io "$udid" screenshot --display=$display "$file"
+  printf '%s ' "$file"; sips -g pixelWidth -g pixelHeight "$file" | tail -2 | tr '\n' ' '; echo
+}
+
 for appearance in light dark; do
   xcrun simctl ui "$udid" appearance "$appearance"
-  for tab in canvases drawings jobs meetings; do
-    xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
-    xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
-    xcrun simctl launch "$udid" "$bundle" --ui-tab "$tab" >/dev/null
-    sleep "${WAIT:-6}"
-    file="$out/unfolded-$tab-$appearance.png"
-    xcrun simctl io "$udid" screenshot --display=$display "$file"
-    sips -g pixelWidth -g pixelHeight "$file" | tail -2 | tr '\n' ' '; echo
+  # The canvas screen: a new empty canvas, then the Debug-only fixture (ink in all four markup colours) zoomed to
+  # everything and close up on its valve.
+  capture canvas-empty --ui-tab canvases
+  capture canvas-everything --ui-tab canvases --ui-fixture
+  capture canvas-closeup --ui-tab canvases --ui-fixture --ui-zoom closeup
+  for tab in drawings jobs meetings; do
+    capture "$tab" --ui-tab "$tab"
   done
 done

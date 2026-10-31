@@ -1,5 +1,6 @@
 // Waits until App Store Connect has processed an uploaded build, and fails if it rejects it.
 // Usage: swift Scripts/asc-build-status.swift <bundle id> <build number>
+//        swift Scripts/asc-build-status.swift <bundle id> --app-only   (only checks the key and that the app record exists)
 // Reads KEY_ID, ISSUER_ID and KEY_PATH (the App Store Connect .p8 key) from the environment, the same key the upload
 // used. Run by Scripts/testflight.sh on a macOS runner; it needs CryptoKit, so it does not run on Linux.
 import CryptoKit
@@ -54,10 +55,15 @@ func get(_ path: String, _ query: [String: String]) async throws -> [String: Any
     return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
 }
 
-let apps = try await get("/v1/apps", ["filter[bundleId]": bundleID, "fields[apps]": "bundleId"])
+let apps = try await get("/v1/apps", ["filter[bundleId]": bundleID, "fields[apps]": "bundleId,name"])
 guard let appID = (apps["data"] as? [[String: Any]])?.first?["id"] as? String else {
     print("App Store Connect has no app with bundle ID \(bundleID)")
     exit(1)
+}
+if buildNumber == "--app-only" {
+    let name = ((apps["data"] as? [[String: Any]])?.first?["attributes"] as? [String: Any])?["name"] as? String ?? "?"
+    print("App Store Connect accepts the key and has the app \(bundleID) (\"\(name)\", id \(appID)).")
+    exit(0)
 }
 
 // A build shows up in the API a few minutes after the upload, as PROCESSING, and then turns VALID, or FAILED or INVALID.

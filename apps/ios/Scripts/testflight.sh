@@ -12,6 +12,9 @@ cd "$(dirname "$0")/.."
 out=.build-native
 archive="$out/Vellum.xcarchive"
 
+# Before the long archive: the key signs a token App Store Connect accepts, and the app record exists.
+swift Scripts/asc-build-status.swift com.millzach.vellum --app-only
+
 sh Scripts/generate-project.sh
 
 # The archive is left unsigned and only the export signs it, as Sotto learned: signing the archive makes a new Apple
@@ -23,7 +26,8 @@ xcodebuild -project Vellum.xcodeproj -scheme Vellum -configuration Release \
   archive
 
 plist="$archive/Products/Applications/Vellum.app/Info.plist"
-for key in CFBundleIdentifier CFBundleShortVersionString CFBundleVersion CFBundleIconName ITSAppUsesNonExemptEncryption; do
+for key in CFBundleIdentifier CFBundleShortVersionString CFBundleVersion CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName \
+  ITSAppUsesNonExemptEncryption; do
   printf '%s = %s\n' "$key" "$(/usr/libexec/PlistBuddy -c "Print :$key" "$plist")"
 done
 

@@ -12,6 +12,10 @@ _Avoid_: page, board, document, sheet (a sheet is a placed PDF)
 What the pen leaves on the canvas: lines and handwriting, kept as strokes rather than pixels.
 _Avoid_: drawing (a drawing is a CAD file), sketch, annotation
 
+**Markup colour**:
+What a colour of ink means to an agent: red is something to add, green is something to delete, blue is a note. Ink in other colours is a sketch.
+_Avoid_: pen colour, highlight
+
 **Text box**:
 Typed text placed on the canvas, with a position and a size.
 _Avoid_: label, note
@@ -102,6 +106,10 @@ _Avoid_: agent (agents run jobs), sync, service
 **Meeting**:
 A recording Vellum makes through the Duo's microphone, or a phone call recording shared into it, with the transcript and summary made from it.
 _Avoid_: call (a call is recorded by the Phone app or Meeting Coach), session, note
+
+**Canvas meeting**:
+A meeting recorded on the canvas Zach is taking notes on. Its summary reads that canvas's ink and text boxes as well as the transcript, and lands on the canvas.
+_Avoid_: attached recording
 
 **Meeting summary**:
 The notes made from a meeting's transcript on the laptop, the way Meeting Coach summarizes a call.

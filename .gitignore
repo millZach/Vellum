@@ -1,0 +1,30 @@
+# Xcode and Swift
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+.build/
+.swiftpm/
+Packages/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Secrets never enter this public repo
+.env
+.env.*
+*.p12
+*.mobileprovision
+*.p8
+Secrets.xcconfig
+**/Secrets.swift
+
+# Local tooling
+.DS_Store
+.worktrees/
+.claude/worktrees/
+.claude/settings.local.json
+.zstack/
+.scratch/
+prototypes/**/node_modules/

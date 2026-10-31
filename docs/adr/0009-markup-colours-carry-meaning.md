@@ -1,0 +1,3 @@
+# Markup colours carry meaning: red adds, green deletes, blue is a note
+
+An agent turning a marked-up sheet into a redline or a drawing has to know what each mark asks for, and asking Zach about every stroke would defeat the job. Vellum follows the common redline convention: red ink is something to add, green is something to delete, blue is a note, and ink in any other colour is a sketch the agent reads for context only. The markup colours are on the pen as fixed colours, and a job records each stroke's colour with it, so the meaning travels with the ink rather than being guessed from a picture. We considered labelling each pen Add, Delete or Note whatever its colour, and leaving meaning to context; the convention is what Zach's drafters and clients already read.

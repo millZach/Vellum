@@ -83,6 +83,10 @@ _Avoid_: action, mode, command
 A job that applies Zach's markups on a sheet to the DWG the sheet came from, in a new revision of that DWG with each change in a revision cloud. The original DWG is never changed.
 _Avoid_: markup (the markup is Zach's ink), update, edit
 
+**Template drawing**:
+The DWG Zach picks for a create-drawing job whose title block, layers and drafting standards the new drawing copies.
+_Avoid_: seed file, template (alone), standard
+
 **Watcher**:
 Sotto's per-computer agent, which starts and watches threads. Vellum hands it each job.
 _Avoid_: dispatcher, orchestrator

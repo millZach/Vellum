@@ -8,3 +8,4 @@ DerivedData/
 *.ipa
 *.xcuserstate
 xcuserdata/
+.build-captures/

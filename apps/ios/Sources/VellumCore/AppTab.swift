@@ -5,35 +5,32 @@ public enum AppTab: String, CaseIterable, Identifiable, Sendable {
     case jobs
     case meetings
 
+    /// What the tab bar and the tab's empty screen show for one tab.
+    public struct Descriptor: Sendable, Equatable {
+        /// The tab's name in the tab bar.
+        public let title: String
+        /// The SF Symbol the tab bar shows beside the title.
+        public let systemImage: String
+        /// One line saying what the tab will hold, shown until it is built.
+        public let placeholder: String
+    }
+
     public var id: String { rawValue }
 
-    /// The tab's name in the tab bar.
-    public var title: String {
+    public var descriptor: Descriptor {
         switch self {
-        case .canvases: "Canvases"
-        case .drawings: "Drawings"
-        case .jobs: "Jobs"
-        case .meetings: "Meetings"
-        }
-    }
-
-    /// The SF Symbol the tab bar shows beside the title.
-    public var systemImage: String {
-        switch self {
-        case .canvases: "pencil.and.outline"
-        case .drawings: "doc.text.magnifyingglass"
-        case .jobs: "paperplane"
-        case .meetings: "waveform"
-        }
-    }
-
-    /// One line saying what the tab will hold, shown until it is built.
-    public var placeholder: String {
-        switch self {
-        case .canvases: "Your canvases will be listed here."
-        case .drawings: "Search the drawing index for any drawing in Dropbox."
-        case .jobs: "Jobs you send to Sotto, and what their threads return."
-        case .meetings: "Meetings you record, with their transcripts and summaries."
+        case .canvases:
+            Descriptor(title: "Canvases", systemImage: "pencil.and.outline",
+                       placeholder: "Your canvases will be listed here.")
+        case .drawings:
+            Descriptor(title: "Drawings", systemImage: "doc.text.magnifyingglass",
+                       placeholder: "Search the drawing index for any drawing in Dropbox.")
+        case .jobs:
+            Descriptor(title: "Jobs", systemImage: "paperplane",
+                       placeholder: "Jobs you send to Sotto, and what their threads return.")
+        case .meetings:
+            Descriptor(title: "Meetings", systemImage: "waveform",
+                       placeholder: "Meetings you record, with their transcripts and summaries.")
         }
     }
 }

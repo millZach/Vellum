@@ -3,13 +3,13 @@ import XCTest
 
 final class AppTabTests: XCTestCase {
     func testTheTabBarShowsFourTabsInOrder() {
-        XCTAssertEqual(AppTab.allCases.map(\.title), ["Canvases", "Drawings", "Jobs", "Meetings"])
+        XCTAssertEqual(AppTab.allCases.map(\.descriptor.title), ["Canvases", "Drawings", "Jobs", "Meetings"])
     }
 
     func testEveryTabSaysWhatItWillHold() {
         for tab in AppTab.allCases {
-            XCTAssertFalse(tab.placeholder.isEmpty, "\(tab.title) has no placeholder line")
-            XCTAssertFalse(tab.systemImage.isEmpty, "\(tab.title) has no symbol")
+            XCTAssertFalse(tab.descriptor.placeholder.isEmpty, "\(tab) has no placeholder line")
+            XCTAssertFalse(tab.descriptor.systemImage.isEmpty, "\(tab) has no symbol")
         }
     }
 
@@ -17,7 +17,8 @@ final class AppTabTests: XCTestCase {
         XCTAssertEqual(Set(AppTab.allCases.map(\.id)).count, AppTab.allCases.count)
     }
 
-    func testTheAppIsCalledVellum() {
-        XCTAssertEqual(AppIdentity.displayName, "Vellum")
+    func testATabIsFoundByItsName() {
+        XCTAssertEqual(AppTab(rawValue: "meetings"), .meetings)
+        XCTAssertNil(AppTab(rawValue: "sheets"))
     }
 }

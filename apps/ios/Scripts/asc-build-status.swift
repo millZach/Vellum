@@ -56,12 +56,13 @@ func get(_ path: String, _ query: [String: String]) async throws -> [String: Any
 }
 
 let apps = try await get("/v1/apps", ["filter[bundleId]": bundleID, "fields[apps]": "bundleId,name"])
-guard let appID = (apps["data"] as? [[String: Any]])?.first?["id"] as? String else {
+let app = (apps["data"] as? [[String: Any]])?.first
+guard let appID = app?["id"] as? String else {
     print("App Store Connect has no app with bundle ID \(bundleID)")
     exit(1)
 }
 if buildNumber == "--app-only" {
-    let name = ((apps["data"] as? [[String: Any]])?.first?["attributes"] as? [String: Any])?["name"] as? String ?? "?"
+    let name = (app?["attributes"] as? [String: Any])?["name"] as? String ?? "?"
     print("App Store Connect accepts the key and has the app \(bundleID) (\"\(name)\", id \(appID)).")
     exit(0)
 }
@@ -83,7 +84,7 @@ while Date() < deadline {
     }
     switch state {
     case "VALID":
-        print("App Store Connect processed build \(buildNumber) (build id \(build?["id"] as? String ?? "?")); TestFlight offers it now.")
+        print("App Store Connect processed build \(buildNumber) (build id \(build?["id"] as? String ?? "?")) for TestFlight.")
         exit(0)
     case "FAILED", "INVALID":
         print("App Store Connect rejected build \(buildNumber): \(state). Its email to the account holder says why.")

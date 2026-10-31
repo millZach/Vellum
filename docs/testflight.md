@@ -4,11 +4,17 @@
 
 ## When a build goes up
 
-- Every push to `main` that changes `apps/ios/` or the workflow, so each merged app change reaches the Duo.
+- Every push to `main` that changes `apps/ios/` or the workflow, so each merged app change reaches the Duo. The workflow file is in the trigger on purpose: a change to how builds are made is proved by a real build.
 - By hand: Actions > TestFlight > Run workflow, or `gh workflow run testflight.yml` (add `--ref <branch>` to build a branch).
 - Never on a pull request: pull requests cannot read the signing secrets, and an unreviewed build should not reach the Duo.
 
-The run archives the app, signs it with Xcode's automatic signing, uploads it and then waits until App Store Connect reports the build processed. A green run means TestFlight offers the build. The build number is `<run number>.<attempt>`, shown in the run's log and in TestFlight; the version (`MARKETING_VERSION`) comes from `apps/ios/project.yml`.
+The run archives the app, signs it with Xcode's automatic signing, uploads it and then waits until App Store Connect reports the build processed. A green run means App Store Connect has processed the build for TestFlight; it reaches the Duo through the testing group below.
+
+The build number (`CFBundleVersion`) is the UTC date and time the run started its upload step, `<yyyymmdd>.<hhmmss>` with the time's leading zeros dropped: `20261101.143005` for 14:30:05, `20261101.5` for 00:00:05. `apps/ios/Scripts/build-number.sh` makes it, and the run's log prints it. App Store Connect compares build numbers as integers, part by part, so each upload's number is larger than the last, even when an old run is retried after a newer one has uploaded (a run number would repeat the old run's number). Uploads are one at a time, so two never share a second. The version (`MARKETING_VERSION`) comes from `apps/ios/project.yml`.
+
+## Setting it up
+
+`apps/ios/Scripts/setup-testflight.sh` walks through everything only Zach can do: registering the bundle ID, creating the app record in App Store Connect, the four secrets below, and the TestFlight testing group. Run it with `bash apps/ios/Scripts/setup-testflight.sh` where `gh` is signed in to `millZach/Vellum`. It holds nothing secret: what is pasted goes straight to the repository secrets, and only the non-secret answers are remembered, in `~/.config/vellum/testflight.env`.
 
 ## Where the secrets live
 
@@ -21,4 +27,10 @@ No certificate or provisioning profile is kept anywhere.
 
 ## Installing on the Duo
 
-The first time: install TestFlight from the App Store on the Duo, signed in with the Apple account that owns the App Store Connect team; Vellum appears there as an internal test app. After that, each processed build shows in TestFlight and installs with one tap, or automatically if automatic updates are on for Vellum in TestFlight.
+A processed build reaches the Duo only through a TestFlight testing group. Set up once (the wizard's last stage):
+
+1. In App Store Connect, open the app (named "Vellum Canvas"), then TestFlight > Internal Testing, and add an internal group with Zach in it as a tester.
+2. Turn on automatic distribution for the group, so every new processed build is given to it without approving each one.
+3. On the Duo, install TestFlight from the App Store, signed in with Zach's Apple account, and accept the invitation.
+
+After that each build shows in TestFlight on the Duo and installs with one tap, or by itself if automatic updates are on for Vellum in TestFlight.

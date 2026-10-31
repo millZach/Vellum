@@ -71,7 +71,7 @@ final class CanvasModelTests: XCTestCase {
         XCTAssertTrue(measure.isNotToScale)
         XCTAssertEqual(measure, .notToScale(.inches(3.5)))
         XCTAssertEqual(canvas.format(measure), "3 1/2\" NTS")
-        XCTAssertEqual(Canvas(units: .metric).format(measure), "89 mm NTS")
+        XCTAssertEqual(Canvas(units: .metric).format(measure), "3 1/2\" NTS")
 
         // Reading a printed length on the sheet itself is NTS too.
         XCTAssertNil(loop.measure(printed: .inches(2)).realLength)

@@ -40,18 +40,13 @@ public enum CanvasUnits: String, CaseIterable, Hashable, Sendable {
         }
     }
 
-    /// A printed length read on an NTS sheet, marked NTS so it is never read as a real one: printed inches to the
-    /// 1/16" on imperial canvases (`3 1/2" NTS`), printed millimetres on metric ones (`89 mm NTS`).
+    /// A printed length read on an NTS sheet: printed inches to the 1/16", marked NTS so it is never read as a real
+    /// one (`3 1/2" NTS`). It reads the same in every canvas units, metric too, because it is a length on the paper,
+    /// not on the canvas.
     public func format(_ printed: PrintedLength) -> String {
-        switch self {
-        case .feetAndInches, .decimalFeet:
-            let sixteenths = Int((printed.inches.magnitude * Double(Self.fractionalPrecision)).rounded())
-            return Self.sign(printed.inches, nonZero: sixteenths != 0)
-                + Fraction.mixed(sixteenths, over: Self.fractionalPrecision, writeZero: false) + "\" NTS"
-        case .metric:
-            let millimetres = Int(printed.millimetres.magnitude.rounded())
-            return Self.sign(printed.inches, nonZero: millimetres != 0) + "\(millimetres) mm NTS"
-        }
+        let sixteenths = Int((printed.inches.magnitude * Double(Self.fractionalPrecision)).rounded())
+        return Self.sign(printed.inches, nonZero: sixteenths != 0)
+            + Fraction.mixed(sixteenths, over: Self.fractionalPrecision, writeZero: false) + "\" NTS"
     }
 
     /// A measure in these units: a real length as a length, an NTS one as a printed length marked NTS.

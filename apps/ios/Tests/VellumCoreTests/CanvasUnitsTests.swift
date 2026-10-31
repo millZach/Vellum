@@ -73,7 +73,12 @@ final class CanvasUnitsTests: XCTestCase {
         XCTAssertEqual(CanvasUnits.decimalFeet.format(PrintedLength.inches(0.25)), "1/4\" NTS")
         XCTAssertEqual(CanvasUnits.feetAndInches.format(PrintedLength.inches(14)), "14\" NTS")
         XCTAssertEqual(CanvasUnits.feetAndInches.format(PrintedLength.zero), "0\" NTS")
-        XCTAssertEqual(CanvasUnits.metric.format(PrintedLength.millimetres(89.2)), "89 mm NTS")
+        // NTS lengths read in printed inches whatever the canvas units, metric included.
+        for units in CanvasUnits.allCases {
+            XCTAssertEqual(units.format(PrintedLength.inches(3.5)), "3 1/2\" NTS", "\(units)")
+            XCTAssertEqual(units.format(Measure.notToScale(.inches(3.5))), "3 1/2\" NTS", "\(units)")
+        }
+        XCTAssertEqual(CanvasUnits.metric.format(PrintedLength.millimetres(89)), "3 1/2\" NTS")
         XCTAssertEqual(CanvasUnits.feetAndInches.format(Measure.notToScale(.inches(1))), "1\" NTS")
         XCTAssertEqual(CanvasUnits.decimalFeet.format(Measure.real(.feet(2))), "2.00'")
     }

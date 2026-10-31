@@ -69,24 +69,26 @@ public struct DrawingScale: Hashable, Sendable, CustomStringConvertible {
     public var description: String {
         switch notation {
         case .ratio:
-            return "\(Self.number(printed.inches)):\(Self.number(real.inches))"
+            return "\(Self.formatNumber(printed.inches)):\(Self.formatNumber(real.inches))"
         case .lengths:
+            // Both sides are written exactly, never with a measure's 1/16" rounding, so a label reads back as the
+            // same conversion.
             let paper = Self.inchText(printed.inches) + "\""
-            let realFeet = real.inches / 12
-            if real.inches == 12 { return paper + " = 1'-0\"" }
-            if printed.inches == 1 && realFeet == realFeet.rounded() { return paper + " = \(Int(realFeet))'" }
-            return paper + " = " + CanvasUnits.feetAndInches.format(real)
+            let feet = (real.inches / 12).rounded(.down)
+            let inches = real.inches - feet * 12
+            if printed.inches == 1 && inches == 0 && feet != 1 { return paper + " = \(Self.formatNumber(feet))'" }
+            return paper + " = \(Self.formatNumber(feet))'-" + Self.inchText(inches) + "\""
         }
     }
 
-    /// Inches as a fraction to the 1/64" (`3/32`, `1 1/2`), or as a decimal when no 64th fits.
+    /// Inches exactly: as a fraction when a 64th fits (`3/32`, `1 1/2`, `0`), otherwise as a decimal.
     private static func inchText(_ inches: Double) -> String {
         let sixtyFourths = inches * 64
-        guard sixtyFourths == sixtyFourths.rounded() else { return number(inches) }
+        guard sixtyFourths == sixtyFourths.rounded() else { return formatNumber(inches) }
         return Fraction.mixed(Int(sixtyFourths), over: 64, writeZero: false)
     }
 
-    private static func number(_ value: Double) -> String {
+    private static func formatNumber(_ value: Double) -> String {
         value == value.rounded() && value.magnitude < 1e15 ? String(Int(value)) : String(value)
     }
 }
@@ -125,7 +127,7 @@ extension DrawingScale {
 
         let ratioSides = body.split(separator: ":", omittingEmptySubsequences: false)
         if ratioSides.count == 2 {
-            guard let printed = number(ratioSides[0]), let real = number(ratioSides[1]),
+            guard let printed = parseNumber(ratioSides[0]), let real = parseNumber(ratioSides[1]),
                   let scale = DrawingScale(printed: .inches(printed), real: .inches(real), notation: .ratio)
             else { return .cantTell }
             return .scale(scale)
@@ -160,10 +162,11 @@ extension DrawingScale {
     private static func inchesOfLength(_ text: Substring) -> Double? {
         let t = String(text).trimmingSpaces()
         if let footMark = t.firstIndex(of: "'") {
-            guard let feet = number(t[..<footMark]) else { return nil }
+            guard let feet = parseNumber(t[..<footMark]) else { return nil }
             var rest = t[t.index(after: footMark)...].drop { $0 == " " }
-            if rest.first == "-" { rest = rest.dropFirst().drop { $0 == " " } }
-            if rest.isEmpty { return feet * 12 }
+            let hyphenated = rest.first == "-"
+            if hyphenated { rest = rest.dropFirst().drop { $0 == " " } }
+            if rest.isEmpty { return hyphenated ? nil : feet * 12 }   // `1'-` is cut off, not a length
             guard rest.last == "\"", let inches = mixedNumber(rest.dropLast()) else { return nil }
             return feet * 12 + inches
         }
@@ -171,14 +174,22 @@ extension DrawingScale {
         return mixedNumber(t.dropLast())
     }
 
-    /// `1`, `0.25`, `1/4`, `1 1/2` or `1-1/2`.
+    /// `1`, `0.25`, `1/4`, `1 1/2` or `1-1/2`. A hyphen only joins a whole number to its fraction: `-1/4`, `1/4-`
+    /// and `1--1/2` are not numbers, since quietly repairing them would hand Zach a scale nobody wrote.
     private static func mixedNumber(_ text: Substring) -> Double? {
-        let parts = text.split(whereSeparator: { $0 == " " || $0 == "-" })
+        let t = Substring(String(text).trimmingSpaces())
+        let parts: [Substring]
+        if t.contains("-") {
+            parts = t.split(separator: "-", omittingEmptySubsequences: false)
+        } else {
+            parts = t.split(separator: " ")
+        }
         switch parts.count {
         case 1:
-            return fraction(parts[0]) ?? number(parts[0])
+            return fraction(parts[0]) ?? parseNumber(parts[0])
         case 2:
-            guard !parts[0].contains("/"), let whole = number(parts[0]), let part = fraction(parts[1]) else { return nil }
+            guard !parts[0].contains("/"), let whole = parseNumber(parts[0]), let part = fraction(parts[1])
+            else { return nil }
             return whole + part
         default:
             return nil
@@ -187,12 +198,12 @@ extension DrawingScale {
 
     private static func fraction(_ text: Substring) -> Double? {
         let sides = text.split(separator: "/", omittingEmptySubsequences: false)
-        guard sides.count == 2, let top = number(sides[0]), let bottom = number(sides[1]), bottom > 0 else { return nil }
+        guard sides.count == 2, let top = parseNumber(sides[0]), let bottom = parseNumber(sides[1]), bottom > 0 else { return nil }
         return top / bottom
     }
 
     /// A plain decimal number, digits and at most one point. `Double(_:)` alone would also take `nan` and `1e5`.
-    private static func number(_ text: Substring) -> Double? {
+    private static func parseNumber(_ text: Substring) -> Double? {
         let t = String(text).trimmingSpaces()
         guard !t.isEmpty, t.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ".") }),
               t.filter({ $0 == "." }).count <= 1, t != "." else { return nil }

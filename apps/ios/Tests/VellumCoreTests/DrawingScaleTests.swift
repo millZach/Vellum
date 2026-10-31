@@ -33,6 +33,29 @@ final class DrawingScaleTests: XCTestCase {
         }
     }
 
+    func testEveryScaleReadsBackAsTheSameConversion() {
+        let odd = [
+            DrawingScale(printed: .inches(1), real: .inches(1.0 / 32))!,
+            DrawingScale(printed: .inches(3.0 / 64), real: .inches(89.3))!,
+            DrawingScale(printed: .inches(0.3), real: .feet(7, inches: 1.0 / 64))!,
+            DrawingScale(printed: .inches(1), real: .feet(1, inches: 0.1))!,
+            DrawingScale(printed: .inches(1), real: .feet(1))!,
+            DrawingScale(printed: .inches(2.5), real: .inches(1), notation: .ratio)!,
+            DrawingScale.ratio(2.5),
+        ]
+        for scale in DrawingScale.architecturalScales + DrawingScale.engineeringScales + DrawingScale.ratioScales + odd {
+            guard case .scale(let read) = DrawingScale.read(scale.description) else {
+                XCTFail("\(scale.description) did not read back")
+                continue
+            }
+            XCTAssertEqual(read.realPerPrinted, scale.realPerPrinted, scale.description)
+        }
+        // The label is exact, not rounded to a measure's 1/16".
+        XCTAssertEqual(odd[0].description, "1\" = 0'-1/32\"")
+        XCTAssertEqual(odd[2].description, "0.3\" = 7'-1/64\"")
+        XCTAssertEqual(odd[4].description, "1\" = 1'-0\"")
+    }
+
     func testABadScaleCannotBeMade() {
         XCTAssertNil(DrawingScale(printed: .zero, real: .feet(1)))
         XCTAssertNil(DrawingScale(printed: .inches(1), real: .feet(-1)))
@@ -97,6 +120,20 @@ final class DrawingScaleTests: XCTestCase {
         for text in ["AS NOTED", "SCALE: AS NOTED", "AS SHOWN", "SCALE: AS SHOWN", "AS INDICATED", "VARIES"] {
             XCTAssertEqual(read(text), .cantTell, text)
         }
+    }
+
+    func testCantTellMalformedLengths() {
+        // Signs, stray hyphens and cut-off lengths are not quietly repaired into a usable scale (ADR-0002).
+        for text in ["-1/4\" = 1'-0\"", "1/4-\" = 1'-0\"", "1/4\" = 1'-", "1/4\" = 1' -", "1/4\" = -1'-0\"",
+                     "1/4\" = 1'--0\"", "1/4\" = 1'-0-\"", "1/4\" = 1'--1/2\"", "1--1/2\" = 1'-0\"",
+                     "1-1/2-\" = 1'-0\"", "-1-1/2\" = 1'-0\"", "1-\" = 20'", "1\" = -20'", "-1:50", "1:-50"] {
+            XCTAssertEqual(DrawingScale.read(text), .cantTell, text)
+        }
+        // The hyphen that joins a whole number to its fraction, and feet to inches, still reads.
+        XCTAssertEqual(factor("1-1/2\" = 1'-0\""), 8)
+        XCTAssertEqual(factor("1 - 1/2\" = 1' - 0\""), 8)
+        XCTAssertEqual(factor("1/4\" = 1'-0\""), 48)
+        XCTAssertEqual(factor("1/2\" = 1'-1-1/2\""), 27)
     }
 
     func testCantTellJunk() {

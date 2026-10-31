@@ -4,7 +4,7 @@
 
 ## When a build goes up
 
-- Every push to `main` that changes `apps/ios/`, so each merged app change reaches the Duo.
+- Every push to `main` that changes `apps/ios/` or the workflow, so each merged app change reaches the Duo.
 - By hand: Actions > TestFlight > Run workflow, or `gh workflow run testflight.yml` (add `--ref <branch>` to build a branch).
 - Never on a pull request: pull requests cannot read the signing secrets, and an unreviewed build should not reach the Duo.
 

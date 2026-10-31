@@ -1,13 +1,17 @@
 # Archives the Vellum app, signs it, uploads it to TestFlight and waits until App Store Connect has processed it, so
-# the build is ready to install on the Duo (ADR-0001). Runs on every push to main that changes the app, and by hand
+# the build is ready to install on the Duo (ADR-0001). Runs on every push to main that changes the app or
+# this workflow, and by hand
 # (Actions > TestFlight > Run workflow, or `gh workflow run testflight.yml`); never on a pull request.
 # The App Store Connect key and the team ID are repository secrets; see docs/testflight.md.
 name: TestFlight
 
 on:
   push:
-    branches: [main]
-    paths: ['apps/ios/**']
+    # TEMPORARY: feat/testflight proves the upload before this file is on main, where workflow_dispatch needs it.
+    # Removed before merge.
+    branches: [main, feat/testflight]
+    # A change to this workflow is proved by a build too.
+    paths: ['apps/ios/**', '.github/workflows/testflight.yml']
   workflow_dispatch:
 
 permissions:

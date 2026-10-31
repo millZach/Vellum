@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch or pull request cancels the run it supersedes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Both jobs run on GitHub's hosted xcode-27 image (macOS 27, public preview), the only hosted image with the iOS 27
+# SDKs and the iPhone Duo simulator. Xcode 27.2 carries the iOS 27.2 SDK, the version the Duo runs; on this image it is
+# a release candidate. The image's Duo simulator is iOS 27.1, which is why project.yml targets iOS 27.1.
+jobs:
+  core-tests:
+    name: VellumCore tests (macOS)
+    runs-on: xcode-27
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+      - name: Record the toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Run the VellumCore tests
+        run: swift test --package-path apps/ios
+
+  simulator-build:
+    name: iOS simulator build (macOS)
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+      - name: Record the toolchain and the Duo simulator
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | grep -i duo || echo "No iPhone Duo simulator on this image"
+      - name: Generate the project and build the unsigned simulator app
+        run: sh apps/ios/Scripts/build-simulator.sh

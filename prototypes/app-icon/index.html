@@ -1,0 +1,123 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Never merge to main; kept as the tag prototype/app-icon.
+  Question: which app icon should Vellum ship with? Three designs, each shown large, on a light and a dark
+  home screen at real size, and as iOS's dark and tinted variants.
+  Open on a phone; it reflows to one column.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vellum app icon — prototype</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; font:15px/1.4 -apple-system,system-ui,sans-serif; background:#ece8df; color:#1d1d1f; }
+  header { padding:18px 18px 4px; } h1 { font-size:20px; margin:0 0 4px; } header p { margin:0; color:#555; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; padding:16px; }
+  .opt { background:#fffdf9; border-radius:18px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.08); }
+  .opt h2 { margin:0 0 2px; font-size:18px; } .opt .why { color:#555; margin:0 0 12px; font-size:14px; }
+  .big { width:100%; max-width:260px; aspect-ratio:1; border-radius:22.37%; overflow:hidden; display:block; margin:0 auto 14px; box-shadow:0 6px 18px rgba(0,0,0,.18); }
+  .big svg { width:100%; height:100%; display:block; }
+  .homes { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .home { min-width:0; border-radius:14px; padding:12px 6px; display:grid; grid-template-columns:repeat(3,1fr); gap:10px 4px; justify-items:center; }
+  .home.light { background:linear-gradient(160deg,#d9e3ef,#f4e9de); } .home.dark { background:linear-gradient(160deg,#101418,#2a2230); }
+  .app { display:flex; flex-direction:column; align-items:center; gap:3px; font-size:10px; min-width:0; }
+  .home.dark .app { color:#eee; }
+  .ico { width:44px; height:44px; border-radius:22.37%; overflow:hidden; }
+  .ico svg { width:100%; height:100%; display:block; }
+  .filler { background:rgba(120,120,128,.35); }
+  .variants { display:flex; gap:12px; justify-content:center; margin-top:12px; font-size:12px; color:#555; text-align:center; }
+  .variants .ico { width:64px; height:64px; margin:0 auto 4px; }
+  footer { padding:0 18px 24px; color:#666; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Vellum app icon: three options</h1>
+  <p>Each is shown large, at real size on a light and a dark home screen, and as the dark and tinted versions iOS uses when you set the home screen that way.</p>
+</header>
+<div class="grid" id="grid"></div>
+<footer>Prototype. The chosen design becomes the 1024 × 1024 PNGs in the app's asset catalog.</footer>
+<script>
+// Each icon is a 1024 × 1024 square; iOS rounds the corners itself.
+const ICONS = {
+  A: { name: 'A — Drafting sheet', why: 'A sheet of vellum on warm paper, with red redline ink and a blue dimension. Says "mark up drawings".',
+    light: () => `
+      <defs><linearGradient id="pa" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6f1e6"/><stop offset="1" stop-color="#e2d8c4"/></linearGradient>
+      <pattern id="ga" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="#8fa3b8" stroke-opacity=".35" stroke-width="2"/></pattern></defs>
+      <rect width="1024" height="1024" fill="url(#pa)"/>
+      <g transform="rotate(-7 512 512)">
+        <rect x="190" y="170" width="650" height="700" rx="10" fill="#fbfdff" fill-opacity=".92" stroke="#b9c6d3" stroke-width="6"/>
+        <rect x="190" y="170" width="650" height="700" fill="url(#ga)"/>
+        <rect x="560" y="740" width="250" height="100" fill="none" stroke="#5d6f82" stroke-width="6"/>
+        <path d="M270 470 H770" stroke="#2a2f36" stroke-width="12"/>
+        <path d="M470 440 l60 60 v-60 l-60 60 z" fill="none" stroke="#2a2f36" stroke-width="10" stroke-linejoin="round"/>
+        <path d="M300 300 H700 M300 278 v44 M700 278 v44" stroke="#2563eb" stroke-width="10" stroke-linecap="round"/>
+      </g>
+      <path d="M330 560 q40 -70 110 -40 q50 -60 120 -10 q70 -40 110 30 q40 80 -30 110 q-20 70 -110 50 q-70 40 -130 -10 q-90 10 -90 -60 q-40 -40 20 -70z" fill="none" stroke="#d6342c" stroke-width="22" stroke-linejoin="round" stroke-linecap="round"/>`,
+    dark: () => `
+      <defs><pattern id="gad" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="#8fa3b8" stroke-opacity=".22" stroke-width="2"/></pattern></defs>
+      <rect width="1024" height="1024" fill="#17181c"/>
+      <g transform="rotate(-7 512 512)">
+        <rect x="190" y="170" width="650" height="700" rx="10" fill="#23262d" stroke="#46505c" stroke-width="6"/>
+        <rect x="190" y="170" width="650" height="700" fill="url(#gad)"/>
+        <rect x="560" y="740" width="250" height="100" fill="none" stroke="#7d8da0" stroke-width="6"/>
+        <path d="M270 470 H770" stroke="#e6e6e6" stroke-width="12"/>
+        <path d="M470 440 l60 60 v-60 l-60 60 z" fill="none" stroke="#e6e6e6" stroke-width="10" stroke-linejoin="round"/>
+        <path d="M300 300 H700 M300 278 v44 M700 278 v44" stroke="#5b8dff" stroke-width="10" stroke-linecap="round"/>
+      </g>
+      <path d="M330 560 q40 -70 110 -40 q50 -60 120 -10 q70 -40 110 30 q40 80 -30 110 q-20 70 -110 50 q-70 40 -130 -10 q-90 10 -90 -60 q-40 -40 20 -70z" fill="none" stroke="#ff5a4f" stroke-width="22" stroke-linejoin="round" stroke-linecap="round"/>`,
+    tinted: () => `
+      <rect width="1024" height="1024" fill="#000"/>
+      <g transform="rotate(-7 512 512)"><rect x="190" y="170" width="650" height="700" rx="10" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="10"/>
+        <path d="M270 470 H770" stroke="#fff" stroke-opacity=".7" stroke-width="12"/><path d="M300 300 H700 M300 278 v44 M700 278 v44" stroke="#fff" stroke-opacity=".7" stroke-width="10" stroke-linecap="round"/></g>
+      <path d="M330 560 q40 -70 110 -40 q50 -60 120 -10 q70 -40 110 30 q40 80 -30 110 q-20 70 -110 50 q-70 40 -130 -10 q-90 10 -90 -60 q-40 -40 20 -70z" fill="none" stroke="#fff" stroke-width="24" stroke-linejoin="round"/>` },
+  B: { name: 'B — Model space', why: "AutoCAD's crosshair on a black model-space grid, with a red revision cloud. Says \"CAD\" at a glance and matches dark mode.",
+    light: () => `
+      <defs><pattern id="gb" width="64" height="64" patternUnits="userSpaceOnUse"><path d="M64 0H0V64" fill="none" stroke="#3b4250" stroke-width="2"/></pattern></defs>
+      <rect width="1024" height="1024" fill="#121418"/><rect width="1024" height="1024" fill="url(#gb)"/>
+      <path d="M512 150 V874 M150 512 H874" stroke="#f2f2f2" stroke-width="12"/>
+      <rect x="472" y="472" width="80" height="80" fill="none" stroke="#f2f2f2" stroke-width="12"/>
+      <path d="M560 300 q50 -60 120 -20 q80 -20 100 60 q70 40 20 110 q20 80 -70 90 q-50 60 -120 10 q-80 10 -80 -70 q-60 -50 0 -100 q-10 -70 30 -80z" fill="none" stroke="#ff4d42" stroke-width="20" stroke-linejoin="round"/>`,
+    dark: () => ICONS.B.light(),
+    tinted: () => `
+      <rect width="1024" height="1024" fill="#000"/>
+      <path d="M512 150 V874 M150 512 H874" stroke="#fff" stroke-opacity=".8" stroke-width="12"/><rect x="472" y="472" width="80" height="80" fill="none" stroke="#fff" stroke-width="12"/>
+      <path d="M560 300 q50 -60 120 -20 q80 -20 100 60 q70 40 20 110 q20 80 -70 90 q-50 60 -120 10 q-80 10 -80 -70 q-60 -50 0 -100 q-10 -70 30 -80z" fill="none" stroke="#fff" stroke-width="22" stroke-linejoin="round"/>` },
+  C: { name: 'C — Drafting V', why: 'A V drawn as two pencil strokes meeting at a point, under a dimension line. Simple and reads well tiny.',
+    light: () => `
+      <defs><linearGradient id="pc" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a6d9e"/><stop offset="1" stop-color="#1e3d5e"/></linearGradient></defs>
+      <rect width="1024" height="1024" fill="url(#pc)"/>
+      <path d="M262 250 H762 M262 220 v60 M762 220 v60 M262 250 l40 -18 v36z M762 250 l-40 -18 v36z" stroke="#dbe8f5" stroke-width="12" fill="#dbe8f5" stroke-linejoin="round"/>
+      <path d="M262 340 L512 820 L762 340" fill="none" stroke="#fffdf8" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="512" cy="820" r="26" fill="#ff5a4f"/>`,
+    dark: () => `
+      <rect width="1024" height="1024" fill="#14181e"/>
+      <path d="M262 250 H762 M262 220 v60 M762 220 v60 M262 250 l40 -18 v36z M762 250 l-40 -18 v36z" stroke="#8fbbe6" stroke-width="12" fill="#8fbbe6" stroke-linejoin="round"/>
+      <path d="M262 340 L512 820 L762 340" fill="none" stroke="#e8eef5" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="512" cy="820" r="26" fill="#ff5a4f"/>`,
+    tinted: () => `
+      <rect width="1024" height="1024" fill="#000"/>
+      <path d="M262 250 H762 M262 220 v60 M762 220 v60" stroke="#fff" stroke-opacity=".7" stroke-width="12"/>
+      <path d="M262 340 L512 820 L762 340" fill="none" stroke="#fff" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>` },
+};
+const svg = (body) => `<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+const filler = (n) => Array.from({length:n}, () => `<div class="app"><div class="ico filler"></div>App</div>`).join('');
+document.getElementById('grid').innerHTML = Object.entries(ICONS).map(([k, ic]) => `
+  <section class="opt" id="${k}">
+    <h2>${ic.name}</h2><p class="why">${ic.why}</p>
+    <div class="big">${svg(ic.light())}</div>
+    <div class="homes">
+      <div class="home light">${filler(4)}<div class="app"><div class="ico">${svg(ic.light())}</div>Vellum</div>${filler(1)}</div>
+      <div class="home dark">${filler(4)}<div class="app"><div class="ico">${svg(ic.dark())}</div>Vellum</div>${filler(1)}</div>
+    </div>
+    <div class="variants"><div><div class="ico">${svg(ic.light())}</div>Default</div><div><div class="ico">${svg(ic.dark())}</div>Dark</div><div><div class="ico">${svg(ic.tinted())}</div>Tinted</div></div>
+  </section>`).join('');
+// Export hook for rendering the PNGs: ?export=A&kind=light|dark|tinted shows one full-size icon only.
+const q = new URLSearchParams(location.search);
+if (q.get('export')) { document.body.innerHTML = `<div id="exp" style="width:1024px;height:1024px">${svg(ICONS[q.get('export')][q.get('kind')||'light']())}</div>`; document.body.style.margin = 0; }
+</script>
+</body>
+</html>

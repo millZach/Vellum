@@ -7,6 +7,8 @@ import VellumCore
 /// floating over the canvas.
 struct CanvasScreen: View {
     let editor: CanvasEditor
+    /// Back to the Canvases list; nil where there is no list (previews).
+    var showCanvases: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -22,7 +24,7 @@ struct CanvasScreen: View {
                     ToolRail(editor: editor)
                     VStack(spacing: 0) {
                         HStack(alignment: .top) {
-                            TopBar(editor: editor)
+                            TopBar(editor: editor, showCanvases: showCanvases)
                             Spacer(minLength: 8)
                             CanvasActions()
                         }
@@ -167,17 +169,25 @@ private struct WeightPicker: View {
 
 // MARK: - Top bar
 
-/// The canvas's name, its units, light or dark, and undo and redo.
+/// Back to the Canvases list, the canvas's name, its units, light or dark, and undo and redo.
 private struct TopBar: View {
     @Bindable var editor: CanvasEditor
+    let showCanvases: (() -> Void)?
     @AppStorage(AppearanceSetting.storageKey) private var appearance = AppearanceSetting.default.rawValue
 
     var body: some View {
         HStack(spacing: 10) {
+            if let showCanvases {
+                Button(action: showCanvases) {
+                    Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).frame(width: 26, height: 30)
+                }
+                .accessibilityLabel("Canvases")
+                .accessibilityHint("Back to the list of canvases")
+            }
             Text(editor.canvas.name)
                 .font(.system(size: 14, weight: .bold))
                 .lineLimit(1)
-            Picker("Canvas units", selection: $editor.canvas.units) {
+            Picker("Canvas units", selection: $editor.units) {
                 ForEach(CanvasUnits.allCases, id: \.self) { units in
                     Text(units.shortTitle).tag(units)
                 }
@@ -293,7 +303,7 @@ private struct StatusBar: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Zoom to everything")
             Text(editor.saveState.title)
-                .foregroundStyle(Chrome.unsaved)
+                .foregroundStyle(editor.saveState.isSaved ? Chrome.secondaryText : Chrome.unsaved)
                 .lineLimit(1)
                 .accessibilityLabel("Save status")
                 .accessibilityValue(editor.saveState.title)
@@ -334,8 +344,10 @@ enum Chrome {
     static let accent = dynamic(light: 0x2F5D8A, dark: 0x9CC4EC)
     static let selected = dynamic(light: 0xE6EDF5, dark: 0x2C3A4A)
     static let primary = dynamic(light: 0x2F5D8A, dark: 0x3F74A8)
+    /// The Canvases list's ground: the canvas's paper in light, its dark ground in dark.
+    static let listGround = dynamic(light: 0xF3EFE6, dark: 0x1C1D20)
     static let chipRim = dynamic(light: 0xFFFFFF, dark: 0x26272B)
-    /// Not green: nothing is saved yet (#9), and the colour must not say otherwise.
+    /// For a canvas with changes not yet written on the Duo: amber, never green.
     static let unsaved = dynamic(light: 0x9A5B00, dark: 0xE0A458)
 
     private static func dynamic(light: UInt32, lightAlpha: CGFloat = 1, dark: UInt32, darkAlpha: CGFloat = 1) -> Color {

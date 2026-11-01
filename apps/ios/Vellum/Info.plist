@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Merged with the keys project.yml generates. DROPBOX_APP_KEY is a build setting: the TestFlight workflow passes the
-     repository secret, and every other build has project.yml's placeholder (ADR-0013). -->
+     repository secret, and every other build has project.yml's placeholder (ADR-0014). -->
 <plist version="1.0">
 <dict>
 	<key>DropboxAppKey</key>

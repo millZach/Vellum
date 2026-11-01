@@ -1,19 +1,22 @@
 import SwiftUI
+import UIKit
 import VellumCore
 
-/// The iOS tab bar with Canvases, Drawings, Jobs and Meetings. Canvases holds the canvas screen; Drawings shows Zach's
-/// Dropbox (#10); the other tabs are empty until their tickets build them.
+/// The iOS tab bar with Canvases, Drawings, Jobs and Meetings. Canvases holds the list of canvases and, over it, the
+/// canvas screen for the one open; Drawings shows Zach's Dropbox (#10); the other tabs are empty until their tickets
+/// build them.
 struct RootView: View {
     @State private var selection: AppTab = RootView.launchTab
-    /// The open canvas lives here, above the tabs, so switching tabs keeps its ink for the session.
-    @State private var editor = RootView.launchEditor()
+    /// The canvases and the open canvas live here, above the tabs, so switching tabs keeps the canvas open.
+    @State private var canvases = CanvasesModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView(selection: $selection) {
             ForEach(AppTab.allCases) { tab in
                 Tab(tab.descriptor.title, systemImage: tab.descriptor.systemImage, value: tab) {
                     if tab == .canvases {
-                        CanvasScreen(editor: editor)
+                        CanvasesTab(model: canvases)
                     } else if tab == .drawings {
                         DrawingsScreen()
                     } else {
@@ -22,36 +25,45 @@ struct RootView: View {
                 }
             }
         }
+        .task {
+            #if DEBUG
+            if await DebugLaunch.run(canvases) { return }
+            #endif
+            await canvases.launch()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Every change is already written; leaving the screen flushes it to storage so a power cut keeps it too.
+            if phase != .active { canvases.appWillLeaveScreen() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+            canvases.appWillTerminate()
+        }
     }
 
     /// The tab the app opens on. Debug builds accept `--ui-tab <name>` so the simulator captures can open each tab.
     private static var launchTab: AppTab {
         #if DEBUG
-        if let name = launchArgument("--ui-tab"), let tab = AppTab(rawValue: name) { return tab }
+        if let name = DebugLaunch.argument("--ui-tab"), let tab = AppTab(rawValue: name) { return tab }
         #endif
         return .canvases
     }
+}
 
-    /// A new, empty canvas. Debug builds accept `--ui-fixture` to open the made-up fixture canvas instead, and
-    /// `--ui-zoom closeup` to open it close up on its valve rather than on everything.
-    private static func launchEditor() -> CanvasEditor {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--ui-fixture") {
-            let closeUp = launchArgument("--ui-zoom") == "closeup"
-            return CanvasEditor(canvas: DebugFixture.canvas,
-                                startingView: closeUp ? .region(DebugFixture.valveRegion) : .everything)
+/// The canvas screen for the open canvas, or the list when none is open.
+struct CanvasesTab: View {
+    let model: CanvasesModel
+
+    var body: some View {
+        if let editor = model.openEditor {
+            CanvasScreen(editor: editor, showCanvases: { model.closeCanvas() })
+                .id(editor.canvasID)
+        } else if !model.hasLaunched {
+            // Launch reopens the canvas that was open; until it has, show the ground rather than flash the list.
+            Chrome.listGround.ignoresSafeArea()
+        } else {
+            CanvasListScreen(model: model)
         }
-        #endif
-        return CanvasEditor()
     }
-
-    #if DEBUG
-    private static func launchArgument(_ flag: String) -> String? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
-        return arguments[index + 1]
-    }
-    #endif
 }
 
 /// An empty screen that says, in one line, what its tab will hold.

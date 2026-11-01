@@ -1,0 +1,146 @@
+#if canImport(Glibc)
+import Glibc
+#else
+import Darwin
+#endif
+import Foundation
+
+/// Writing files so a crash, a kill or a dead battery leaves either the old contents or the new, never half of each
+/// (ADR-0013). Plain POSIX calls, so it behaves the same on the Duo and on Linux, where the tests run.
+enum DurableFile {
+    struct Failure: Error, CustomStringConvertible {
+        let operation: String
+        let path: String
+        let code: Int32
+
+        var description: String { "\(operation) \(path): \(String(cString: strerror(code)))" }
+
+        /// Whether the Duo is out of space, which the status bar says plainly.
+        var isOutOfSpace: Bool { code == ENOSPC || code == EDQUOT }
+    }
+
+    /// Replaces a file's contents in one step: writes a temporary file beside it, flushes it to storage, renames it over
+    /// the old one and flushes the folder, so the rename itself survives a power loss.
+    static func writeAtomically(_ bytes: [UInt8], to url: URL) throws {
+        let temporary = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).writing")
+        let fd = try open(temporary, flags: O_WRONLY | O_CREAT | O_TRUNC)
+        do {
+            try write(bytes, to: fd, path: temporary.path)
+            try flush(fd, path: temporary.path)
+        } catch {
+            close(fd)
+            unlink(temporary.path)
+            throw error
+        }
+        close(fd)
+        guard rename(temporary.path, url.path) == 0 else {
+            let code = errno
+            unlink(temporary.path)
+            throw Failure(operation: "rename", path: url.path, code: code)
+        }
+        try flushFolder(url.deletingLastPathComponent())
+    }
+
+    static func open(_ url: URL, flags: Int32) throws -> Int32 {
+        let fd = url.path.withCString { systemOpen($0, flags | O_CLOEXEC, 0o644) }
+        guard fd >= 0 else { throw Failure(operation: "open", path: url.path, code: errno) }
+        return fd
+    }
+
+    static func write(_ bytes: [UInt8], to fd: Int32, path: String) throws {
+        try bytes.withUnsafeBytes { buffer in
+            var offset = 0
+            while offset < buffer.count {
+                let written = systemWrite(fd, buffer.baseAddress! + offset, buffer.count - offset)
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    throw Failure(operation: "write", path: path, code: errno)
+                }
+                offset += written
+            }
+        }
+    }
+
+    /// Flushes a file to storage. `full` asks for `F_FULLFSYNC` on Apple platforms, which reaches the flash itself
+    /// rather than the drive's cache and costs milliseconds: kept for the rare writes that replace a file (a snapshot,
+    /// a canvas's name). The ink log's batched flush is a plain `fsync`.
+    static func flush(_ fd: Int32, path: String, full: Bool = true) throws {
+        #if canImport(Darwin)
+        if full, fcntl(fd, F_FULLFSYNC) == 0 { return }
+        #endif
+        guard fsync(fd) == 0 else { throw Failure(operation: "fsync", path: path, code: errno) }
+    }
+
+    static func flushFolder(_ url: URL) throws {
+        let fd = url.path.withCString { systemOpen($0, O_RDONLY | O_CLOEXEC, 0) }
+        guard fd >= 0 else { throw Failure(operation: "open", path: url.path, code: errno) }
+        defer { close(fd) }
+        #if canImport(Darwin)
+        if fcntl(fd, F_FULLFSYNC) == 0 { return }
+        #endif
+        // Some file systems refuse fsync on a folder; the rename has still happened.
+        if fsync(fd) != 0, errno != EINVAL, errno != EBADF {
+            throw Failure(operation: "fsync", path: url.path, code: errno)
+        }
+    }
+
+    static func truncate(_ fd: Int32, to length: Int, path: String) throws {
+        guard ftruncate(fd, off_t(length)) == 0 else { throw Failure(operation: "truncate", path: path, code: errno) }
+    }
+
+    static func size(of fd: Int32, path: String) throws -> Int {
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { throw Failure(operation: "stat", path: path, code: errno) }
+        return Int(info.st_size)
+    }
+
+    /// A whole file's bytes, or nil when it does not exist.
+    static func read(_ url: URL) throws -> [UInt8]? {
+        let fd = url.path.withCString { systemOpen($0, O_RDONLY | O_CLOEXEC, 0) }
+        if fd < 0 {
+            if errno == ENOENT { return nil }
+            throw Failure(operation: "open", path: url.path, code: errno)
+        }
+        defer { close(fd) }
+        let length = try size(of: fd, path: url.path)
+        var bytes = [UInt8](repeating: 0, count: length)
+        var offset = 0
+        try bytes.withUnsafeMutableBytes { buffer in
+            while offset < length {
+                let count = systemRead(fd, buffer.baseAddress! + offset, length - offset)
+                if count < 0 {
+                    if errno == EINTR { continue }
+                    throw Failure(operation: "read", path: url.path, code: errno)
+                }
+                if count == 0 { break }
+                offset += count
+            }
+        }
+        return offset == length ? bytes : Array(bytes[..<offset])
+    }
+}
+
+// The C calls, named so they don't collide with `DurableFile`'s own `open`, `write` and `read`.
+private func systemOpen(_ path: UnsafePointer<CChar>, _ flags: Int32, _ mode: mode_t) -> Int32 {
+    #if canImport(Glibc)
+    Glibc.open(path, flags, mode)
+    #else
+    Darwin.open(path, flags, mode)
+    #endif
+}
+
+private func systemWrite(_ fd: Int32, _ buffer: UnsafeRawPointer, _ count: Int) -> Int {
+    #if canImport(Glibc)
+    Glibc.write(fd, buffer, count)
+    #else
+    Darwin.write(fd, buffer, count)
+    #endif
+}
+
+private func systemRead(_ fd: Int32, _ buffer: UnsafeMutableRawPointer, _ count: Int) -> Int {
+    #if canImport(Glibc)
+    Glibc.read(fd, buffer, count)
+    #else
+    Darwin.read(fd, buffer, count)
+    #endif
+}

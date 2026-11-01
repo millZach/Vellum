@@ -224,21 +224,46 @@ public struct Ink: Hashable, Sendable {
     func index(of id: StrokeID) -> Int? { strokes.firstIndex { $0.id == id } }
 }
 
-/// Drawing and erasing ink with undo and redo, for one session on a canvas. Undo history lives only as long as the
-/// session; the ink itself is what gets saved (#9).
-public struct InkSession: Sendable {
+/// One change to a canvas's ink, as it is written to the Duo (ADR-0013): a stroke drawn, strokes erased, an undo or a
+/// redo. Replaying a canvas's events in order through `InkSession.apply` rebuilds its ink and its undo history exactly.
+public enum InkEvent: Hashable, Sendable {
+    /// A stroke drawn, added on top of the ink.
+    case draw(InkStroke)
+    /// Strokes the eraser took, whole, in the order it took them. `continuingSweep` is true when they join the undo
+    /// step of the sweep in progress rather than starting a new one.
+    case erase([StrokeID], continuingSweep: Bool)
+    case undo
+    case redo
+}
+
+/// Drawing and erasing ink with undo and redo on a canvas. Every change it makes is also kept as an `InkEvent` until
+/// `takeEvents` hands it to be saved, so what is written to the Duo is exactly what was done.
+///
+/// The undo history keeps the last `undoLimit` steps. It is saved with the ink (ADR-0013), so undo and redo survive a
+/// relaunch.
+public struct InkSession: Hashable, Sendable {
+    /// How many undo steps are kept. Older steps are dropped, oldest first.
+    public static let undoLimit = 500
+
     public private(set) var ink: Ink
-    private var undoStack: [Edit] = []
-    private var redoStack: [Edit] = []
-    private var nextID: Int
+    private(set) var undoStack: [Edit] = []
+    private(set) var redoStack: [Edit] = []
+    private(set) var nextID: Int
     /// Whether the top undo step belongs to the eraser sweep in progress, so the sweep's next hit joins it.
     private var sweepHasEntry = false
+    /// Changes made since `takeEvents` last collected them.
+    public private(set) var unsavedEvents: [InkEvent] = []
 
     /// One undoable step. An erase records every stroke it removed, with the index it was removed from, in the order
     /// they went, so undo can put each back exactly where it was.
-    private enum Edit: Sendable {
+    enum Edit: Hashable, Sendable {
         case draw(InkStroke, index: Int)
-        case erase([(index: Int, stroke: InkStroke)])
+        case erase([Removal])
+    }
+
+    struct Removal: Hashable, Sendable {
+        var index: Int
+        var stroke: InkStroke
     }
 
     public init(ink: Ink = Ink()) {
@@ -246,8 +271,22 @@ public struct InkSession: Sendable {
         nextID = (ink.strokes.map(\.id.value).max() ?? 0) + 1
     }
 
+    /// A session restored from a snapshot, with its undo history.
+    init(ink: Ink, undoStack: [Edit], redoStack: [Edit], nextID: Int) {
+        self.ink = ink
+        self.undoStack = undoStack
+        self.redoStack = redoStack
+        self.nextID = max(nextID, (ink.strokes.map(\.id.value).max() ?? 0) + 1)
+    }
+
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
+
+    /// Hands over the changes made since the last call, for saving, and forgets them.
+    public mutating func takeEvents() -> [InkEvent] {
+        defer { unsavedEvents.removeAll() }
+        return unsavedEvents
+    }
 
     /// Commits a stroke the Pencil has finished, with the pen, colour and width it took at touchdown.
     @discardableResult
@@ -255,15 +294,14 @@ public struct InkSession: Sendable {
         draw(stroke.points, tool: stroke.tool, colour: stroke.colour, width: stroke.width)
     }
 
-    /// Adds a stroke with a real-world width. A stroke with no points leaves nothing and returns nil.
+    /// Adds a stroke with a real-world width. A stroke with no points leaves nothing and returns nil. Its points are
+    /// kept on the ink grid (1/65,536 inch, ADR-0013), so the ink in memory is exactly the ink saved.
     @discardableResult
     public mutating func draw(_ points: [CanvasPoint], tool: InkTool, colour: MarkupColour, width: Length) -> InkStroke? {
         guard !points.isEmpty else { return nil }
-        let stroke = InkStroke(id: StrokeID(nextID), tool: tool, colour: colour, width: width, points: points)
-        nextID += 1
-        let index = ink.strokes.count
-        ink.insert(stroke, at: index)
-        record(.draw(stroke, index: index))
+        let stroke = InkStroke(id: StrokeID(nextID), tool: tool, colour: colour, width: width,
+                               points: points.map(\.onInkGrid))
+        perform(.draw(stroke))
         return stroke
     }
 
@@ -276,50 +314,93 @@ public struct InkSession: Sendable {
     @discardableResult
     public mutating func erase(at point: CanvasPoint, tolerance: Length) -> [InkStroke] {
         let hit = ink.strokes(hitAt: point, tolerance: tolerance)
-        var removed: [(index: Int, stroke: InkStroke)] = []
-        for stroke in hit {
-            guard let index = ink.index(of: stroke.id) else { continue }
-            removed.append((index, ink.remove(at: index)))
-        }
-        guard !removed.isEmpty else { return [] }
-        if sweepHasEntry, case .erase(let earlier)? = undoStack.last {
-            redoStack.removeAll()
-            undoStack[undoStack.count - 1] = .erase(earlier + removed)
-        } else {
-            record(.erase(removed))
-            sweepHasEntry = true
-        }
-        return removed.map(\.stroke)
+        guard !hit.isEmpty else { return [] }
+        let continuing: Bool
+        if sweepHasEntry, case .erase? = undoStack.last { continuing = true } else { continuing = false }
+        perform(.erase(hit.map(\.id), continuingSweep: continuing))
+        return hit
     }
 
     public mutating func undo() {
-        guard let edit = undoStack.popLast() else { return }
-        sweepHasEntry = false
-        switch edit {
-        case .draw(_, let index):
-            _ = ink.remove(at: index)
-        case .erase(let removed):
-            for item in removed.reversed() { ink.insert(item.stroke, at: item.index) }
-        }
-        redoStack.append(edit)
+        guard canUndo else { return }
+        perform(.undo)
     }
 
     public mutating func redo() {
-        guard let edit = redoStack.popLast() else { return }
-        sweepHasEntry = false
-        switch edit {
-        case .draw(let stroke, let index):
+        guard canRedo else { return }
+        perform(.redo)
+    }
+
+    private mutating func perform(_ event: InkEvent) {
+        apply(event)
+        unsavedEvents.append(event)
+    }
+
+    /// Replays one saved change. Replaying a canvas's events in the order they were made rebuilds its ink and undo
+    /// history exactly; an event that no longer fits (an undo with nothing to undo, an erase of strokes not there) does
+    /// nothing rather than fail, so a damaged history never stops a canvas opening.
+    public mutating func apply(_ event: InkEvent) {
+        switch event {
+        case .draw(let stroke):
+            // Strokes are numbered in the order drawn, so only an id below the next one can already be on the canvas.
+            guard !stroke.points.isEmpty, stroke.id.value >= nextID || ink.index(of: stroke.id) == nil else { return }
+            nextID = max(nextID, stroke.id.value + 1)
+            let index = ink.strokes.count
             ink.insert(stroke, at: index)
-        case .erase(let removed):
-            for item in removed { _ = ink.remove(at: item.index) }
+            record(.draw(stroke, index: index))
+        case .erase(let ids, let continuing):
+            var removed: [Removal] = []
+            for id in ids {
+                guard let index = ink.index(of: id) else { continue }
+                removed.append(Removal(index: index, stroke: ink.remove(at: index)))
+            }
+            guard !removed.isEmpty else { return }
+            if continuing, case .erase(let earlier)? = undoStack.last {
+                redoStack.removeAll()
+                undoStack[undoStack.count - 1] = .erase(earlier + removed)
+            } else {
+                record(.erase(removed))
+            }
+            sweepHasEntry = true
+        case .undo:
+            guard let edit = undoStack.popLast() else { return }
+            sweepHasEntry = false
+            switch edit {
+            case .draw(_, let index):
+                _ = ink.remove(at: index)
+            case .erase(let removed):
+                for item in removed.reversed() { ink.insert(item.stroke, at: item.index) }
+            }
+            redoStack.append(edit)
+        case .redo:
+            guard let edit = redoStack.popLast() else { return }
+            sweepHasEntry = false
+            switch edit {
+            case .draw(let stroke, let index):
+                ink.insert(stroke, at: index)
+            case .erase(let removed):
+                for item in removed { _ = ink.remove(at: item.index) }
+            }
+            undoStack.append(edit)
         }
-        undoStack.append(edit)
     }
 
     private mutating func record(_ edit: Edit) {
         redoStack.removeAll()
         undoStack.append(edit)
+        if undoStack.count > Self.undoLimit { undoStack.removeFirst(undoStack.count - Self.undoLimit) }
         sweepHasEntry = false
+    }
+
+    /// Two sessions are equal when their ink and undo history are; unsaved events and the sweep in progress are not
+    /// part of what is saved.
+    public static func == (lhs: InkSession, rhs: InkSession) -> Bool {
+        lhs.ink == rhs.ink && lhs.undoStack == rhs.undoStack && lhs.redoStack == rhs.redoStack && lhs.nextID == rhs.nextID
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(ink)
+        hasher.combine(nextID)
     }
 }
 

@@ -20,6 +20,10 @@ _Avoid_: line (a line is the line tool's), path, mark
 How heavy a pen draws, chosen on the pen (fine, medium or bold), never from how hard the Pencil presses. A stroke keeps the weight it was drawn at as a real-world width, so it zooms with what it marks.
 _Avoid_: thickness, pressure, size
 
+**Draw with finger**:
+The switch in Settings, off by default and kept on the Duo, that lets one finger draw, erase or use the selected tool as the Pencil does, with two fingers left to pan and pinch. A finger stroke is ink only once it is clearly one finger: a second finger landing within 130 ms of the first cancels it and becomes a pan or pinch, with nothing saved.
+_Avoid_: finger mode, touch drawing, palm rejection (the Pencil needs none of this)
+
 **Markup colour**:
 What a colour of ink means to an agent: red is something to add, green is something to delete, blue is a note. Ink in other colours is a sketch.
 _Avoid_: pen colour, highlight

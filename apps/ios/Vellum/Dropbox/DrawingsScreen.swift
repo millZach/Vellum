@@ -19,7 +19,7 @@ struct DrawingsScreen: View {
                         Button("Settings", systemImage: "gearshape") { showsSettings = true }
                     }
                 }
-                .sheet(isPresented: $showsSettings) { DropboxSettingsSheet(dropbox: dropbox) }
+                .sheet(isPresented: $showsSettings) { SettingsSheet(dropbox: dropbox) }
         }
     }
 }
@@ -90,15 +90,26 @@ struct DropboxFoldersView: View {
     }
 }
 
-/// A small Settings sheet; for now it holds the Dropbox connection and Sign Out.
-struct DropboxSettingsSheet: View {
+/// A small Settings sheet: Draw with finger (#24), then the Dropbox connection and Sign Out.
+struct SettingsSheet: View {
     let dropbox: DropboxConnection
     @Environment(\.dismiss) private var dismiss
     @State private var confirmsSignOut = false
+    /// Kept on this Duo; the canvas reads it when it changes.
+    @AppStorage(FingerDrawingSetting.storageKey) private var drawsWithFinger = FingerDrawingSetting.default
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Toggle("Draw with finger", isOn: $drawsWithFinger)
+                } header: {
+                    Text("Drawing")
+                } footer: {
+                    Text(drawsWithFinger
+                         ? "One finger draws, erases or uses the selected tool. Two fingers pan and pinch. The Apple Pencil always draws."
+                         : "Only the Apple Pencil draws. Fingers pan and pinch.")
+                }
                 Section("Dropbox") {
                     switch dropbox.phase {
                     case .notSetUp:

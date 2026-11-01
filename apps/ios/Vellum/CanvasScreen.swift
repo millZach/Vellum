@@ -47,9 +47,11 @@ struct CanvasScreen: View {
 private struct CanvasLayer: View {
     let editor: CanvasEditor
     let isDark: Bool
+    @AppStorage(FingerDrawingSetting.storageKey) private var fingerDraws = FingerDrawingSetting.default
 
     var body: some View {
-        InkCanvasView(editor: editor, isDark: isDark, viewport: editor.viewport, units: editor.canvas.units)
+        InkCanvasView(editor: editor, isDark: isDark, viewport: editor.viewport, units: editor.canvas.units,
+                      fingerDraws: fingerDraws)
     }
 }
 
@@ -297,10 +299,7 @@ private struct StatusBar: View {
             // The readouts are their own views, so the pen moving or the zoom changing redraws only them.
             PenReadout(editor: editor)
             ScaleReadout(editor: editor)
-            Text(editor.tool.prompt)
-                .foregroundStyle(Chrome.secondaryText)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            ToolPrompt(tool: editor.tool)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(countText)
                 .foregroundStyle(Chrome.secondaryText)
@@ -333,6 +332,20 @@ private struct StatusBar: View {
 
 /// The pen's position in canvas units. The canvas view publishes the position at most once a display frame, and the
 /// text is formatted once per update and used for both the label and VoiceOver.
+/// What the tool expects next. Its own view, holding the Draw with finger setting, so turning the switch redraws only
+/// this text.
+private struct ToolPrompt: View {
+    let tool: CanvasTool
+    @AppStorage(FingerDrawingSetting.storageKey) private var fingerDraws = FingerDrawingSetting.default
+
+    var body: some View {
+        Text(tool.prompt(fingerDraws: fingerDraws))
+            .foregroundStyle(Chrome.secondaryText)
+            .lineLimit(1)
+            .truncationMode(.tail)
+    }
+}
+
 private struct PenReadout: View {
     let editor: CanvasEditor
 

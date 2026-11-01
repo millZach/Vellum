@@ -9,7 +9,7 @@ import VellumCore
 final class CanvasSaver: @unchecked Sendable {
     /// How long appended changes may sit in the file cache before they are flushed to storage. They already survive a
     /// crash or a kill; this bounds what a sudden power cut could take.
-    static let flushInterval: TimeInterval = 3
+    static let flushInterval: TimeInterval = FlushSchedule.interval
 
     let id: UUID
     private let library: CanvasLibrary
@@ -19,7 +19,7 @@ final class CanvasSaver: @unchecked Sendable {
     private let store: InkStore
     /// Changes a failed write left unsaved, written again ahead of the next ones.
     private var unwritten: [InkEvent] = []
-    private var flushScheduled = false
+    private var flushSchedule = FlushSchedule()
     private var pencilDown = false
     private var thumbnailIsStale = false
 
@@ -101,10 +101,9 @@ final class CanvasSaver: @unchecked Sendable {
     }
 
     private func scheduleFlush() {
-        guard !flushScheduled else { return }
-        flushScheduled = true
+        guard flushSchedule.didAppend() else { return }
         queue.asyncAfter(deadline: .now() + Self.flushInterval) { [self] in
-            flushScheduled = false
+            flushSchedule.didFlush()
             try? store.flush()
             compactIfDue()
             refreshThumbnailIfStale()

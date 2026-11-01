@@ -218,6 +218,29 @@ public final class InkStore {
     }
 }
 
+/// When an open canvas's appended changes are flushed from the file cache to storage: once `interval` after the first
+/// append since the last flush, so continuous drawing costs one flush every `interval` seconds however many strokes it
+/// makes, and immediately when the app leaves the screen (ADR-0014). The interval bounds what a sudden power cut can
+/// take; a crash or a kill takes nothing appended.
+public struct FlushSchedule: Hashable, Sendable {
+    public static let interval: Double = 3
+
+    /// Whether a flush is already scheduled.
+    public private(set) var isPending = false
+
+    public init() {}
+
+    /// After an append: true when a flush should be scheduled `interval` from now, false when one already is.
+    public mutating func didAppend() -> Bool {
+        guard !isPending else { return false }
+        isPending = true
+        return true
+    }
+
+    /// The scheduled flush has run.
+    public mutating func didFlush() { isPending = false }
+}
+
 extension InkSession {
     /// Forgets unsaved events without returning them: for a session rebuilt from what is already on the Duo.
     mutating func dropUnsavedEvents() { _ = takeEvents() }

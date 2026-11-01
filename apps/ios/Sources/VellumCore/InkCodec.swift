@@ -95,7 +95,7 @@ enum InkCodec {
         for stroke in session.ink.strokes { w.stroke(stroke) }
         for stack in [session.undoStack, session.redoStack] {
             w.u32(UInt32(stack.count))
-            for edit in stack { w.edit(edit) }
+            for edit in stack { w.edit(edit, on: session.ink) }
         }
         return w.bytes
     }
@@ -108,15 +108,16 @@ enum InkCodec {
         strokes.reserveCapacity(strokeCount)
         for _ in 0..<strokeCount { strokes.append(try r.stroke()) }
         var stacks: [[InkSession.Edit]] = []
+        let ink = Ink(strokes: strokes)
         for _ in 0..<2 {
             let count = try r.count(each: 1)
             var stack: [InkSession.Edit] = []
             stack.reserveCapacity(count)
-            for _ in 0..<count { stack.append(try r.edit()) }
+            for _ in 0..<count { stack.append(try r.edit(on: ink)) }
             stacks.append(stack)
         }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after a snapshot") }
-        return InkSession(ink: Ink(strokes: strokes), undoStack: stacks[0], redoStack: stacks[1], nextID: nextID)
+        return InkSession(ink: ink, undoStack: stacks[0], redoStack: stacks[1], nextID: nextID)
     }
 }
 
@@ -180,21 +181,36 @@ struct ByteWriter {
         }
     }
 
-    mutating func edit(_ edit: InkSession.Edit) {
+    /// An undo or redo step. A stroke the step names that is on the canvas is written as its id, since the snapshot
+    /// already holds it; only strokes the history alone holds (erased, or undone) are written whole.
+    mutating func edit(_ edit: InkSession.Edit, on ink: Ink) {
         switch edit {
-        case .draw(let stroke, let index):
-            u8(1)
-            u32(UInt32(index))
-            self.stroke(stroke)
-        case .erase(let removed):
-            u8(2)
-            u32(UInt32(removed.count))
-            for item in removed {
-                u32(UInt32(item.index))
-                stroke(item.stroke)
-            }
+        case .draw(let stroke):
+            u8(EditTag.draw.rawValue)
+            historyStroke(stroke, on: ink)
+        case .erase(let strokes):
+            u8(EditTag.erase.rawValue)
+            u32(UInt32(strokes.count))
+            for item in strokes { historyStroke(item, on: ink) }
         }
     }
+
+    private mutating func historyStroke(_ stroke: InkStroke, on ink: Ink) {
+        if ink.contains(stroke.id) {
+            u8(1)
+            varint(UInt64(max(stroke.id.value, 0)))
+        } else {
+            u8(0)
+            self.stroke(stroke)
+        }
+    }
+}
+
+/// How an undo or redo step is stored in a snapshot. Each stroke it names follows as 1 and its id when the stroke is
+/// on the canvas, or 0 and the whole stroke when only the history holds it.
+enum EditTag: UInt8 {
+    case draw = 1
+    case erase = 2
 }
 
 struct ByteReader {
@@ -286,21 +302,33 @@ struct ByteReader {
         return InkStroke(id: id, tool: tool, colour: colour, width: width, points: points)
     }
 
-    mutating func edit() throws -> InkSession.Edit {
-        switch try u8() {
-        case 1:
-            let index = Int(try u32())
-            return .draw(try stroke(), index: index)
-        case 2:
-            let count = try self.count(each: 18)
-            var removed: [InkSession.Removal] = []
-            for _ in 0..<count {
-                let index = Int(try u32())
-                removed.append(InkSession.Removal(index: index, stroke: try stroke()))
-            }
+    mutating func edit(on ink: Ink) throws -> InkSession.Edit {
+        switch EditTag(rawValue: try u8()) {
+        case .draw:
+            return .draw(try historyStroke(on: ink))
+        case .erase:
+            let count = try self.count(each: 2)
+            var removed: [InkStroke] = []
+            removed.reserveCapacity(count)
+            for _ in 0..<count { removed.append(try historyStroke(on: ink)) }
             return .erase(removed)
-        default:
+        case nil:
             throw InkCodec.Malformed(reason: "unknown undo step")
+        }
+    }
+
+    private mutating func historyStroke(on ink: Ink) throws -> InkStroke {
+        switch try u8() {
+        case 0:
+            return try stroke()
+        case 1:
+            let id = StrokeID(Int(try varint()))
+            guard let index = ink.index(of: id) else {
+                throw InkCodec.Malformed(reason: "an undo step names \(id), which is not on the canvas")
+            }
+            return ink.strokes[index]
+        default:
+            throw InkCodec.Malformed(reason: "unknown stroke reference")
         }
     }
 }

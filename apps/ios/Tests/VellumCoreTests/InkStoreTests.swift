@@ -251,81 +251,6 @@ final class InkStoreTests: XCTestCase {
         XCTAssertTrue(r.isAtEnd)
         XCTAssertEqual({ var w = ByteWriter(); w.signedVarint(-1); return w.bytes.count }(), 1)
     }
-
-    // MARK: Speed and size
-
-    /// Saving must not cost Pencil frames. The numbers go in the PR; the limits here only catch a gross slip, since
-    /// shared CI machines vary.
-    func testTenThousandStrokesAppendAndReopenQuickly() throws {
-        let strokes = 10_000, pointsEach = 120
-        func handwriting(_ i: Int) -> [CanvasPoint] {
-            // A hand-sized stroke a few inches long, drawn at a plant zoom: samples about a tenth of an inch apart.
-            let ox = Double(i % 100) * 30, oy = Double(i / 100) * 30
-            return (0..<pointsEach).map { k in
-                let t = Double(k)
-                return CanvasPoint(x: .inches(ox + t * 0.1), y: .inches(oy + 2 * sin(t / 7) + 0.3 * sin(t * 1.3)))
-            }
-        }
-
-        // Build the canvas the way the app does: one append per stroke, a flush every 50 strokes (a few seconds of
-        // drawing), compaction when the log outgrows the snapshot.
-        let store = try InkStore(folder: folder)
-        var session = InkSession()
-        var appendSeconds = 0.0, flushSeconds = 0.0, compactSeconds = 0.0, flushes = 0, compactions = 0
-        var slowestAppend = 0.0
-        for i in 0..<strokes {
-            session.draw(handwriting(i), tool: .pen, colour: MarkupColour.allCases[i % 4], width: .inches(0.75))
-            let events = session.takeEvents()
-            let start = Date()
-            try store.append(events)
-            let took = Date().timeIntervalSince(start)
-            appendSeconds += took
-            slowestAppend = max(slowestAppend, took)
-            if i % 50 == 49 {
-                let f = Date()
-                try store.flush()
-                flushSeconds += Date().timeIntervalSince(f)
-                flushes += 1
-            }
-            if store.needsCompaction {
-                let c = Date()
-                try store.compact()
-                compactSeconds += Date().timeIntervalSince(c)
-                compactions += 1
-            }
-        }
-        try store.flush()
-
-        // Appending one more stroke to the full canvas: the bytes of that stroke only.
-        let before = store.bytesOnDisk
-        session.draw(handwriting(0), tool: .pen, colour: .red, width: .inches(0.75))
-        let tailStart = Date()
-        try store.append(session.takeEvents())
-        let tailAppend = Date().timeIntervalSince(tailStart)
-        let strokeBytes = store.bytesOnDisk - before
-
-        let reopenStart = Date()
-        let reopened = try InkStore(folder: folder)
-        let reopenSeconds = Date().timeIntervalSince(reopenStart)
-        XCTAssertEqual(reopened.session.ink.strokes.count, strokes + 1)
-
-        let snapshotBytes = try fileSize(snapshotURL), logBytes = try fileSize(logURL)
-        let us = { (s: Double) in String(format: "%.0f µs", s * 1e6) }
-        let ms = { (s: Double) in String(format: "%.1f ms", s * 1e3) }
-        print("""
-        INK-STORE-NUMBERS strokes=\(strokes) points/stroke=\(pointsEach)
-          append (write only): mean \(us(appendSeconds / Double(strokes))), slowest \(ms(slowestAppend)), \
-        one more stroke on the full canvas \(us(tailAppend))
-          flush (fsync) every 50 strokes: mean \(ms(flushSeconds / Double(max(flushes, 1)))) over \(flushes) flushes
-          compaction: \(compactions) times, \(ms(compactSeconds)) in total
-          reopen: \(ms(reopenSeconds))
-          bytes: one stroke of \(pointsEach) points = \(strokeBytes) B (\(String(format: "%.1f", Double(strokeBytes) / Double(pointsEach))) B/point); \
-        canvas on disk = snapshot \(snapshotBytes) B + log \(logBytes) B
-        """)
-        XCTAssertLessThan(Double(strokeBytes), Double(pointsEach) * 8, "a point takes well under 8 bytes")
-        XCTAssertLessThan(reopenSeconds, 20)
-        XCTAssertLessThan(tailAppend, 0.25)
-    }
 }
 
 /// A small seeded generator, so the replay test does the same thing on every machine.
@@ -338,44 +263,5 @@ struct SplitMix {
         z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
         z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
         return z ^ (z >> 31)
-    }
-}
-
-/// What a stroke commit costs the main thread: committing it to the session, taking its event and handing that to
-/// the saving queue. The write itself happens on the queue.
-final class InkCommitHandOffTests: XCTestCase {
-    func testCommittingAStrokeOnTheCallingThreadIsOnlyAHandOff() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vellum-handoff-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        nonisolated(unsafe) let store = try InkStore(folder: folder)
-        let queue = DispatchQueue(label: "saving")
-        var session = InkSession()
-        // A canvas already holding 10,000 strokes.
-        for i in 0..<10_000 {
-            session.draw([CanvasPoint(x: .inches(Double(i)), y: .zero), CanvasPoint(x: .inches(Double(i) + 1), y: .inches(1))],
-                         tool: .pen, colour: .red, width: .inches(0.5))
-        }
-        try store.append(session.takeEvents())
-
-        let points = (0..<120).map { k in CanvasPoint(x: .inches(Double(k) * 0.1), y: .inches(sin(Double(k) / 7))) }
-        var callerSeconds = 0.0, slowest = 0.0
-        let commits = 500
-        for _ in 0..<commits {
-            var stroke = StrokeInProgress(tool: .pen, colour: .blue, width: .inches(0.5), start: points[0])
-            for p in points.dropFirst() { stroke.add(p) }
-            let start = Date()
-            session.commit(stroke)
-            let events = session.takeEvents()
-            queue.async { try? store.append(events) }
-            let took = Date().timeIntervalSince(start)
-            callerSeconds += took
-            slowest = max(slowest, took)
-        }
-        queue.sync {}
-        XCTAssertEqual(store.session.ink.strokes.count, 10_000 + commits)
-        print(String(format: "INK-COMMIT-HANDOFF on a 10,000-stroke canvas: mean %.1f µs, slowest %.1f µs on the calling thread",
-                     callerSeconds / Double(commits) * 1e6, slowest * 1e6))
-        XCTAssertLessThan(callerSeconds / Double(commits), 0.004, "well inside one 120 Hz frame")
     }
 }

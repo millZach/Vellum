@@ -12,7 +12,7 @@ A canvas is one folder, named by the canvas's id so a rename never moves it, und
 
 Both ink files start with a 16-byte header (magic, version, generation) and hold records framed by their length and a CRC-32. Replaying the log's events on the snapshot through `InkSession.apply` rebuilds the ink and the undo history exactly. On reopen, a last record cut short or failing its checksum is dropped and the log is trimmed back to the last whole record. That is never an error.
 
-A stroke's points are kept on an ink grid of 1/65,536 inch, about 0.4 micrometres and a hundredth of a point at the canvas's closest zoom (ADR-0012). The first point is stored as whole grid units and each later point as its step from the one before, as zigzag varints. The ink in memory is snapped to the same grid when it is drawn, so what reopens is exactly what was drawn, with no drift. A stroke's width stays a 64-bit float. A typical 120-point stroke takes 582 bytes, about 4.8 bytes a point (16 bytes as raw doubles). A 10,000-stroke canvas of such strokes takes about 5.2 MB.
+A stroke's points are kept on an ink grid of 1/65,536 inch, about 0.4 micrometres and a hundredth of a point at the canvas's closest zoom (ADR-0012). The first point is stored as whole grid units and each later point as its step from the one before, as zigzag varints. The ink in memory is snapped to the same grid when it is drawn, so what reopens is exactly what was drawn, with no drift. A stroke's width stays a 64-bit float. A typical 120-point stroke takes 582 bytes, about 4.8 bytes a point (16 bytes as raw doubles). A 10,000-stroke canvas of such strokes takes about 5.8 MB on disk, snapshot and log together. In the snapshot, an undo or redo step names a stroke that is on the canvas by its id and writes whole only the strokes the history alone holds (erased strokes, undone strokes).
 
 ## When bytes reach storage
 
@@ -26,7 +26,13 @@ A stroke's points are kept on an ink grid of 1/65,536 inch, about 0.4 micrometre
 
 ## Undo
 
-Undo and redo survive a relaunch. Replaying the log rebuilds them for free, and the snapshot stores the undo and redo steps with the ink. The history keeps the last 500 steps (`InkSession.undoLimit`). Undo covers drawing and erasing, as ADR-0012 says; renaming a canvas and changing its units are not undo steps.
+Undo and redo survive a relaunch. Replaying the log rebuilds them for free, and the snapshot stores the undo and redo steps with the ink. The history keeps the last 500 steps (`InkSession.undoLimit`), and fewer when the ink only it holds (erased strokes, undone strokes) would pass a million points, about 16 MB (`InkSession.historyPointBudget`): the oldest steps go first, and the newest is always kept, however big, so a sweep that erases the whole canvas can still be undone. We considered paging older steps back from the log on disk instead, but that puts a file read on the undo button, and compaction folds the log away anyway; a budget bounds memory without either.
+
+## The ink in memory
+
+One value owns a canvas's ink on the canvas screen: the editor's `InkSession`. The canvas model beside it holds no copy, since two values sharing the stroke list make every change copy the whole canvas. Each change reports what it added and took away (`InkChange`), so anything kept in step with the ink follows the change rather than the canvas. The saver keeps its own replica, built from the same changes on its queue; the two share the ink as read at opening, so the first edit after opening copies the stroke list once, and no edit after that does.
+
+Strokes are numbered in the order drawn and never renumbered, and every change keeps the ink in that order, so a stroke is found by binary search, and erasing or restoring any number of strokes is one pass over the strokes after the first one touched. Undo steps hold strokes, not positions. `docs/perf/baselines/storage.json` holds the work counts this costs (copies per edit, strokes moved per bulk erase, history points) as budgets. Undo covers drawing and erasing, as ADR-0012 says; renaming a canvas and changing its units are not undo steps.
 
 ## Consequences
 

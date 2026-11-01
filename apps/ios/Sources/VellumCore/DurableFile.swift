@@ -33,6 +33,7 @@ enum DurableFile {
             throw error
         }
         close(fd)
+        FileWork.note()
         guard rename(temporary.path, url.path) == 0 else {
             let code = errno
             unlink(temporary.path)
@@ -65,6 +66,7 @@ enum DurableFile {
     /// rather than the drive's cache and costs milliseconds: kept for the rare writes that replace a file (a snapshot,
     /// a canvas's name). The ink log's batched flush is a plain `fsync`.
     static func flush(_ fd: Int32, path: String, full: Bool = true) throws {
+        FileWork.note(fsync: true)
         #if canImport(Darwin)
         if full, fcntl(fd, F_FULLFSYNC) == 0 { return }
         #endif
@@ -75,6 +77,7 @@ enum DurableFile {
         let fd = url.path.withCString { systemOpen($0, O_RDONLY | O_CLOEXEC, 0) }
         guard fd >= 0 else { throw Failure(operation: "open", path: url.path, code: errno) }
         defer { close(fd) }
+        FileWork.note(fsync: true)
         #if canImport(Darwin)
         if fcntl(fd, F_FULLFSYNC) == 0 { return }
         #endif
@@ -85,6 +88,7 @@ enum DurableFile {
     }
 
     static func truncate(_ fd: Int32, to length: Int, path: String) throws {
+        FileWork.note()
         guard ftruncate(fd, off_t(length)) == 0 else { throw Failure(operation: "truncate", path: path, code: errno) }
     }
 
@@ -120,28 +124,68 @@ enum DurableFile {
     }
 }
 
+/// A count of the file work Vellum's storage has done, for the budget tests (`docs/perf/baselines/storage.json`):
+/// every open, read, write, flush, truncate and rename, how many of them ran on the main thread, how many were flushes
+/// to storage, and how many bytes were written. It costs a lock per system call, nothing next to the call itself.
+public enum FileWork {
+    public struct Counts: Hashable, Sendable {
+        public var operations = 0
+        public var onMainThread = 0
+        public var fsyncs = 0
+        public var bytesWritten = 0
+
+        public static func - (lhs: Counts, rhs: Counts) -> Counts {
+            Counts(operations: lhs.operations - rhs.operations, onMainThread: lhs.onMainThread - rhs.onMainThread,
+                   fsyncs: lhs.fsyncs - rhs.fsyncs, bytesWritten: lhs.bytesWritten - rhs.bytesWritten)
+        }
+    }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var counts = Counts()
+
+    /// The counts since launch. Take the difference of two readings to count one piece of work.
+    public static var current: Counts {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts
+    }
+
+    static func note(fsync: Bool = false, bytesWritten: Int = 0) {
+        let main = Thread.isMainThread
+        lock.lock()
+        counts.operations += 1
+        if main { counts.onMainThread += 1 }
+        if fsync { counts.fsyncs += 1 }
+        counts.bytesWritten += bytesWritten
+        lock.unlock()
+    }
+}
+
 // The C calls, named so they don't collide with `DurableFile`'s own `open`, `write` and `read`.
 private func systemOpen(_ path: UnsafePointer<CChar>, _ flags: Int32, _ mode: mode_t) -> Int32 {
+    FileWork.note()
     #if canImport(Glibc)
-    Glibc.open(path, flags, mode)
+    return Glibc.open(path, flags, mode)
     #else
-    Darwin.open(path, flags, mode)
+    return Darwin.open(path, flags, mode)
     #endif
 }
 
 private func systemWrite(_ fd: Int32, _ buffer: UnsafeRawPointer, _ count: Int) -> Int {
+    FileWork.note(bytesWritten: count)
     #if canImport(Glibc)
-    Glibc.write(fd, buffer, count)
+    return Glibc.write(fd, buffer, count)
     #else
-    Darwin.write(fd, buffer, count)
+    return Darwin.write(fd, buffer, count)
     #endif
 }
 
 private func systemRead(_ fd: Int32, _ buffer: UnsafeMutableRawPointer, _ count: Int) -> Int {
+    FileWork.note()
     #if canImport(Glibc)
-    Glibc.read(fd, buffer, count)
+    return Glibc.read(fd, buffer, count)
     #else
-    Darwin.read(fd, buffer, count)
+    return Darwin.read(fd, buffer, count)
     #endif
 }
 

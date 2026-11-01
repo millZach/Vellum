@@ -15,8 +15,17 @@ final class CanvasEditor {
     /// Where a new canvas opens: about 45 feet across the Duo's free width.
     static let startingPointsPerInch = 1.5
 
+    /// The canvas's name, units, sheets and frames. Its ink is not kept here but in `session`, the one owner of the
+    /// ink: two values sharing the stroke list would make every change copy the whole canvas.
     var canvas: VellumCore.Canvas
-    private(set) var session: InkSession
+    /// The ink and its undo history. Not observed: SwiftUI's observation would read it out and write it back on every
+    /// change, sharing the stroke list for that moment and copying it. Views follow `inkRevision`, `canUndo` and
+    /// `canRedo` instead.
+    @ObservationIgnored private var session: InkSession
+    private(set) var canUndo = false
+    private(set) var canRedo = false
+    /// Told what each change did to the ink (strokes added, strokes taken away), for anything kept in step with it.
+    @ObservationIgnored var inkDidChange: ((InkChange) -> Void)?
     var viewport: Viewport
     /// The tool, markup colour and line weights in hand. A stroke takes them at touchdown (`beginStroke`).
     var pen = PenSettings()
@@ -47,17 +56,21 @@ final class CanvasEditor {
          startingView: StartingView = .origin) {
         var canvas = canvas
         let session = session ?? InkSession(ink: canvas.ink)
-        canvas.ink = session.ink
+        canvas.ink = Ink()
         self.canvas = canvas
         self.session = session
+        canUndo = session.canUndo
+        canRedo = session.canRedo
         self.saver = saver
         viewport = Viewport(pointsPerInch: Self.startingPointsPerInch, screenWidth: 951, screenHeight: 669)
         self.startingView = startingView
     }
 
+    /// The ink, for drawing it. Read it alongside `inkRevision`, which is what changes when it does.
     var ink: Ink { session.ink }
-    var canUndo: Bool { session.canUndo }
-    var canRedo: Bool { session.canRedo }
+
+    /// The rectangle everything on the canvas covers, its ink included.
+    var extents: CanvasRect? { CanvasRect.union([canvas.extents, session.ink.bounds].compactMap { $0 }) }
 
     /// The canvas units, saved with the canvas's name when they change.
     var units: CanvasUnits {
@@ -143,7 +156,7 @@ final class CanvasEditor {
     }
 
     func zoomToEverything() {
-        if let extents = canvas.extents {
+        if let extents {
             viewport.fit(extents, insets: Self.chromeInsets)
         } else {
             viewport = Viewport(pointsPerInch: Self.startingPointsPerInch, screenWidth: viewport.screenWidth,
@@ -162,8 +175,12 @@ final class CanvasEditor {
     #endif
 
     private func syncInk() {
-        canvas.ink = session.ink
+        // Nothing to follow when the change did nothing (an empty stroke, undo with nothing to undo).
+        guard !session.unsavedEvents.isEmpty else { return }
+        inkDidChange?(session.lastChange)
         inkRevision += 1
+        if canUndo != session.canUndo { canUndo = session.canUndo }
+        if canRedo != session.canRedo { canRedo = session.canRedo }
         save()
     }
 

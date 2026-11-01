@@ -207,6 +207,32 @@ final class InkTests: XCTestCase {
         XCTAssertEqual(session.draw([.origin], tool: .pen, colour: .red, width: .inches(1))?.id, StrokeID(42))
     }
 
+    func testEachChangeSaysWhatItAddedAndTookAway() {
+        var session = InkSession()
+        let a = session.draw(line(0, 0, 10, 0), tool: .pen, colour: .red, width: .inches(1))!
+        XCTAssertEqual(session.lastChange, InkChange(added: [a]))
+        let b = session.draw(line(0, 5, 10, 5), tool: .pen, colour: .green, width: .inches(1))!
+        session.beginEraserSweep()
+        session.erase(at: CanvasPoint(x: .feet(5), y: .zero), tolerance: .inches(1))
+        XCTAssertEqual(session.lastChange, InkChange(removed: [a.id]))
+        session.undo()
+        XCTAssertEqual(session.lastChange, InkChange(added: [a]))
+        XCTAssertEqual(session.ink.strokes.map(\.id), [a.id, b.id], "put back in drawing order")
+        session.undo()
+        XCTAssertEqual(session.lastChange, InkChange(removed: [b.id]))
+        session.redo()
+        XCTAssertEqual(session.lastChange, InkChange(added: [b]))
+    }
+
+    func testInkIsKeptInDrawingOrderWhateverOrderItIsGiven() {
+        let strokes = [3, 1, 2].map { InkStroke(id: StrokeID($0), tool: .pen, colour: .red, width: .inches(1), points: [.origin]) }
+        var ink = Ink(strokes: strokes)
+        XCTAssertEqual(ink.strokes.map(\.id.value), [1, 2, 3])
+        XCTAssertEqual(ink.remove([StrokeID(3), StrokeID(1), StrokeID(1), StrokeID(9)]).map(\.id.value), [1, 3])
+        ink.restore([strokes[0], strokes[1], strokes[2]])
+        XCTAssertEqual(ink.strokes.map(\.id.value), [1, 2, 3], "a stroke already there is not added twice")
+    }
+
     // MARK: The canvas
 
     func testExtentsTakeInSheetsFramesAndInk() {

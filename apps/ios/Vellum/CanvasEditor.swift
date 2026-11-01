@@ -1,8 +1,9 @@
 import Observation
 import VellumCore
 
-/// One canvas open on the canvas screen: what is on it, what part of it is on screen, and the tool in hand. Ink is
-/// kept in memory for the session; saving it is #9, and the status bar says "Not saved yet" until then.
+/// One canvas open on the canvas screen: what is on it, what part of it is on screen, and the tool in hand. Every
+/// change to the ink is handed to its `CanvasSaver` as it is made and written on the Duo off the main thread
+/// (ADR-0013); the status bar says "Saved on this Duo" once it is.
 @MainActor
 @Observable
 final class CanvasEditor {
@@ -20,7 +21,14 @@ final class CanvasEditor {
     var pen = PenSettings()
     /// Where the Pencil last touched the canvas. The Duo has no hover, so this is the last touch, not a live cursor.
     var penPosition: CanvasPoint?
-    let saveState = SaveState.notSavedYet
+    /// Whether every change is written on the Duo. "Saving…" only shows when a write takes long enough to notice.
+    private(set) var saveState = SaveState.savedOnThisDuo
+    /// Changes handed to the saver and not yet written.
+    @ObservationIgnored private var savesInFlight = 0
+    /// Saves the canvas; nil for a canvas that is only in memory (previews).
+    @ObservationIgnored let saver: CanvasSaver?
+    /// The canvas's id on the Duo; nil for one only in memory.
+    var canvasID: UUID? { saver?.id }
     /// Changes whenever the ink does, so the ink view knows to redraw.
     private(set) var inkRevision = 0
     /// Set once the view has its size and the starting zoom has been applied.
@@ -34,9 +42,14 @@ final class CanvasEditor {
         case region(CanvasRect)
     }
 
-    init(canvas: VellumCore.Canvas = VellumCore.Canvas(), startingView: StartingView = .origin) {
+    init(canvas: VellumCore.Canvas = VellumCore.Canvas(), session: InkSession? = nil, saver: CanvasSaver? = nil,
+         startingView: StartingView = .origin) {
+        var canvas = canvas
+        let session = session ?? InkSession(ink: canvas.ink)
+        canvas.ink = session.ink
         self.canvas = canvas
-        session = InkSession(ink: canvas.ink)
+        self.session = session
+        self.saver = saver
         viewport = Viewport(pointsPerInch: Self.startingPointsPerInch, screenWidth: 951, screenHeight: 669)
         self.startingView = startingView
     }
@@ -44,6 +57,17 @@ final class CanvasEditor {
     var ink: Ink { session.ink }
     var canUndo: Bool { session.canUndo }
     var canRedo: Bool { session.canRedo }
+
+    /// The canvas units, saved with the canvas's name when they change.
+    var units: CanvasUnits {
+        get { canvas.units }
+        set {
+            guard newValue != canvas.units else { return }
+            canvas.units = newValue
+            saver?.setUnits(newValue)
+            inkRevision += 1  // the grid follows the units
+        }
+    }
 
     var tool: CanvasTool {
         get { pen.tool }
@@ -85,6 +109,11 @@ final class CanvasEditor {
         pen.beginStroke(at: point, pointsPerInch: viewport.pointsPerInch)
     }
 
+    /// Tells the saver whether the Pencil is on the glass, so tidying the saved ink waits for it to lift.
+    func pencilDidTouch(_ down: Bool) {
+        saver?.setPencilDown(down)
+    }
+
     /// Adds a stroke the Pencil has finished to the ink.
     func commit(_ stroke: StrokeInProgress) {
         session.commit(stroke)
@@ -121,8 +150,44 @@ final class CanvasEditor {
         }
     }
 
+    #if DEBUG
+    /// A stroke shown as if the Pencil were still drawing it, never committed: for the kill-and-reopen captures.
+    private(set) var debugOpenStroke: StrokeInProgress?
+
+    func showDebugOpenStroke(_ stroke: StrokeInProgress) {
+        debugOpenStroke = stroke
+        inkRevision += 1
+    }
+    #endif
+
     private func syncInk() {
         canvas.ink = session.ink
         inkRevision += 1
+        save()
+    }
+
+    /// Hands the changes just made to the saver: a queue hand-off, so the Pencil never waits on storage.
+    private func save() {
+        let events = session.takeEvents()
+        guard !events.isEmpty, let saver else { return }
+        savesInFlight += 1
+        saver.save(events) { [weak self] state in
+            self?.didSave(state)
+        }
+        // Only say "Saving…" if the write is still going after a moment; most take well under a millisecond.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard let self, self.savesInFlight > 0, self.saveState == .savedOnThisDuo else { return }
+            self.saveState = .saving
+        }
+    }
+
+    private func didSave(_ state: SaveState) {
+        savesInFlight = max(0, savesInFlight - 1)
+        if !state.isSaved {
+            saveState = state
+        } else if savesInFlight == 0 {
+            saveState = .savedOnThisDuo
+        }
     }
 }

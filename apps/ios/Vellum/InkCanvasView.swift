@@ -18,6 +18,9 @@ struct InkCanvasView: UIViewRepresentable {
     func updateUIView(_ view: InkCanvasUIView, context: Context) {
         view.isDark = isDark
         view.setNeedsDisplay()
+        #if DEBUG
+        if let stroke = editor.debugOpenStroke { view.showOpenStroke(stroke) }
+        #endif
     }
 }
 
@@ -193,6 +196,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             styleLiveLayer(for: stroke)
             updateLiveLayer(predicted: [])
         }
+        if liveTouch != nil { editor.pencilDidTouch(true) }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -250,6 +254,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         if keep, let stroke = liveStroke {
             editor.commit(stroke)
         }
+        if liveTouch != nil { editor.pencilDidTouch(false) }
         liveTouch = nil
         liveStroke = nil
         erasing = false
@@ -278,6 +283,17 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         liveLayer.path = Self.path(for: stroke.points + predicted, viewport: viewport)
         CATransaction.commit()
     }
+
+    #if DEBUG
+    /// Shows a stroke as if it were being drawn, for the kill-and-reopen captures.
+    func showOpenStroke(_ stroke: StrokeInProgress) {
+        guard liveTouch == nil else { return }
+        liveStroke = stroke
+        styleLiveLayer(for: stroke)
+        updateLiveLayer(predicted: [])
+        liveStroke = nil
+    }
+    #endif
 
     // MARK: Fingers
 

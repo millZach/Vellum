@@ -1,5 +1,5 @@
 #!/bin/sh
-# Captures the canvas screen and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
+# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
 # app. The fold is moved by Scripts/duo/posture.m, a simulator-side tool that calls SpringBoard's display tool service,
 # the way Sotto captured its Duo layouts (Sotto tag prototype/iphone-duo-layout).
 # usage: capture-duo.sh [output folder]   (default .build-captures)
@@ -50,13 +50,49 @@ capture() {
   printf '%s ' "$file"; sips -g pixelWidth -g pixelHeight "$file" | tail -2 | tr '\n' ' '; echo
 }
 
+# shot <name>: screenshot the inner display as it is now.
+shot() {
+  file="$out/unfolded-$1-$appearance.png"
+  xcrun simctl io "$udid" screenshot --display=$display "$file"
+  printf '%s ' "$file"; sips -g pixelWidth -g pixelHeight "$file" | tail -2 | tr '\n' ' '; echo
+}
+
+# Saving (#9): draw the Debug-only fixture into a new canvas stroke by stroke through the canvas screen, leave one
+# stroke open as if the Pencil were still down, kill the app with SIGKILL, relaunch it with no arguments, and capture
+# what it reopened: everything but the open stroke.
+kill_and_reopen() {
+  xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  launched=$(xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-reset --ui-draw-fixture)
+  pid=${launched##*: }
+  echo "Drawing the fixture in process $pid"
+  sleep "${DRAW_WAIT:-10}"
+  shot saving-before-kill
+  # The simulator's apps are processes on the Mac, so this is the same SIGKILL iOS uses to kill an app.
+  kill -9 "$pid"
+  echo "Killed $pid with SIGKILL"
+  sleep 2
+  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+  echo "Canvas folders after the kill:"
+  ls -lR "$data/Library/Application Support/Canvases" | sed "s|$data|<app data>|"
+  xcrun simctl launch "$udid" "$bundle" >/dev/null
+  sleep "${WAIT:-6}"
+  shot saving-after-reopen
+  # Back to the list: the canvas is listed with its stroke count and its thumbnail.
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+}
+
 for appearance in light dark; do
   xcrun simctl ui "$udid" appearance "$appearance"
   # The canvas screen: a new empty canvas, then the Debug-only fixture (ink in all four markup colours) zoomed to
-  # everything and close up on its valve.
-  capture canvas-empty --ui-tab canvases
-  capture canvas-everything --ui-tab canvases --ui-fixture
-  capture canvas-closeup --ui-tab canvases --ui-fixture --ui-zoom closeup
+  # everything and close up on its valve. Each starts from no canvases (--ui-reset).
+  capture canvas-empty --ui-tab canvases --ui-reset --ui-new-canvas
+  capture canvas-everything --ui-tab canvases --ui-reset --ui-fixture
+  capture canvas-closeup --ui-tab canvases --ui-reset --ui-fixture --ui-zoom closeup
+  # The Canvases list with made-up canvases and the selected one's preview, and with none.
+  capture canvases-list --ui-tab canvases --ui-reset --ui-seed-list
+  capture canvases-none --ui-tab canvases --ui-reset
+  kill_and_reopen
   for tab in drawings jobs meetings; do
     capture "$tab" --ui-tab "$tab"
   done

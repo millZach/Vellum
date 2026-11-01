@@ -24,6 +24,14 @@ _Avoid_: thickness, pressure, size
 What a colour of ink means to an agent: red is something to add, green is something to delete, blue is a note. Ink in other colours is a sketch.
 _Avoid_: pen colour, highlight
 
+**Ink log**:
+The record on the Duo of every change to a canvas's ink since its last snapshot (a stroke drawn, strokes erased, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0013).
+_Avoid_: journal, history file, autosave
+
+**Canvas folder**:
+The folder on the Duo that holds one canvas: its name and canvas units (`canvas.json`), its ink snapshot and its ink log, and nothing else, so #12 can mirror it to Dropbox as it is.
+_Avoid_: document, package, bundle
+
 **Text box**:
 Typed text placed on the canvas, with a position and a size.
 _Avoid_: label, note

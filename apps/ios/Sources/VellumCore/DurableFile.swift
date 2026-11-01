@@ -144,3 +144,10 @@ private func systemRead(_ fd: Int32, _ buffer: UnsafeMutableRawPointer, _ count:
     Darwin.read(fd, buffer, count)
     #endif
 }
+
+/// A write to the Duo's storage that failed, saying whether it was for want of space so the status bar can say so.
+public protocol StorageFailure: Error {
+    var isOutOfSpace: Bool { get }
+}
+
+extension DurableFile.Failure: StorageFailure {}

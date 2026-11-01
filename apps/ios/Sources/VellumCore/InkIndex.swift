@@ -143,6 +143,21 @@ public struct InkIndex: Sendable {
         Change(removed: strokes.compactMap { remove($0.id) }, addedOnTop: false)
     }
 
+    /// Follows one change the session made (`InkSession.lastChange`: a stroke drawn, an erase, undo or redo), without
+    /// looking at the rest of the ink, and says what changed. This is how the canvas editor keeps the index in step.
+    public mutating func apply(_ change: InkChange) -> Change {
+        let latestBefore = latestID
+        var result = Change()
+        for id in change.removed {
+            if let stroke = remove(id) { result.removed.append(stroke) }
+        }
+        for stroke in change.added { insert(stroke) }
+        result.added = change.added
+        result.addedOnTop = result.removed.isEmpty
+            && change.added.allSatisfy { stroke in latestBefore.map { stroke.id > $0 } ?? true }
+        return result
+    }
+
     /// Brings the index in step with the ink, whatever changed it (a stroke, an erase, undo, redo or a canvas loaded),
     /// and returns what changed. Ink keeps its strokes in the order drawn, which is ascending id, so this is one walk
     /// down two sorted lists; ink in any other order falls back to a lookup per stroke.

@@ -52,8 +52,20 @@ final class CanvasToolTests: XCTestCase {
         XCTAssertTrue(SheetDisplay.dimmed.paperIsLight)
     }
 
-    func testTheCanvasSaysItIsNotSavedYet() {
-        XCTAssertEqual(SaveState.notSavedYet.title, "Not saved yet")
+    func testTheSaveStateSaysTheCanvasIsOnThisDuoAndNeverClaimsDropbox() {
+        XCTAssertEqual(SaveState.savedOnThisDuo.title, "Saved on this Duo")
+        XCTAssertEqual(SaveState.saving.title, "Saving…")
+        XCTAssertEqual(SaveState.notSaved(outOfSpace: true).title, "Not saved: this Duo is full")
+        XCTAssertEqual(SaveState.notSaved(outOfSpace: false).title, "Not saved: will retry")
+        XCTAssertEqual(SaveState.neverSaved.title, "Test canvas: never saved")
+        XCTAssertFalse(SaveState.neverSaved.isSaved)
+        for state in [SaveState.savedOnThisDuo, .saving, .notSaved(outOfSpace: true), .notSaved(outOfSpace: false),
+                      .neverSaved] {
+            XCTAssertFalse(state.title.localizedCaseInsensitiveContains("dropbox"))
+            XCTAssertFalse(state.title.localizedCaseInsensitiveContains("synced"))
+        }
+        XCTAssertTrue(SaveState.savedOnThisDuo.isSaved)
+        XCTAssertFalse(SaveState.saving.isSaved)
     }
 }
 

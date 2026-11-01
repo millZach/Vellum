@@ -204,50 +204,239 @@ public struct InkStroke: Hashable, Sendable, Identifiable {
 }
 
 /// All the ink on a canvas, in the order it was drawn.
+///
+/// Strokes are numbered in the order they are drawn and never renumbered, and every change keeps them in that order
+/// (an undone erase puts a stroke back where it was), so the ink is always sorted by `StrokeID`. That lets a stroke be
+/// found by binary search and lets erasing and restoring many strokes run in one pass instead of one search and one
+/// shift per stroke.
+///
+/// The strokes live in one buffer shared copy-on-write, like an array. `work` counts what changing them cost, so the
+/// budget tests can hold the ink model to its baselines (`docs/perf/baselines/storage.json`).
 public struct Ink: Hashable, Sendable {
-    public private(set) var strokes: [InkStroke]
+    /// What changing the ink has cost since it was made. Not part of the ink: two inks with the same strokes are equal.
+    public struct Work: Hashable, Sendable {
+        /// Times the whole stroke list was copied because another value shared it when it changed. One owner keeps
+        /// this at zero.
+        public var copies = 0
+        /// Strokes moved or merged by erasing and restoring.
+        public var strokesMoved = 0
+    }
 
-    public init(strokes: [InkStroke] = []) { self.strokes = strokes }
+    private final class Storage: @unchecked Sendable {
+        var strokes: [InkStroke]
+        init(_ strokes: [InkStroke]) { self.strokes = strokes }
+    }
 
-    public var isEmpty: Bool { strokes.isEmpty }
+    private var storage: Storage
+    public private(set) var work = Work()
+
+    /// Ink holding these strokes, put in drawing order (by id) if they are not already.
+    public init(strokes: [InkStroke] = []) {
+        let inOrder = zip(strokes, strokes.dropFirst()).allSatisfy { $0.id < $1.id }
+        storage = Storage(inOrder ? strokes : strokes.sorted { $0.id < $1.id })
+    }
+
+    /// Every stroke, in the order drawn.
+    public var strokes: [InkStroke] { storage.strokes }
+    public var isEmpty: Bool { storage.strokes.isEmpty }
+    public var count: Int { storage.strokes.count }
 
     /// The strokes the eraser touches at a point, topmost (latest) first.
     public func strokes(hitAt point: CanvasPoint, tolerance: Length) -> [InkStroke] {
-        strokes.reversed().filter { $0.isHit(at: point, tolerance: tolerance) }
+        storage.strokes.reversed().filter { $0.isHit(at: point, tolerance: tolerance) }
     }
 
     /// The rectangle all the ink covers; nil when there is none.
-    public var bounds: CanvasRect? { CanvasRect.union(strokes.compactMap(\.bounds)) }
+    public var bounds: CanvasRect? { CanvasRect.union(storage.strokes.compactMap(\.bounds)) }
 
-    mutating func insert(_ stroke: InkStroke, at index: Int) { strokes.insert(stroke, at: index) }
-    mutating func remove(at index: Int) -> InkStroke { strokes.remove(at: index) }
-    func index(of id: StrokeID) -> Int? { strokes.firstIndex { $0.id == id } }
+    /// Where the stroke with this id is, found by binary search; nil when it is not on the canvas.
+    func index(of id: StrokeID) -> Int? {
+        let i = insertionIndex(of: id)
+        return i < storage.strokes.count && storage.strokes[i].id == id ? i : nil
+    }
+
+    func contains(_ id: StrokeID) -> Bool { index(of: id) != nil }
+
+    /// The index of the first stroke whose id is not below `id`.
+    private func insertionIndex(of id: StrokeID) -> Int {
+        var low = 0, high = storage.strokes.count
+        while low < high {
+            let mid = (low + high) / 2
+            if storage.strokes[mid].id < id { low = mid + 1 } else { high = mid }
+        }
+        return low
+    }
+
+    /// Takes the stroke list out of shared storage to change it, copying it only if another value shares it.
+    private mutating func withUniqueStrokes<T>(_ body: (inout [InkStroke]) -> T) -> T {
+        if !isKnownUniquelyReferenced(&storage) {
+            storage = Storage(storage.strokes)
+            work.copies += 1
+        }
+        var strokes = storage.strokes
+        storage.strokes = []
+        defer { storage.strokes = strokes }
+        return body(&strokes)
+    }
+
+    /// Removes the strokes with these ids, in one pass over the strokes after the first of them, and returns the ones
+    /// that were there, in drawing order. Ids not on the canvas are ignored.
+    @discardableResult
+    mutating func remove(_ ids: [StrokeID]) -> [InkStroke] {
+        var indices = ids.compactMap(index(of:))
+        guard !indices.isEmpty else { return [] }
+        indices.sort()
+        let first = indices[0]
+        var removed: [InkStroke] = []
+        removed.reserveCapacity(indices.count)
+        let moved = withUniqueStrokes { strokes -> Int in
+            var write = first, next = 0
+            for read in first..<strokes.count {
+                if next < indices.count, indices[next] == read {
+                    // The same id twice in `ids` gives the same index twice; take the stroke once.
+                    removed.append(strokes[read])
+                    while next < indices.count, indices[next] == read { next += 1 }
+                } else {
+                    strokes[write] = strokes[read]
+                    write += 1
+                }
+            }
+            let moved = strokes.count - first
+            strokes.removeLast(strokes.count - write)
+            return moved
+        }
+        work.strokesMoved += moved
+        return removed
+    }
+
+    /// Puts strokes back in their places by id, merging them with the strokes after the first of them in one pass. A
+    /// stroke whose id is already on the canvas is left out.
+    mutating func restore(_ restored: [InkStroke]) {
+        guard !restored.isEmpty else { return }
+        let adding = zip(restored, restored.dropFirst()).allSatisfy { $0.id < $1.id }
+            ? restored : restored.sorted { $0.id < $1.id }
+        let from = insertionIndex(of: adding[0].id)
+        let moved = withUniqueStrokes { strokes -> Int in
+            if from == strokes.count {
+                // Restoring on top of everything, as redoing a stroke does: an append.
+                var last = strokes.last?.id
+                for stroke in adding where last.map({ stroke.id > $0 }) ?? true {
+                    strokes.append(stroke)
+                    last = stroke.id
+                }
+                return adding.count
+            }
+            let tail = Array(strokes[from...])
+            strokes.removeLast(tail.count)
+            strokes.reserveCapacity(strokes.count + tail.count + adding.count)
+            var t = 0, a = 0
+            while t < tail.count || a < adding.count {
+                if a == adding.count || (t < tail.count && tail[t].id <= adding[a].id) {
+                    if a < adding.count, tail[t].id == adding[a].id { a += 1 }  // already there
+                    strokes.append(tail[t])
+                    t += 1
+                } else {
+                    if strokes.last.map({ $0.id < adding[a].id }) ?? true { strokes.append(adding[a]) }
+                    a += 1
+                }
+            }
+            return tail.count + adding.count
+        }
+        work.strokesMoved += moved
+    }
+
+    public static func == (lhs: Ink, rhs: Ink) -> Bool {
+        lhs.storage === rhs.storage || lhs.storage.strokes == rhs.storage.strokes
+    }
+
+    public func hash(into hasher: inout Hasher) { hasher.combine(storage.strokes) }
 }
 
-/// Drawing and erasing ink with undo and redo, for one session on a canvas. Undo history lives only as long as the
-/// session; the ink itself is what gets saved (#9).
-public struct InkSession: Sendable {
+/// What one change did to the ink: the strokes it added and the ids of the strokes it took away. The canvas screen
+/// passes it on to whatever keeps state in step with the ink, so nothing has to diff or copy the whole canvas to
+/// follow a change.
+public struct InkChange: Hashable, Sendable {
+    public var added: [InkStroke] = []
+    public var removed: [StrokeID] = []
+
+    public init(added: [InkStroke] = [], removed: [StrokeID] = []) {
+        self.added = added
+        self.removed = removed
+    }
+
+    public static let none = InkChange()
+    public var isEmpty: Bool { added.isEmpty && removed.isEmpty }
+}
+
+/// One change to a canvas's ink, as it is written to the Duo (ADR-0014): a stroke drawn, strokes erased, an undo or a
+/// redo. Replaying a canvas's events in order through `InkSession.apply` rebuilds its ink and its undo history exactly.
+public enum InkEvent: Hashable, Sendable {
+    /// A stroke drawn, added on top of the ink.
+    case draw(InkStroke)
+    /// Strokes the eraser took, whole, in the order it took them. `continuingSweep` is true when they join the undo
+    /// step of the sweep in progress rather than starting a new one.
+    case erase([StrokeID], continuingSweep: Bool)
+    case undo
+    case redo
+}
+
+/// Drawing and erasing ink with undo and redo on a canvas. Every change it makes is also kept as an `InkEvent` until
+/// `takeEvents` hands it to be saved, so what is written to the Duo is exactly what was done.
+///
+/// The undo history keeps the last `undoLimit` steps, and no more of them than keep the geometry only the history
+/// holds (erased strokes, undone strokes) under `historyPointBudget` points; the newest step is always kept, however
+/// big. It is saved with the ink (ADR-0014), so undo and redo survive a relaunch.
+public struct InkSession: Hashable, Sendable {
+    /// How many undo steps are kept. Older steps are dropped, oldest first.
+    public static let undoLimit = 500
+    /// How many points of ink the undo history may hold that are not on the canvas: about 16 MB of geometry. Older
+    /// steps are dropped, oldest first, to keep under it.
+    public static let historyPointBudget = 1_000_000
+
     public private(set) var ink: Ink
-    private var undoStack: [Edit] = []
-    private var redoStack: [Edit] = []
-    private var nextID: Int
+    private(set) var undoStack: [Edit] = []
+    private(set) var redoStack: [Edit] = []
+    private(set) var nextID: Int
+    /// Points held only by the history: erased strokes in undo steps, undone strokes in redo steps.
+    public private(set) var historyPoints = 0
     /// Whether the top undo step belongs to the eraser sweep in progress, so the sweep's next hit joins it.
     private var sweepHasEntry = false
+    /// Changes made since `takeEvents` last collected them.
+    public private(set) var unsavedEvents: [InkEvent] = []
+    /// What the last change did to the ink.
+    public private(set) var lastChange = InkChange.none
 
-    /// One undoable step. An erase records every stroke it removed, with the index it was removed from, in the order
-    /// they went, so undo can put each back exactly where it was.
-    private enum Edit: Sendable {
-        case draw(InkStroke, index: Int)
-        case erase([(index: Int, stroke: InkStroke)])
+    /// One undoable step: a stroke drawn, or every stroke one eraser sweep took. Strokes keep their ids, and the ink
+    /// is in id order, so undo and redo put each back exactly where it was without remembering positions.
+    enum Edit: Hashable, Sendable {
+        case draw(InkStroke)
+        case erase([InkStroke])
     }
 
     public init(ink: Ink = Ink()) {
         self.ink = ink
-        nextID = (ink.strokes.map(\.id.value).max() ?? 0) + 1
+        nextID = (ink.strokes.last?.id.value ?? 0) + 1
+    }
+
+    /// A session restored from a snapshot, with its undo history.
+    init(ink: Ink, undoStack: [Edit], redoStack: [Edit], nextID: Int) {
+        self.ink = ink
+        self.undoStack = undoStack
+        self.redoStack = redoStack
+        self.nextID = max(nextID, (ink.strokes.last?.id.value ?? 0) + 1)
+        historyPoints = undoStack.reduce(0) { $0 + Self.heldPoints($1, inUndo: true) }
+            + redoStack.reduce(0) { $0 + Self.heldPoints($1, inUndo: false) }
     }
 
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
+    public var undoSteps: Int { undoStack.count }
+
+    /// Hands over the changes made since the last call, for saving, and forgets them.
+    public mutating func takeEvents() -> [InkEvent] {
+        defer { unsavedEvents.removeAll() }
+        return unsavedEvents
+    }
 
     /// Commits a stroke the Pencil has finished, with the pen, colour and width it took at touchdown.
     @discardableResult
@@ -255,15 +444,14 @@ public struct InkSession: Sendable {
         draw(stroke.points, tool: stroke.tool, colour: stroke.colour, width: stroke.width)
     }
 
-    /// Adds a stroke with a real-world width. A stroke with no points leaves nothing and returns nil.
+    /// Adds a stroke with a real-world width. A stroke with no points leaves nothing and returns nil. Its points are
+    /// kept on the ink grid (1/65,536 inch, ADR-0014), so the ink in memory is exactly the ink saved.
     @discardableResult
     public mutating func draw(_ points: [CanvasPoint], tool: InkTool, colour: MarkupColour, width: Length) -> InkStroke? {
         guard !points.isEmpty else { return nil }
-        let stroke = InkStroke(id: StrokeID(nextID), tool: tool, colour: colour, width: width, points: points)
-        nextID += 1
-        let index = ink.strokes.count
-        ink.insert(stroke, at: index)
-        record(.draw(stroke, index: index))
+        let stroke = InkStroke(id: StrokeID(nextID), tool: tool, colour: colour, width: width,
+                               points: points.map(\.onInkGrid))
+        perform(.draw(stroke))
         return stroke
     }
 
@@ -276,50 +464,154 @@ public struct InkSession: Sendable {
     @discardableResult
     public mutating func erase(at point: CanvasPoint, tolerance: Length, index: InkIndex? = nil) -> [InkStroke] {
         let hit = index?.strokes(hitAt: point, tolerance: tolerance) ?? ink.strokes(hitAt: point, tolerance: tolerance)
-        var removed: [(index: Int, stroke: InkStroke)] = []
-        for stroke in hit {
-            guard let index = ink.index(of: stroke.id) else { continue }
-            removed.append((index, ink.remove(at: index)))
-        }
-        guard !removed.isEmpty else { return [] }
-        if sweepHasEntry, case .erase(let earlier)? = undoStack.last {
-            redoStack.removeAll()
-            undoStack[undoStack.count - 1] = .erase(earlier + removed)
-        } else {
-            record(.erase(removed))
-            sweepHasEntry = true
-        }
-        return removed.map(\.stroke)
+        guard !hit.isEmpty else { return [] }
+        let continuing: Bool
+        if sweepHasEntry, case .erase? = undoStack.last { continuing = true } else { continuing = false }
+        perform(.erase(hit.map(\.id), continuingSweep: continuing))
+        // An index a step behind the ink could name a stroke already gone; return only what this erase removed.
+        let removed = Set(lastChange.removed)
+        return hit.filter { removed.contains($0.id) }
     }
 
     public mutating func undo() {
-        guard let edit = undoStack.popLast() else { return }
-        sweepHasEntry = false
-        switch edit {
-        case .draw(_, let index):
-            _ = ink.remove(at: index)
-        case .erase(let removed):
-            for item in removed.reversed() { ink.insert(item.stroke, at: item.index) }
-        }
-        redoStack.append(edit)
+        guard canUndo else { return }
+        perform(.undo)
     }
 
     public mutating func redo() {
-        guard let edit = redoStack.popLast() else { return }
-        sweepHasEntry = false
-        switch edit {
-        case .draw(let stroke, let index):
-            ink.insert(stroke, at: index)
-        case .erase(let removed):
-            for item in removed { _ = ink.remove(at: item.index) }
+        guard canRedo else { return }
+        perform(.redo)
+    }
+
+    private mutating func perform(_ event: InkEvent) {
+        apply(event)
+        unsavedEvents.append(event)
+    }
+
+    /// Replays one saved change and returns what it did to the ink. Replaying a canvas's events in the order they were
+    /// made rebuilds its ink and undo history exactly; an event that no longer fits (an undo with nothing to undo, an
+    /// erase of strokes not there) does nothing rather than fail, so a damaged history never stops a canvas opening.
+    @discardableResult
+    public mutating func apply(_ event: InkEvent) -> InkChange {
+        let change = applying(event)
+        lastChange = change
+        return change
+    }
+
+    private mutating func applying(_ event: InkEvent) -> InkChange {
+        switch event {
+        case .draw(let stroke):
+            guard !stroke.points.isEmpty, !ink.contains(stroke.id) else { return .none }
+            nextID = max(nextID, stroke.id.value + 1)
+            ink.restore([stroke])
+            record(.draw(stroke))
+            return InkChange(added: [stroke])
+        case .erase(let ids, let continuing):
+            let removed = ink.remove(ids)
+            guard !removed.isEmpty else { return .none }
+            if continuing, case .erase? = undoStack.last {
+                clearRedo()
+                // Grow the sweep's step in place: taken off the stack, it is the only owner of its strokes.
+                guard case .erase(var earlier) = undoStack.removeLast() else { return .none }
+                earlier.append(contentsOf: removed)
+                undoStack.append(.erase(earlier))
+                historyPoints += Self.points(removed)
+                trimHistory()
+            } else {
+                record(.erase(removed))
+            }
+            sweepHasEntry = true
+            return InkChange(removed: removed.map(\.id))
+        case .undo:
+            guard let edit = undoStack.popLast() else { return .none }
+            sweepHasEntry = false
+            historyPoints += Self.heldPoints(edit, inUndo: false) - Self.heldPoints(edit, inUndo: true)
+            redoStack.append(edit)
+            trimHistory()
+            switch edit {
+            case .draw(let stroke):
+                ink.remove([stroke.id])
+                return InkChange(removed: [stroke.id])
+            case .erase(let strokes):
+                ink.restore(strokes)
+                return InkChange(added: strokes)
+            }
+        case .redo:
+            guard let edit = redoStack.popLast() else { return .none }
+            sweepHasEntry = false
+            historyPoints += Self.heldPoints(edit, inUndo: true) - Self.heldPoints(edit, inUndo: false)
+            undoStack.append(edit)
+            trimHistory()
+            switch edit {
+            case .draw(let stroke):
+                ink.restore([stroke])
+                return InkChange(added: [stroke])
+            case .erase(let strokes):
+                ink.remove(strokes.map(\.id))
+                return InkChange(removed: strokes.map(\.id))
+            }
         }
-        undoStack.append(edit)
     }
 
     private mutating func record(_ edit: Edit) {
-        redoStack.removeAll()
+        clearRedo()
         undoStack.append(edit)
+        historyPoints += Self.heldPoints(edit, inUndo: true)
+        trimHistory()
         sweepHasEntry = false
+    }
+
+    private mutating func clearRedo() {
+        guard !redoStack.isEmpty else { return }
+        for edit in redoStack { historyPoints -= Self.heldPoints(edit, inUndo: false) }
+        redoStack.removeAll()
+    }
+
+    /// Keeps the history within `undoLimit` undo steps and `historyPointBudget` points, counting the redo steps as
+    /// well as the undo steps. Over the budget, the redo steps furthest from the ink go first, then the oldest undo
+    /// steps. The newest step is always kept (the one just undone, or the one just done), however big. Replaying the
+    /// same events trims the same steps, so a reopened canvas has exactly the history it was saved with.
+    private mutating func trimHistory() {
+        var held = historyPoints
+        var dropRedo = 0
+        while held > Self.historyPointBudget, redoStack.count - dropRedo > 1 {
+            held -= Self.heldPoints(redoStack[dropRedo], inUndo: false)
+            dropRedo += 1
+        }
+        let keepUndo = redoStack.count - dropRedo > 0 ? 0 : 1
+        var drop = 0
+        while undoStack.count - drop > Self.undoLimit
+                || (held > Self.historyPointBudget && undoStack.count - drop > keepUndo) {
+            held -= Self.heldPoints(undoStack[drop], inUndo: true)
+            drop += 1
+        }
+        guard drop > 0 || dropRedo > 0 else { return }
+        redoStack.removeFirst(dropRedo)
+        undoStack.removeFirst(drop)
+        historyPoints = held
+    }
+
+    /// The points of an edit's strokes that only the history holds: an undo step's erased strokes, and a redo step's
+    /// undone stroke. A drawn stroke in an undo step, or erased strokes in a redo step, are on the canvas.
+    static func heldPoints(_ edit: Edit, inUndo: Bool) -> Int {
+        switch (edit, inUndo) {
+        case (.erase(let strokes), true): points(strokes)
+        case (.draw(let stroke), false): stroke.points.count
+        default: 0
+        }
+    }
+
+    private static func points(_ strokes: [InkStroke]) -> Int { strokes.reduce(0) { $0 + $1.points.count } }
+
+    /// Two sessions are equal when their ink and undo history are; unsaved events and the sweep in progress are not
+    /// part of what is saved.
+    public static func == (lhs: InkSession, rhs: InkSession) -> Bool {
+        lhs.ink == rhs.ink && lhs.undoStack == rhs.undoStack && lhs.redoStack == rhs.redoStack && lhs.nextID == rhs.nextID
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(ink)
+        hasher.combine(nextID)
     }
 }
 

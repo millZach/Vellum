@@ -153,6 +153,39 @@ final class InkIndexTests: XCTestCase {
         XCTAssertTrue(direct.sync(with: session.ink).isEmpty)
     }
 
+    /// The canvas editor keeps the index in step by following each change's delta (`InkSession.lastChange`, ADR-0014)
+    /// rather than reading the whole ink. Through random drawing, erase sweeps, undo and redo, that matches a full sync.
+    func testFollowingTheSessionsChangesMatchesASync() {
+        var session = randomInk(count: 300, seed: 51)
+        var followed = InkIndex(session.ink)
+        var random = MadeUpInk.SeededRandom(state: 52)
+        let everything = InkIndex.Box(minX: -1e6, minY: -1e6, maxX: 1e6, maxY: 1e6)
+        for step in 0..<500 {
+            let roll = random.next()
+            var synced = followed
+            if roll < 0.3 {
+                let p = CanvasPoint(x: .inches(random.range(-3_000, 3_000)), y: .inches(random.range(-2_000, 2_000)))
+                session.draw([p, CanvasPoint(x: p.x + .inches(5), y: p.y)], tool: .pen, colour: .blue, width: .inches(1))
+            } else if roll < 0.7 {
+                if roll < 0.4 { session.beginEraserSweep() }
+                let p = CanvasPoint(x: .inches(random.range(-3_000, 3_000)), y: .inches(random.range(-2_000, 2_000)))
+                guard !session.erase(at: p, tolerance: .inches(150), index: followed).isEmpty else { continue }
+            } else if roll < 0.85 {
+                guard session.canUndo else { continue }
+                session.undo()
+            } else {
+                guard session.canRedo else { continue }
+                session.redo()
+            }
+            let change = followed.apply(session.lastChange)
+            let expected = synced.sync(with: session.ink)
+            XCTAssertEqual(Set(change.added.map(\.id)), Set(expected.added.map(\.id)), "step \(step)")
+            XCTAssertEqual(Set(change.removed.map(\.id)), Set(expected.removed.map(\.id)), "step \(step)")
+            XCTAssertEqual(change.addedOnTop, expected.addedOnTop, "step \(step)")
+            XCTAssertEqual(followed.strokeIDs(in: everything), session.ink.strokes.map(\.id), "step \(step)")
+        }
+    }
+
     func testErasingThroughTheIndexMatchesErasingWithout() {
         var withIndex = randomInk(count: 600, seed: 31)
         var without = withIndex

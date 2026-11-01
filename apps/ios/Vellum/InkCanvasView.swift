@@ -77,6 +77,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     /// The stroke being drawn, with the pen, colour and width it took at touchdown.
     private var liveStroke: StrokeInProgress?
     private var erasing = false
+    /// Whether the saver has been told the Pencil is on the glass.
+    private var pencilIsDown = false
     private var lastPinchScale: CGFloat = 1
     private var lastPanTranslation: CGPoint = .zero
     /// The view of the canvas the layers were last placed for.
@@ -104,6 +106,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         applyColours()
 
         editor.onInkChange = { [weak self] change in self?.renderer.inkChanged(change) }
+        #if DEBUG
+        editor.onDebugOpenStroke = { [weak self] stroke in self?.showOpenStroke(stroke) }
+        #endif
 
         let directTouches = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
@@ -340,6 +345,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             return false
         }
         editor.penPosition = point
+        // Tidying the saved ink (compaction) waits for the Pencil to lift (ADR-0014).
+        editor.pencilDidTouch(true)
+        pencilIsDown = true
         startDisplayLink()
         return true
     }
@@ -395,6 +403,10 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             }
             CATransaction.commit()
         }
+        if pencilIsDown {
+            editor.pencilDidTouch(false)
+            pencilIsDown = false
+        }
         liveTouch = nil
         liveStroke = nil
         liveBase = nil
@@ -429,6 +441,17 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         pendingPenPosition = nil
         if editor.penPosition != point { editor.penPosition = point }
     }
+
+    #if DEBUG
+    /// Shows a stroke as if it were being drawn, never committed, for the kill-and-reopen captures, which kill the app
+    /// with it on screen.
+    func showOpenStroke(_ stroke: StrokeInProgress) {
+        guard liveTouch == nil, liveStroke == nil, !erasing else { return }
+        liveStroke = stroke
+        startLive(stroke)
+        liveStroke = nil
+    }
+    #endif
 
     // MARK: Fingers
 

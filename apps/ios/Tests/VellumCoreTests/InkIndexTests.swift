@@ -142,6 +142,27 @@ final class InkIndexTests: XCTestCase {
         XCTAssertEqual(index.strokeIDs(in: everything), session.ink.strokes.map(\.id))
     }
 
+    func testAddingAndRemovingWhatChangedMatchesASync() {
+        var session = randomInk(count: 300, seed: 41)
+        var direct = InkIndex(session.ink)
+        var synced = direct
+        let drawn = session.draw([CanvasPoint(x: .inches(1), y: .inches(2))], tool: .pen, colour: .blue, width: .inches(1))!
+        let added = direct.add(drawn)
+        XCTAssertEqual(added.added.map(\.id), [drawn.id])
+        XCTAssertTrue(added.addedOnTop)
+        session.beginEraserSweep()
+        let erased = session.erase(at: CanvasPoint(x: .inches(0), y: .inches(0)), tolerance: .inches(800), index: direct)
+        XCTAssertFalse(erased.isEmpty)
+        let removed = direct.remove(erased)
+        XCTAssertEqual(Set(removed.removed.map(\.id)), Set(erased.map(\.id)))
+        XCTAssertFalse(removed.addedOnTop)
+        synced.sync(with: session.ink)
+        let everything = InkIndex.Box(minX: -1e6, minY: -1e6, maxX: 1e6, maxY: 1e6)
+        XCTAssertEqual(direct.strokeIDs(in: everything), synced.strokeIDs(in: everything))
+        XCTAssertEqual(direct.strokeIDs(in: everything), session.ink.strokes.map(\.id))
+        XCTAssertTrue(direct.sync(with: session.ink).isEmpty)
+    }
+
     func testErasingThroughTheIndexMatchesErasingWithout() {
         var withIndex = randomInk(count: 600, seed: 31)
         var without = withIndex

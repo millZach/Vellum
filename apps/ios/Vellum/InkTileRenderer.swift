@@ -230,7 +230,7 @@ final class InkTileRenderer {
         let tiling = level.tiling
         let job = TileJob(pixels: Int((InkTiling.tileSize * displayScale).rounded()), displayScale: displayScale,
                           levelScale: tiling.scale, originX: box.minX, originY: box.minY, base: base,
-                          strokes: strokes, dark: isDark, paths: paths)
+                          strokes: strokes, dark: isDark, paths: paths, cancelled: tile.cancelled)
         let jobEpoch = tile.epoch
         tile.inFlight = true
         pendingCount += 1
@@ -266,13 +266,15 @@ final class InkTileRenderer {
         let strokes: [InkStroke]
         let dark: Bool
         let paths: StrokePathCache<CGPath>
+        let cancelled: Flag
     }
 
     private struct ImageBox: @unchecked Sendable { let image: CGImage? }
 
     /// Draws one tile: its ink at the level's scale, over `base` when only new strokes are added.
     private nonisolated static func draw(_ job: TileJob) -> CGImage? {
-        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+        // A tile that left the screen, or a level a pinch has already passed, is not worth drawing.
+        guard !job.cancelled.isSet, let space = CGColorSpace(name: CGColorSpace.sRGB),
               let context = CGContext(data: nil, width: job.pixels, height: job.pixels, bitsPerComponent: 8,
                                       bytesPerRow: 0, space: space,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
@@ -287,7 +289,8 @@ final class InkTileRenderer {
         context.setLineCap(.round)
         context.setLineJoin(.round)
         let thinnest = minimumWidth / job.levelScale
-        for stroke in job.strokes {
+        for (i, stroke) in job.strokes.enumerated() {
+            if i % 256 == 255, job.cancelled.isSet { return nil }
             let (path, origin) = job.paths.path(for: stroke)
             context.saveGState()
             context.translateBy(x: origin.x.inches - job.originX, y: origin.y.inches - job.originY)
@@ -453,7 +456,11 @@ private final class Tile {
     var renderedEpoch = -1
     var inFlight = false
     var waiting = false
-    var removed = false
+    /// Set when the tile leaves the screen or its level is taken down; a drawing not yet started for it is skipped.
+    var removed = false {
+        didSet { if removed { cancelled.set() } }
+    }
+    let cancelled = Flag()
 
     init(key: InkTiling.Key, epoch: Int) {
         self.key = key
@@ -483,5 +490,23 @@ private final class FrameTicker: NSObject {
     func stop() {
         link?.invalidate()
         link = nil
+    }
+}
+
+/// A flag set once on the main thread and read from the drawing threads.
+final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    func set() {
+        lock.lock()
+        value = true
+        lock.unlock()
+    }
+
+    var isSet: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
     }
 }

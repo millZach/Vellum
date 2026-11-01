@@ -102,10 +102,11 @@ public struct InkIndex: Sendable {
     @discardableResult
     public mutating func remove(_ id: StrokeID) -> InkStroke? {
         guard let entry = entries.removeValue(forKey: id) else { return nil }
-        if var cells = levels[entry.level], var members = cells[entry.cell] {
-            members.removeAll { $0 == id }
-            if members.isEmpty { cells[entry.cell] = nil } else { cells[entry.cell] = members }
-            levels[entry.level] = cells.isEmpty ? nil : cells
+        // In place, so a level's table of cells is never copied to take one stroke out of it.
+        levels[entry.level]?[entry.cell]?.removeAll { $0 == id }
+        if levels[entry.level]?[entry.cell]?.isEmpty == true {
+            levels[entry.level]?[entry.cell] = nil
+            if levels[entry.level]?.isEmpty == true { levels[entry.level] = nil }
         }
         let at = Self.insertionPoint(of: id, in: ids)
         if at < ids.count, ids[at] == id { ids.remove(at: at) }
@@ -121,6 +122,25 @@ public struct InkIndex: Sendable {
         public var addedOnTop = true
 
         public var isEmpty: Bool { added.isEmpty && removed.isEmpty }
+
+        public init(added: [InkStroke] = [], removed: [InkStroke] = [], addedOnTop: Bool = true) {
+            self.added = added
+            self.removed = removed
+            self.addedOnTop = addedOnTop
+        }
+    }
+
+    /// Adds a stroke just drawn, without looking at the rest of the ink, and says what changed. For a stroke the
+    /// session has just committed; anything else goes through `sync(with:)`.
+    public mutating func add(_ stroke: InkStroke) -> Change {
+        let onTop = latestID.map { stroke.id > $0 } ?? true
+        insert(stroke)
+        return Change(added: [stroke], addedOnTop: onTop)
+    }
+
+    /// Takes out strokes just erased, without looking at the rest of the ink, and says what changed.
+    public mutating func remove(_ strokes: [InkStroke]) -> Change {
+        Change(removed: strokes.compactMap { remove($0.id) }, addedOnTop: false)
     }
 
     /// Brings the index in step with the ink, whatever changed it (a stroke, an erase, undo, redo or a canvas loaded),

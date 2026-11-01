@@ -92,8 +92,8 @@ final class CanvasEditor {
 
     /// Adds a stroke the Pencil has finished to the ink.
     func commit(_ stroke: StrokeInProgress) {
-        session.commit(stroke)
-        syncInk()
+        guard let drawn = session.commit(stroke) else { return }
+        syncInk(inkIndex.add(drawn))
     }
 
     /// Starts a sweep of the eraser, which undoes as one step.
@@ -104,7 +104,7 @@ final class CanvasEditor {
     /// Erases whole strokes under the eraser: within 8 screen points of the Pencil's tip at this zoom.
     func erase(at point: CanvasPoint) {
         let erased = session.erase(at: point, tolerance: viewport.canvasLength(ofScreen: 8), index: inkIndex)
-        if !erased.isEmpty { syncInk() }
+        if !erased.isEmpty { syncInk(inkIndex.remove(erased)) }
     }
 
     func undo() {
@@ -126,10 +126,12 @@ final class CanvasEditor {
         }
     }
 
-    private func syncInk() {
+    /// Publishes a change of ink. A stroke drawn or erased says exactly what changed; undo and redo let the index
+    /// find out by comparing itself with the ink.
+    private func syncInk(_ known: InkIndex.Change? = nil) {
         canvas.ink = session.ink
         inkRevision += 1
-        let change = inkIndex.sync(with: session.ink)
+        let change = known ?? inkIndex.sync(with: session.ink)
         onInkChange?(change)
     }
 }

@@ -86,122 +86,230 @@
     {
       "metric": "draw_frame_ms_max",
       "kind": "time",
-      "value": 4,
+      "value": 4.27,
       "before": 20.5,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. Main drew the stroke on a shape layer too; its full redraw came after lift, outside the measured frames."
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. Main drew the stroke on a shape layer too; its full redraw came after lift, outside the measured frames. Raised from 4 at the review fixes: this run counts every frame, the Pencil's lift and commit included (the earlier run missed the last frame), and hosted-runner noise; see PR #23."
+    },
+    {
+      "metric": "draw_frame_ms_max_release",
+      "kind": "time",
+      "value": 31.91,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. Main drew the stroke on a shape layer too; its full redraw came after lift, outside the measured frames."
     },
     {
       "metric": "draw_frame_ms_p50",
       "kind": "time",
-      "value": 1.66,
+      "value": 1.28,
       "before": 1.47,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. Main drew the stroke on a shape layer too; its full redraw came after lift, outside the measured frames."
+    },
+    {
+      "metric": "draw_frame_ms_p50_release",
+      "kind": "time",
+      "value": 2.52,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. Main drew the stroke on a shape layer too; its full redraw came after lift, outside the measured frames."
     },
     {
       "metric": "draw_frame_ms_p95",
       "kind": "time",
-      "value": 3.11,
+      "value": 1.46,
       "before": 3.56,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. Main drew the stroke on a shape layer too; its full redraw came after lift, outside the measured frames."
+    },
+    {
+      "metric": "draw_frame_ms_p95_release",
+      "kind": "time",
+      "value": 4.73,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. Main drew the stroke on a shape layer too; its full redraw came after lift, outside the measured frames."
     },
     {
       "metric": "erase_frame_ms_max",
       "kind": "time",
-      "value": 24.35,
+      "value": 14.93,
       "before": 6230.71,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "erase_frame_ms_max_release",
+      "kind": "time",
+      "value": 32,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
     },
     {
       "metric": "erase_frame_ms_p50",
       "kind": "time",
-      "value": 7.69,
+      "value": 4.78,
       "before": 5946.98,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "erase_frame_ms_p50_release",
+      "kind": "time",
+      "value": 1.81,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
     },
     {
       "metric": "erase_frame_ms_p95",
       "kind": "time",
-      "value": 13.55,
+      "value": 8,
       "before": 6230.71,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "erase_frame_ms_p95_release",
+      "kind": "time",
+      "value": 5.03,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
     },
     {
       "metric": "pan_frame_ms_max",
       "kind": "time",
-      "value": 5.14,
+      "value": 4.36,
       "before": 7750.47,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "pan_frame_ms_max_release",
+      "kind": "time",
+      "value": 4.76,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
     },
     {
       "metric": "pan_frame_ms_p50",
       "kind": "time",
-      "value": 1.62,
+      "value": 1.45,
       "before": 7439.08,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "pan_frame_ms_p50_release",
+      "kind": "time",
+      "value": 1.87,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
     },
     {
       "metric": "pan_frame_ms_p95",
       "kind": "time",
-      "value": 2.9,
+      "value": 1.87,
       "before": 7750.47,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "pan_frame_ms_p95_release",
+      "kind": "time",
+      "value": 3.03,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
     },
     {
       "metric": "pinch_frame_ms_max",
       "kind": "time",
-      "value": 11.61,
+      "value": 9.97,
       "before": 6911.45,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "pinch_frame_ms_max_release",
+      "kind": "time",
+      "value": 17.29,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
     },
     {
       "metric": "pinch_frame_ms_p50",
       "kind": "time",
-      "value": 5.05,
+      "value": 4.44,
       "before": 6541.58,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "pinch_frame_ms_p50_release",
+      "kind": "time",
+      "value": 3.16,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
     },
     {
       "metric": "pinch_frame_ms_p95",
       "kind": "time",
-      "value": 7.71,
+      "value": 7.11,
       "before": 6911.45,
       "unit": "ms",
       "tolerance": 0.25,
-      "measured": "0bb7dc2 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41278556468 (before: a861465 + e7be8e8 on main's renderer, run 41274235624)",
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: a Debug build on a shared simulator that runs at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "pinch_frame_ms_p95_release",
+      "kind": "time",
+      "value": 6.05,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
     }
   ]
 }

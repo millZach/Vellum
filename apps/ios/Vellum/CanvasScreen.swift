@@ -13,8 +13,7 @@ struct CanvasScreen: View {
 
     var body: some View {
         ZStack {
-            InkCanvasView(editor: editor, isDark: colorScheme == .dark, inkRevision: editor.inkRevision,
-                          viewport: editor.viewport)
+            CanvasLayer(editor: editor, isDark: colorScheme == .dark)
                 .ignoresSafeArea()
             // The chrome lays itself out over the whole screen, clear of the system's safe area and of the iOS tab
             // rail, which floats at the right edge unfolded.
@@ -40,6 +39,17 @@ struct CanvasScreen: View {
             }
             .ignoresSafeArea()
         }
+    }
+}
+
+/// The canvas under the chrome. Its own view, so a pan or pinch re-evaluates only this, not the whole screen; ink
+/// changes reach the canvas from the editor without SwiftUI at all.
+private struct CanvasLayer: View {
+    let editor: CanvasEditor
+    let isDark: Bool
+
+    var body: some View {
+        InkCanvasView(editor: editor, isDark: isDark, viewport: editor.viewport, units: editor.canvas.units)
     }
 }
 
@@ -169,11 +179,14 @@ private struct WeightPicker: View {
 
 // MARK: - Top bar
 
-/// Back to the Canvases list, the canvas's name, its units, light or dark, and undo and redo.
+/// Back to the Canvases list, the canvas's name, its units, light or dark, and undo and redo. A long press on the
+/// name offers the made-up test canvas (`TestCanvas`).
 private struct TopBar: View {
     @Bindable var editor: CanvasEditor
     let showCanvases: (() -> Void)?
     @AppStorage(AppearanceSetting.storageKey) private var appearance = AppearanceSetting.default.rawValue
+    @Environment(\.testCanvas) private var testCanvas
+    @State private var offersTestCanvas = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -187,6 +200,18 @@ private struct TopBar: View {
             Text(editor.canvas.name)
                 .font(.system(size: 14, weight: .bold))
                 .lineLimit(1)
+                .onLongPressGesture(minimumDuration: 0.8) {
+                    if testCanvas != nil { offersTestCanvas = true }
+                }
+                .confirmationDialog("Test canvas", isPresented: $offersTestCanvas, titleVisibility: .visible) {
+                    if let testCanvas {
+                        Button(testCanvas.isOpen ? "Back to My Canvas" : "Open the 10,000-Stroke Test Canvas") {
+                            testCanvas.toggle()
+                        }
+                    }
+                } message: {
+                    Text("A made-up canvas for trying pan, pinch, draw and erase. It is never saved, and your canvas stays as it is.")
+                }
             Picker("Canvas units", selection: $editor.units) {
                 ForEach(CanvasUnits.allCases, id: \.self) { units in
                     Text(units.shortTitle).tag(units)
@@ -266,27 +291,12 @@ private struct CanvasActions: View {
 /// whether the canvas is saved.
 private struct StatusBar: View {
     let editor: CanvasEditor
-    private static let scaleBarSpace = 90.0
 
     var body: some View {
-        let units = editor.canvas.units
-        let bar = ScaleBar.mark(fitting: Self.scaleBarSpace, pointsPerInch: editor.viewport.pointsPerInch, units: units)
         HStack(spacing: 14) {
-            Text(editor.penPosition.map(units.formatPosition) ?? "X –  Y –")
-                .monospacedDigit()
-                .frame(minWidth: 150, alignment: .leading)
-                .accessibilityLabel(editor.penPosition == nil ? "No pen position yet" : "Pen position")
-                .accessibilityValue(editor.penPosition.map(units.formatPosition) ?? "")
-            HStack(spacing: 6) {
-                ScaleBarShape()
-                    .stroke(Chrome.text, lineWidth: 1.5)
-                    .frame(width: ScaleBar.points(for: bar.length, pointsPerInch: editor.viewport.pointsPerInch), height: 6)
-                Text(bar.label).monospacedDigit()
-            }
-            .frame(width: Self.scaleBarSpace + 70, alignment: .leading)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Scale bar")
-            .accessibilityValue(bar.label)
+            // The readouts are their own views, so the pen moving or the zoom changing redraws only them.
+            PenReadout(editor: editor)
+            ScaleReadout(editor: editor)
             Text(editor.tool.prompt)
                 .foregroundStyle(Chrome.secondaryText)
                 .lineLimit(1)
@@ -318,6 +328,43 @@ private struct StatusBar: View {
     private var countText: String {
         let sheets = editor.canvas.sheets.count, frames = editor.canvas.frames.count
         return "\(sheets) sheet\(sheets == 1 ? "" : "s") · \(frames) frame\(frames == 1 ? "" : "s")"
+    }
+}
+
+/// The pen's position in canvas units. The canvas view publishes the position at most once a display frame, and the
+/// text is formatted once per update and used for both the label and VoiceOver.
+private struct PenReadout: View {
+    let editor: CanvasEditor
+
+    var body: some View {
+        let position = editor.penPosition
+        let text = position.map(editor.canvas.units.formatPosition)
+        Text(text ?? "X –  Y –")
+            .monospacedDigit()
+            .frame(minWidth: 150, alignment: .leading)
+            .accessibilityLabel(position == nil ? "No pen position yet" : "Pen position")
+            .accessibilityValue(text ?? "")
+    }
+}
+
+/// The scale bar: the longest round length that fits, labelled exactly.
+private struct ScaleReadout: View {
+    let editor: CanvasEditor
+    private static let space = 90.0
+
+    var body: some View {
+        let pointsPerInch = editor.viewport.pointsPerInch
+        let bar = ScaleBar.mark(fitting: Self.space, pointsPerInch: pointsPerInch, units: editor.canvas.units)
+        HStack(spacing: 6) {
+            ScaleBarShape()
+                .stroke(Chrome.text, lineWidth: 1.5)
+                .frame(width: ScaleBar.points(for: bar.length, pointsPerInch: pointsPerInch), height: 6)
+            Text(bar.label).monospacedDigit()
+        }
+        .frame(width: Self.space + 70, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Scale bar")
+        .accessibilityValue(bar.label)
     }
 }
 

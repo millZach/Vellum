@@ -460,15 +460,17 @@ public struct InkSession: Hashable, Sendable {
     public mutating func beginEraserSweep() { sweepHasEntry = false }
 
     /// Erases every stroke within `tolerance` of a point, whole, as part of the current sweep. Returns the strokes
-    /// erased.
+    /// erased. An `index` kept in step with this ink finds them without looking at every stroke.
     @discardableResult
-    public mutating func erase(at point: CanvasPoint, tolerance: Length) -> [InkStroke] {
-        let hit = ink.strokes(hitAt: point, tolerance: tolerance)
+    public mutating func erase(at point: CanvasPoint, tolerance: Length, index: InkIndex? = nil) -> [InkStroke] {
+        let hit = index?.strokes(hitAt: point, tolerance: tolerance) ?? ink.strokes(hitAt: point, tolerance: tolerance)
         guard !hit.isEmpty else { return [] }
         let continuing: Bool
         if sweepHasEntry, case .erase? = undoStack.last { continuing = true } else { continuing = false }
         perform(.erase(hit.map(\.id), continuingSweep: continuing))
-        return hit
+        // An index a step behind the ink could name a stroke already gone; return only what this erase removed.
+        let removed = Set(lastChange.removed)
+        return hit.filter { removed.contains($0.id) }
     }
 
     public mutating func undo() {

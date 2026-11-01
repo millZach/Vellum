@@ -39,8 +39,13 @@ final class CanvasEditor {
     let saver: CanvasSaver?
     /// The canvas's id on the Duo; nil for one only in memory.
     var canvasID: UUID? { saver?.id }
-    /// Changes whenever the ink does, so the ink view knows to redraw.
+    /// Changes whenever the ink does, for views that show something about it. An eraser sweep changes it once, when
+    /// the sweep ends, so no SwiftUI view updates on every hit; the renderer hears at once, through `onInkChange`.
     private(set) var inkRevision = 0
+    /// Where every stroke is, kept in step with the ink, for the eraser and the renderer (ADR-0012).
+    @ObservationIgnored private(set) var inkIndex: InkIndex
+    /// Told what changed whenever the ink does, so the renderer redraws only that, without waiting on SwiftUI.
+    @ObservationIgnored var onInkChange: (@MainActor (InkIndex.Change) -> Void)?
     /// Set once the view has its size and the starting zoom has been applied.
     @ObservationIgnored private var hasPlacedView = false
     private let startingView: StartingView
@@ -52,22 +57,28 @@ final class CanvasEditor {
         case region(CanvasRect)
     }
 
-    init(canvas: VellumCore.Canvas = VellumCore.Canvas(), session: InkSession? = nil, saver: CanvasSaver? = nil,
-         startingView: StartingView = .origin) {
+    /// `index`, built off the main thread for a large canvas, must be of the session's ink; nil builds it here.
+    init(canvas: VellumCore.Canvas = VellumCore.Canvas(), session: InkSession? = nil, index: InkIndex? = nil,
+         saver: CanvasSaver? = nil, startingView: StartingView = .origin) {
         var canvas = canvas
         let session = session ?? InkSession(ink: canvas.ink)
         canvas.ink = Ink()
         self.canvas = canvas
         self.session = session
+        inkIndex = index ?? InkIndex(session.ink)
         canUndo = session.canUndo
         canRedo = session.canRedo
         self.saver = saver
         viewport = Viewport(pointsPerInch: Self.startingPointsPerInch, screenWidth: 951, screenHeight: 669)
         self.startingView = startingView
+        // Only the test canvas and previews have no saver; the status bar must not say they are saved.
+        if saver == nil { saveState = .neverSaved }
     }
 
     /// The ink, for drawing it. Read it alongside `inkRevision`, which is what changes when it does.
     var ink: Ink { session.ink }
+    /// True during an eraser sweep, which bumps `inkRevision` once, when it ends (`endEraserSweep`).
+    @ObservationIgnored private var sweeping = false
 
     /// The rectangle everything on the canvas covers, its ink included.
     var extents: CanvasRect? { CanvasRect.union([canvas.extents, session.ink.bounds].compactMap { $0 }) }
@@ -137,20 +148,30 @@ final class CanvasEditor {
     /// Starts a sweep of the eraser, which undoes as one step.
     func beginEraserSweep() {
         session.beginEraserSweep()
+        sweeping = true
+    }
+
+    /// Ends a sweep of the eraser and tells the views reading `inkRevision` what it erased, once.
+    func endEraserSweep() {
+        guard sweeping else { return }
+        sweeping = false
+        inkRevision += 1
     }
 
     /// Erases whole strokes under the eraser: within 8 screen points of the Pencil's tip at this zoom.
     func erase(at point: CanvasPoint) {
-        let erased = session.erase(at: point, tolerance: viewport.canvasLength(ofScreen: 8))
-        if !erased.isEmpty { syncInk() }
+        session.erase(at: point, tolerance: viewport.canvasLength(ofScreen: 8), index: inkIndex)
+        syncInk()
     }
 
     func undo() {
+        endEraserSweep()
         session.undo()
         syncInk()
     }
 
     func redo() {
+        endEraserSweep()
         session.redo()
         syncInk()
     }
@@ -170,15 +191,22 @@ final class CanvasEditor {
 
     func showDebugOpenStroke(_ stroke: StrokeInProgress) {
         debugOpenStroke = stroke
-        inkRevision += 1
+        onDebugOpenStroke?(stroke)
     }
+
+    /// Set by the ink view, which shows the open stroke in its live layers.
+    @ObservationIgnored var onDebugOpenStroke: ((StrokeInProgress) -> Void)?
     #endif
 
+    /// Follows the change the session just made: the index and the renderer take its delta (strokes added, ids
+    /// taken away) without reading the rest of the ink, and the change goes to the saver.
     private func syncInk() {
         // Nothing to follow when the change did nothing (an empty stroke, undo with nothing to undo).
         guard !session.unsavedEvents.isEmpty else { return }
-        inkDidChange?(session.lastChange)
-        inkRevision += 1
+        let change = session.lastChange
+        inkDidChange?(change)
+        onInkChange?(inkIndex.apply(change))
+        if !sweeping { inkRevision += 1 }
         if canUndo != session.canUndo { canUndo = session.canUndo }
         if canRedo != session.canRedo { canRedo = session.canRedo }
         save()

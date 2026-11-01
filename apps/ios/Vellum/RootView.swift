@@ -26,6 +26,15 @@ struct RootView: View {
             }
         }
         .task {
+            #if DEBUG || BENCHMARK
+            // The 10,000-stroke test canvas for the captures and the benchmark (`--ui-fixture-large`): opened in place
+            // of a saved canvas, so it never touches Zach's.
+            if ProcessInfo.processInfo.arguments.contains("--ui-fixture-large") {
+                await canvases.openTestCanvas()
+                canvases.finishLaunch()
+                return
+            }
+            #endif
             #if DEBUG
             if await DebugLaunch.run(canvases) { return }
             #endif
@@ -49,14 +58,16 @@ struct RootView: View {
     }
 }
 
-/// The canvas screen for the open canvas, or the list when none is open.
+/// The canvas screen for the open canvas, or the list when none is open. The made-up test canvas, while it is open,
+/// shows in place of the open canvas (`TestCanvas`).
 struct CanvasesTab: View {
     let model: CanvasesModel
 
     var body: some View {
-        if let editor = model.openEditor {
+        if let editor = model.testEditor ?? model.openEditor {
             CanvasScreen(editor: editor, showCanvases: { model.closeCanvas() })
-                .id(editor.canvasID)
+                .id(ObjectIdentifier(editor))
+                .environment(\.testCanvas, TestCanvasSwitch(isOpen: model.testEditor != nil, toggle: model.toggleTestCanvas))
         } else if !model.hasLaunched {
             // Launch reopens the canvas that was open; until it has, show the ground rather than flash the list.
             Chrome.listGround.ignoresSafeArea()

@@ -40,7 +40,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
         GENERATE_INFOPLIST_FILE: YES
-        # Merged with the generated keys: the Dropbox app key and its db-<key> callback scheme.
+        # Merged with the generated keys: the Dropbox app key and its db-<key> callback scheme, and
+        # CADisableMinimumFrameDurationOnPhone, which has no INFOPLIST_KEY_ setting and lets drawing run at 120 Hz.
         INFOPLIST_FILE: Vellum/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Vellum
         INFOPLIST_KEY_LSRequiresIPhoneOS: YES

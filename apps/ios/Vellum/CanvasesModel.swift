@@ -17,6 +17,9 @@ final class CanvasesModel {
     var selection: UUID?
     /// The canvas on the canvas screen, or nil for the list.
     private(set) var openEditor: CanvasEditor?
+    /// The made-up 10,000-stroke test canvas while it is shown in place of `openEditor` (`TestCanvas`). It has no
+    /// saver: it is never saved, never listed, and never remembered as the canvas to reopen.
+    private(set) var testEditor: CanvasEditor?
     /// Set while a canvas is being opened, so the list shows it is on its way.
     private(set) var opening: UUID?
     private(set) var hasLoaded = false
@@ -108,7 +111,9 @@ final class CanvasesModel {
         do {
             let (manifest, session, saver) = try await savers.open(id)
             let canvas = VellumCore.Canvas(name: manifest.name, units: manifest.canvasUnits)
-            let editor = CanvasEditor(canvas: canvas, session: session, saver: saver,
+            // The renderer's index of a large canvas takes a while to build: off the main thread.
+            let index = await Task.detached(priority: .userInitiated) { InkIndex(session.ink) }.value
+            let editor = CanvasEditor(canvas: canvas, session: session, index: index, saver: saver,
                                       startingView: startingView ?? (session.ink.isEmpty ? .origin : .everything))
             if let state = unsaved[id] { editor.saveStateDidChange(state) }
             openEditor = editor
@@ -119,9 +124,31 @@ final class CanvasesModel {
         }
     }
 
+    /// Opens the test canvas, built off the main thread, over whatever canvas is open, or closes it and goes back to
+    /// that canvas.
+    func toggleTestCanvas() {
+        if testEditor != nil {
+            testEditor = nil
+        } else {
+            Task { await openTestCanvas() }
+        }
+    }
+
+    func openTestCanvas() async {
+        guard testEditor == nil else { return }
+        let (canvas, index) = await Task.detached(priority: .userInitiated) { () -> (VellumCore.Canvas, InkIndex) in
+            let canvas = TestCanvas.make()
+            return (canvas, InkIndex(canvas.ink))
+        }.value
+        let editor = TestCanvas.editor(for: canvas, index: index)
+        testEditor = editor
+    }
+
     /// Back to the list. The canvas's saver writes and flushes what it was handed and redraws the thumbnail; if the
     /// Duo is full it keeps the changes and keeps trying, and the list says so.
     func closeCanvas() {
+        // From the test canvas, the list's chevron closes it and the canvas under it, which is saved as always.
+        testEditor = nil
         guard let editor = openEditor else { return }
         openEditor = nil
         lastOpened = nil

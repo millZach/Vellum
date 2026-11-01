@@ -94,6 +94,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Capture every tab and the Home Screen unfolded, in light and dark
         run: sh apps/ios/Scripts/capture-duo.sh .build-captures
+      # Timings are recorded and compared with docs/perf/baselines, warning at 25% worse; they never fail the build.
+      - name: Compare canvas frame timings with the baseline
+        if: always()
+        run: |
+          python3 apps/ios/Scripts/perf-compare.py canvas-rendering apps/ios/.build-captures/benchmark.json
+          python3 apps/ios/Scripts/perf-compare.py canvas-rendering apps/ios/.build-captures/benchmark-release.json
       - name: Keep the captures
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

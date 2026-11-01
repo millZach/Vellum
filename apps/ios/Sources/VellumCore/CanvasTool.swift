@@ -38,13 +38,16 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         public let inkTool: InkTool?
         /// What the tool expects next, for the status bar.
         public let prompt: String
+        /// The accessibility hint, when it says more than the prompt.
+        public var help: String? = nil
     }
 
     public var descriptor: Descriptor {
         switch self {
         case .pen:
             Descriptor(title: "Pen", systemImage: "pencil.tip", group: .ink, comingIn: nil, inkTool: .pen,
-                       prompt: "Draw with the Pencil")
+                       prompt: "Draw with the Pencil",
+                       help: "Draw with the Pencil. Hold still at the end of a stroke to snap it to a line or a shape")
         case .highlighter:
             Descriptor(title: "Highlighter", systemImage: "highlighter", group: .ink, comingIn: nil,
                        inkTool: .highlighter, prompt: "Highlight with the Pencil")
@@ -52,14 +55,17 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
             Descriptor(title: "Eraser", systemImage: "eraser", group: .ink, comingIn: nil, inkTool: nil,
                        prompt: "Touch ink to erase a stroke")
         case .lineAndShape:
-            Descriptor(title: "Line and shape", systemImage: "line.diagonal", group: .ink, comingIn: 7, inkTool: nil,
-                       prompt: "Draw a straight line")
+            Descriptor(title: "Line and shape", systemImage: "line.diagonal", group: .ink, comingIn: nil,
+                       inkTool: .pen, prompt: "Draw a line, box or circle",
+                       help: "Draw a line, a rectangle or a circle; it straightens when you lift or hold still")
         case .lasso:
-            Descriptor(title: "Lasso", systemImage: "lasso", group: .selectionAndText, comingIn: 7, inkTool: nil,
-                       prompt: "Circle ink or text to select it")
+            Descriptor(title: "Lasso", systemImage: "lasso", group: .selectionAndText, comingIn: nil, inkTool: nil,
+                       prompt: "Circle ink or text to select",
+                       help: "Draw a loop around ink or text to select it, then move, resize, duplicate or delete it")
         case .textBox:
-            Descriptor(title: "Text box", systemImage: "character.textbox", group: .selectionAndText, comingIn: 7,
-                       inkTool: nil, prompt: "Tap where the text box goes")
+            Descriptor(title: "Text box", systemImage: "character.textbox", group: .selectionAndText, comingIn: nil,
+                       inkTool: nil, prompt: "Tap where the text box goes",
+                       help: "Tap to place a text box or edit one, then type, or write with the Pencil and it becomes text")
         case .measure:
             Descriptor(title: "Measure", systemImage: "ruler", group: .lengthsAndRegions, comingIn: 8, inkTool: nil,
                        prompt: "Measure: tap the first point")
@@ -96,8 +102,17 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     public var isAvailable: Bool { comingIn == nil }
 
+    /// The status bar's prompt for the lasso while something is selected.
+    public static let selectionPrompt = "Drag to move the selection"
+
+    /// The status bar's prompt, given whether the lasso has a selection: with one, it says to drag it.
+    public func prompt(fingerDraws: Bool, hasSelection: Bool) -> String {
+        if self == .lasso, hasSelection { return Self.selectionPrompt }
+        return prompt(fingerDraws: fingerDraws)
+    }
+
     /// The accessibility hint: what the tool does, or that it is not built yet.
     public var hint: String {
-        isAvailable ? prompt : "Not available yet. \(title) comes in a later update."
+        isAvailable ? (descriptor.help ?? prompt) : "Not available yet. \(title) comes in a later update."
     }
 }

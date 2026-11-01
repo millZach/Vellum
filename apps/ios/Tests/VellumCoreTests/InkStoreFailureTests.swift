@@ -46,6 +46,24 @@ final class InkStoreFailureTests: XCTestCase {
             unwritten += session.takeEvents()
             if (try? store.append(unwritten)) != nil { unwritten.removeAll() }
         }
+
+        /// The selection and text box changes (#7): a move, a resize, a duplicate, a text box placed and edited, and
+        /// a delete, each its own event.
+        mutating func editSelection(into store: InkStore) {
+            let picked = CanvasSelection(strokes: [StrokeID(1), StrokeID(2)])
+            session.transform(picked, by: .translation(dx: .inches(7), dy: .inches(-3)))
+            session.transform(CanvasSelection(strokes: [StrokeID(3)]),
+                              by: .scaling(by: 1.5, about: CanvasPoint(x: .feet(3), y: .feet(1))))
+            let copies = session.duplicate(picked, by: .translation(dx: .inches(2), dy: .inches(2)))
+            if let box = session.addText("Made-up note", at: CanvasPoint(x: .feet(1), y: .feet(6)),
+                                         size: CanvasSize(width: .feet(4), height: .feet(1)), fontSize: .inches(4),
+                                         colour: .blue) {
+                session.editText(box.id, text: "Made-up note, edited", height: .feet(1.5))
+            }
+            session.delete(copies)
+            unwritten += session.takeEvents()
+            if (try? store.append(unwritten)) != nil { unwritten.removeAll() }
+        }
     }
 
     /// The file calls one compaction makes, in order, so each test can fail or crash at every one of them.
@@ -78,6 +96,7 @@ final class InkStoreFailureTests: XCTestCase {
                 var writer = Writer()
                 for i in 0..<8 { writer.draw(wave(i), into: store) }
                 writer.undo(into: store)
+                writer.editSelection(into: store)
 
                 let counter = Counter()
                 DurableFile.Fault.inject { _, _ in
@@ -125,6 +144,7 @@ final class InkStoreFailureTests: XCTestCase {
         var writer = Writer()
         for i in 0..<8 { writer.draw(wave(i), into: store) }
         writer.undo(into: store)
+        writer.editSelection(into: store)
 
         let crashes = Crashes(folder: folder, scratch: self.folder.appendingPathComponent("crashes"))
         crashes.expected = writer.session

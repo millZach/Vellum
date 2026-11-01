@@ -224,11 +224,31 @@ public struct InkIndex: Sendable {
 
     /// The strokes whose ink touches a rectangle, in the order they were drawn (bottom first).
     public func strokes(in box: Box) -> [InkStroke] {
-        var found: [Entry] = []
         var work = Work()
+        return strokes(in: box, work: &work)
+    }
+
+    public func strokes(in box: Box, work: inout Work) -> [InkStroke] {
+        var found: [Entry] = []
         visit(box, &work) { found.append($0) }
         found.sort { $0.stroke.id < $1.stroke.id }
         return found.map(\.stroke)
+    }
+
+    /// The rectangle the ink of these strokes covers, from the bounds worked out when each went in; nil when none of
+    /// them is in the index. One lookup per id, no points read.
+    public func bounds(of ids: [StrokeID]) -> Box? {
+        var result: Box?
+        for id in ids {
+            guard let box = entries[id]?.box else { continue }
+            if let r = result {
+                result = Box(minX: min(r.minX, box.minX), minY: min(r.minY, box.minY),
+                             maxX: max(r.maxX, box.maxX), maxY: max(r.maxY, box.maxY))
+            } else {
+                result = box
+            }
+        }
+        return result
     }
 
     public func strokes(in rect: CanvasRect) -> [InkStroke] { strokes(in: Box(rect)) }

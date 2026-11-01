@@ -111,6 +111,46 @@
       "note": "A finger eraser sweep over three strokes cancelled by a second finger 80 ms after touchdown: strokes erased. The sweep holds its samples while pending, so nothing is erased. New with #24."
     },
     {
+      "metric": "lasso_strokes_visited",
+      "kind": "count",
+      "value": 10000,
+      "before": 10000,
+      "unit": "strokes",
+      "tolerance": 0,
+      "measured": "feat/snap-lasso-text 2026-11-01 (deterministic; checked by CI VellumCore tests)",
+      "note": "A lasso loop round the middle of the 10,000-stroke canvas, a quarter of its height across, at everything (#7): strokes whose cached bounds the index compared. The before is a plain scan of every stroke. New with #7."
+    },
+    {
+      "metric": "lasso_points_inspected",
+      "kind": "count",
+      "value": 794528,
+      "before": 794528,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "feat/snap-lasso-text 2026-11-01 (deterministic; checked by CI VellumCore tests)",
+      "note": "The same lasso: stroke points tested against the loop, at most Lasso.pointsTested (32) per stroke whose bounds meet the loop's. The before is every point of every stroke. New with #7."
+    },
+    {
+      "metric": "snap_points_tested_per_hold",
+      "kind": "count",
+      "value": 5733,
+      "before": 10000,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "feat/snap-lasso-text 2026-11-01 (deterministic; checked by CI VellumCore tests)",
+      "note": "Recognising a 10,000-sample circle when the Pencil holds still (#7): evenly spaced points tested against the candidate shapes, 63 points at 90 angles for the smallest bounding rectangle and 63 for the fit, the same however long the stroke. Runs once per hold, never per Pencil sample. The before is the stroke's samples, for scale. New with #7."
+    },
+    {
+      "metric": "snap_points_read_per_hold",
+      "kind": "count",
+      "value": 20002,
+      "before": 10000,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "feat/snap-lasso-text 2026-11-01 (deterministic; checked by CI VellumCore tests)",
+      "note": "The same hold: the stroke's points read, twice (its length and bounds, then spacing 64 points along it). Once per hold. New with #7."
+    },
+    {
       "metric": "draw_frame_ms_max",
       "kind": "time",
       "value": 4.27,

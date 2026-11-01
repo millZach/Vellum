@@ -1,5 +1,5 @@
 #!/bin/sh
-# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
+# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, snap, lasso and text boxes, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
 # app. The fold is moved by Scripts/duo/posture.m, a simulator-side tool that calls SpringBoard's display tool service,
 # the way Sotto captured its Duo layouts (Sotto tag prototype/iphone-duo-layout).
 # usage: capture-duo.sh [output folder]   (default .build-captures)
@@ -131,6 +131,21 @@ for appearance in light dark; do
   xcrun simctl ui "$udid" appearance "$appearance"
   capture settings-draw-with-finger --ui-tab drawings --ui-settings --ui-draw-with-finger
   capture canvas-finger-stroke --ui-tab canvases --ui-reset --ui-new-canvas --ui-finger-stroke --ui-draw-with-finger
+done
+
+# Snap, lasso and text boxes (#7), in light and dark. The simulator cannot hold a Pencil, so Debug-only launch
+# arguments (Vellum/DebugSelection.swift) drive the canvas view's own input paths: a wobbly line and a rough box held
+# still until they snap to a straight line and a rectangle, and a circle snapped by the line and shape tool; a lasso
+# loop round the fixture's bypass, selected with its box, handles and menu; the same selection dragged; and two text
+# boxes placed and typed into.
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  saved_wait=${WAIT:-6}; WAIT=${SELECTION_WAIT:-10}
+  capture canvas-snap --ui-tab canvases --ui-reset --ui-new-canvas --ui-snap
+  capture canvas-lasso --ui-tab canvases --ui-reset --ui-fixture --ui-lasso
+  capture canvas-lasso-moved --ui-tab canvases --ui-reset --ui-fixture --ui-lasso-move
+  capture canvas-text --ui-tab canvases --ui-reset --ui-new-canvas --ui-text
+  WAIT=$saved_wait
 done
 
 # Frame timing on the 10,000-stroke canvas (#21): the benchmark pans, pinches, draws and erases through the canvas

@@ -9,7 +9,11 @@ final class CanvasToolTests: XCTestCase {
             "Lasso", "Text box",
             "Measure", "Dimension", "Frame", "Window",
         ])
-        XCTAssertEqual(CanvasTool.allCases.map(\.group), [0, 0, 0, 0, 1, 1, 2, 2, 2, 2])
+        XCTAssertEqual(CanvasTool.Group.allCases.map(\.tools), [
+            [.pen, .highlighter, .eraser, .lineAndShape],
+            [.lasso, .textBox],
+            [.measure, .dimension, .frame, .window],
+        ])
     }
 
     func testOnlyThePenHighlighterAndEraserWorkYetAndTheRestSaySo() {
@@ -17,7 +21,7 @@ final class CanvasToolTests: XCTestCase {
         for tool in CanvasTool.allCases where !tool.isAvailable {
             XCTAssertTrue(tool.hint.hasPrefix("Not available yet"), tool.title)
         }
-        XCTAssertEqual(CanvasTool.lassoTicket, 7)
+        XCTAssertEqual(CanvasTool.lasso.comingIn, 7)
         XCTAssertEqual(CanvasTool.measure.comingIn, 8)
     }
 
@@ -51,10 +55,6 @@ final class CanvasToolTests: XCTestCase {
     func testTheCanvasSaysItIsNotSavedYet() {
         XCTAssertEqual(SaveState.notSavedYet.title, "Not saved yet")
     }
-}
-
-private extension CanvasTool {
-    static var lassoTicket: Int? { CanvasTool.lasso.comingIn }
 }
 
 /// The status bar leaves the prompt about 170 points between the scale bar and the sheet count; a prompt longer than

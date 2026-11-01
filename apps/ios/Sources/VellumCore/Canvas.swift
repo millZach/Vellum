@@ -21,7 +21,7 @@ public struct Canvas: Hashable, Sendable {
     /// The rectangle everything on the canvas covers (sheets, frames and ink), for zoom to everything; nil for an
     /// empty canvas.
     public var extents: CanvasRect? {
-        CanvasRect.union(sheets.map(\.bounds) + frames.map(\.bounds) + ink.strokes.compactMap(\.bounds))
+        CanvasRect.union(sheets.map(\.bounds) + frames.map(\.bounds) + [ink.bounds].compactMap { $0 })
     }
 
     /// The length between two points on the canvas. It is real wherever the canvas is real, across any number of

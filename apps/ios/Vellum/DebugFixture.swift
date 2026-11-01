@@ -57,15 +57,15 @@ enum DebugFixture {
     private static func circle(centre: (Double, Double), radius: Double) -> [CanvasPoint] {
         (0...32).map { i in
             let a = Double(i) / 32 * 2 * Double.pi
-            return point((centre.0 + radius * cosine(a), centre.1 + radius * sine(a)))
+            return point((centre.0 + radius * cos(a), centre.1 + radius * sin(a)))
         }
     }
 
     private static func cloud(centre: (Double, Double), width: Double, height: Double) -> [CanvasPoint] {
         (0...60).map { i in
             let a = Double(i) / 60 * 2 * Double.pi
-            let bump = 1 + 0.06 * abs(sine(a * 7))
-            return point((centre.0 + cosine(a) * width / 2 * bump, centre.1 + sine(a) * height / 2 * bump))
+            let bump = 1 + 0.06 * abs(sin(a * 7))
+            return point((centre.0 + cos(a) * width / 2 * bump, centre.1 + sin(a) * height / 2 * bump))
         }
     }
 
@@ -73,11 +73,8 @@ enum DebugFixture {
         let steps = waves * 8
         return (0...steps).map { i in
             let t = Double(i) / Double(steps)
-            return point((start.0 + t * length, start.1 + height * sine(t * Double(waves) * 2 * Double.pi)))
+            return point((start.0 + t * length, start.1 + height * sin(t * Double(waves) * 2 * Double.pi)))
         }
     }
-
-    private static func sine(_ x: Double) -> Double { sin(x) }
-    private static func cosine(_ x: Double) -> Double { cos(x) }
 }
 #endif

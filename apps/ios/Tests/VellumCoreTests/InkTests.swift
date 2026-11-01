@@ -20,7 +20,7 @@ final class InkTests: XCTestCase {
     func testAStrokeKeepsTheMarkupColourItWasDrawnIn() {
         var session = InkSession()
         for colour in MarkupColour.allCases {
-            session.draw(line(0, 0, 10, 0), tool: .pen, colour: colour, weight: .medium, pointsPerInch: 1)
+            session.draw(line(0, 0, 10, 0), tool: .pen, colour: colour, width: .inches(3))
         }
         XCTAssertEqual(session.ink.strokes.map(\.colour), [.red, .green, .blue, .sketch])
     }
@@ -49,12 +49,12 @@ final class InkTests: XCTestCase {
     // MARK: Widths
 
     func testAStrokesWidthIsItsScreenWeightAtTheZoomItWasDrawnAt() {
-        var session = InkSession()
+        let pen = PenSettings()
         // At 2 points per inch a 3-point medium pen covers 1.5 real inches.
-        let closeUp = session.draw(line(0, 0, 1, 0), tool: .pen, colour: .red, weight: .medium, pointsPerInch: 2)!
+        let closeUp = pen.beginStroke(at: .origin, pointsPerInch: 2)!
         XCTAssertEqual(closeUp.width, .inches(1.5))
         // Zoomed out to 0.01 points per inch (a plant), the same weight covers 300 real inches, 25 feet.
-        let far = session.draw(line(0, 0, 1, 0), tool: .pen, colour: .red, weight: .medium, pointsPerInch: 0.01)!
+        let far = pen.beginStroke(at: .origin, pointsPerInch: 0.01)!
         XCTAssertEqual(far.width.feet, 25, accuracy: 1e-9)
     }
 
@@ -71,7 +71,7 @@ final class InkTests: XCTestCase {
 
     func testAStrokeWithNoPointsLeavesNothing() {
         var session = InkSession()
-        XCTAssertNil(session.draw([], tool: .pen, colour: .red, weight: .fine, pointsPerInch: 1))
+        XCTAssertNil(session.draw([], tool: .pen, colour: .red, width: .inches(1)))
         XCTAssertTrue(session.ink.isEmpty)
         XCTAssertFalse(session.canUndo)
     }
@@ -119,8 +119,9 @@ final class InkTests: XCTestCase {
         let c = session.draw(line(0, 10, 10, 10), tool: .highlighter, colour: .blue, width: .inches(1))!
 
         // One sweep crosses b then a: one undo step.
+        session.beginEraserSweep()
         XCTAssertEqual(session.erase(at: CanvasPoint(x: .feet(5), y: .feet(5)), tolerance: .inches(1)).map(\.id), [b.id])
-        XCTAssertEqual(session.erase(at: CanvasPoint(x: .feet(5), y: .zero), tolerance: .inches(1), continuing: true).map(\.id), [a.id])
+        XCTAssertEqual(session.erase(at: CanvasPoint(x: .feet(5), y: .zero), tolerance: .inches(1)).map(\.id), [a.id])
         XCTAssertEqual(session.ink.strokes.map(\.id), [c.id])
 
         session.undo()
@@ -130,6 +131,46 @@ final class InkTests: XCTestCase {
         session.undo()
         session.undo()
         XCTAssertEqual(session.ink.strokes.map(\.id), [a.id, b.id])
+    }
+
+    func testEachEraserSweepIsItsOwnUndoStepEvenWhenItStartsOnBlankCanvas() {
+        var session = InkSession()
+        let a = session.draw(line(0, 0, 10, 0), tool: .pen, colour: .red, width: .inches(1))!
+        let b = session.draw(line(0, 5, 10, 5), tool: .pen, colour: .green, width: .inches(1))!
+
+        // Sweep one erases a.
+        session.beginEraserSweep()
+        session.erase(at: CanvasPoint(x: .feet(5), y: .zero), tolerance: .inches(1))
+        // Sweep two touches down on blank canvas, then crosses b.
+        session.beginEraserSweep()
+        XCTAssertTrue(session.erase(at: CanvasPoint(x: .feet(5), y: .feet(2)), tolerance: .inches(1)).isEmpty)
+        XCTAssertEqual(session.erase(at: CanvasPoint(x: .feet(5), y: .feet(5)), tolerance: .inches(1)).map(\.id), [b.id])
+        XCTAssertTrue(session.ink.isEmpty)
+
+        // Undo brings back b alone, then a.
+        session.undo()
+        XCTAssertEqual(session.ink.strokes.map(\.id), [b.id])
+        session.undo()
+        XCTAssertEqual(session.ink.strokes.map(\.id), [a.id, b.id])
+        // The next undo is the drawing of b, not more erasing.
+        session.undo()
+        XCTAssertEqual(session.ink.strokes.map(\.id), [a.id])
+    }
+
+    func testASweepDoesNotJoinAnEraseFromBeforeAnUndo() {
+        var session = InkSession()
+        let a = session.draw(line(0, 0, 10, 0), tool: .pen, colour: .red, width: .inches(1))!
+        let b = session.draw(line(0, 5, 10, 5), tool: .pen, colour: .green, width: .inches(1))!
+        let c = session.draw(line(0, 10, 10, 10), tool: .pen, colour: .blue, width: .inches(1))!
+        session.beginEraserSweep()
+        session.erase(at: CanvasPoint(x: .feet(5), y: .zero), tolerance: .inches(1))
+        session.erase(at: CanvasPoint(x: .feet(5), y: .feet(5)), tolerance: .inches(1))
+        // Undo mid-sweep (the other hand), then the same sweep crosses c: a step of its own.
+        session.undo()
+        session.erase(at: CanvasPoint(x: .feet(5), y: .feet(10)), tolerance: .inches(1))
+        XCTAssertEqual(session.ink.strokes.map(\.id), [a.id, b.id])
+        session.undo()
+        XCTAssertEqual(session.ink.strokes.map(\.id), [a.id, b.id, c.id])
     }
 
     func testErasingEmptyCanvasLeavesNoUndoStep() {

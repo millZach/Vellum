@@ -113,43 +113,72 @@ public struct Viewport: Hashable, Sendable {
     }
 }
 
-/// The scale bar in the status bar: a round length in the canvas units whose bar fits a space on screen.
+/// The scale bar in the status bar: a round length whose bar fits a space on screen, labelled exactly. Every length
+/// it offers is one its label shows without rounding, so the bar and its label never disagree ("Scale is the
+/// product").
 public enum ScaleBar {
-    /// The longest round length whose bar is no longer than `maximumPoints` at this zoom. Feet and inches and decimal
-    /// feet step 1/16", 1/8", 1/4", 1/2", 1", 2", 3", 6", then 1', 2', 5', 10', 20', 50' and on by 1-2-5; metric
-    /// steps 1, 2 and 5 times a power of ten millimetres. At a zoom so far out that even the shortest is too long,
-    /// the shortest comes back.
-    public static func length(fitting maximumPoints: Double, pointsPerInch: Double, units: CanvasUnits) -> Length {
+    /// A bar's length and the label under it, which reads that length exactly.
+    public struct Mark: Hashable, Sendable {
+        public let length: Length
+        public let label: String
+    }
+
+    /// The longest round length whose bar is no longer than `maximumPoints` at this zoom, with its label.
+    ///
+    /// - Feet and inches steps 1/16", 1/8", 1/4", 1/2", 1", 2", 3", 6", then 1', 2', 5', 10', 20', 50' and on by
+    ///   1-2-5: every one a whole number of sixteenths, which the units show exactly.
+    /// - Decimal feet steps 0.01', 0.02', 0.05', 0.1' and on by 1-2-5: every one a whole number of hundredths of a
+    ///   foot, which the units show exactly. Closer in than 0.01' fits, the bar falls back to 1/16", labelled in
+    ///   inches, because 1/16" is not a whole hundredth of a foot.
+    /// - Metric steps 1, 2 and 5 times a power of ten millimetres: whole millimetres, shown exactly.
+    ///
+    /// At a zoom so far out that even the shortest is too long, the shortest comes back.
+    public static func mark(fitting maximumPoints: Double, pointsPerInch: Double, units: CanvasUnits) -> Mark {
         let longest = maximumPoints / pointsPerInch
-        let candidates = steps(for: units)
-        return candidates.last { $0.inches <= longest } ?? candidates[0]
+        let candidates = marks(for: units)
+        return candidates.last { $0.length.inches <= longest } ?? candidates[0]
+    }
+
+    /// The length of `mark(fitting:pointsPerInch:units:)`, for spacing the grid.
+    public static func length(fitting maximumPoints: Double, pointsPerInch: Double, units: CanvasUnits) -> Length {
+        mark(fitting: maximumPoints, pointsPerInch: pointsPerInch, units: units).length
     }
 
     /// The bar's length on screen for a length.
     public static func points(for length: Length, pointsPerInch: Double) -> Double { length.inches * pointsPerInch }
 
-    private static let imperialSteps: [Length] = {
-        var steps: [Length] = [1.0 / 16, 1.0 / 8, 1.0 / 4, 1.0 / 2, 1, 2, 3, 6].map { .inches($0) }
-        var decade = 1.0
-        while decade <= 1_000_000 {
-            steps += [1, 2, 5].map { .feet($0 * decade) }
+    /// 1, 2, 5, 10, 20, 50, ... for `decades` decades.
+    private static func oneTwoFive(decades: Int) -> [Int] {
+        var steps: [Int] = []
+        var decade = 1
+        for _ in 0..<decades {
+            steps += [1, 2, 5].map { $0 * decade }
             decade *= 10
         }
         return steps
+    }
+
+    private static let feetAndInchesMarks: [Mark] = {
+        let sixteenths = [1, 2, 4, 8, 16, 32, 48, 96] + oneTwoFive(decades: 7).map { $0 * 12 * 16 }
+        return sixteenths.map { mark(.inches(Double($0) / 16), in: .feetAndInches) }
     }()
 
-    private static let metricSteps: [Length] = {
-        var steps: [Length] = []
-        var decade = 1.0
-        while decade <= 100_000_000 {
-            steps += [1, 2, 5].map { .millimetres($0 * decade) }
-            decade *= 10
+    private static let decimalFeetMarks: [Mark] = {
+        let sixteenth = Length.inches(1.0 / 16)
+        let fallback = Mark(length: sixteenth, label: Fraction.mixed(1, over: 16, writeZero: false) + "\"")
+        return [fallback] + oneTwoFive(decades: 9).map { mark(.feet(Double($0) / 100), in: .decimalFeet) }
+    }()
+
+    private static let metricMarks: [Mark] = oneTwoFive(decades: 9).map { mark(.millimetres(Double($0)), in: .metric) }
+
+    private static func mark(_ length: Length, in units: CanvasUnits) -> Mark { Mark(length: length, label: units.format(length)) }
+
+    private static func marks(for units: CanvasUnits) -> [Mark] {
+        switch units {
+        case .feetAndInches: feetAndInchesMarks
+        case .decimalFeet: decimalFeetMarks
+        case .metric: metricMarks
         }
-        return steps
-    }()
-
-    private static func steps(for units: CanvasUnits) -> [Length] {
-        units == .metric ? metricSteps : imperialSteps
     }
 }
 

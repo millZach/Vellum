@@ -120,6 +120,76 @@ final class ViewportTests: XCTestCase {
         }
     }
 
+    /// The zooms to check the scale bar at: from the least to the most zoom in small steps, both limits included.
+    private var zoomRange: [Double] {
+        var zooms: [Double] = []
+        var ppi = Viewport.minimumPointsPerInch
+        while ppi < Viewport.maximumPointsPerInch {
+            zooms.append(ppi)
+            ppi *= 1.07
+        }
+        return zooms + [Viewport.maximumPointsPerInch]
+    }
+
+    func testTheScaleBarsLabelReadsItsLengthExactlyAtEveryZoomInEveryUnits() {
+        for units in CanvasUnits.allCases {
+            for ppi in zoomRange {
+                let mark = ScaleBar.mark(fitting: 90, pointsPerInch: ppi, units: units)
+                guard let read = Self.inches(readFrom: mark.label) else {
+                    XCTFail("\(units) at \(ppi): can't read \(mark.label)")
+                    continue
+                }
+                XCTAssertEqual(read, mark.length.inches, accuracy: 1e-9, "\(units) at \(ppi): \(mark.label)")
+                let points = ScaleBar.points(for: mark.length, pointsPerInch: ppi)
+                XCTAssertLessThanOrEqual(points, 90 + 1e-9, "\(units) at \(ppi)")
+                if ppi > Viewport.minimumPointsPerInch { XCTAssertGreaterThan(points, 30, "\(units) at \(ppi)") }
+            }
+        }
+    }
+
+    func testDecimalFeetScaleBarsAreWholeHundredthsOrASixteenthInInches() {
+        // At the most zoom 90 points is 0.09", shorter than 0.01' (0.12"), so the bar is 1/16" and says so in inches.
+        let closest = ScaleBar.mark(fitting: 90, pointsPerInch: Viewport.maximumPointsPerInch, units: .decimalFeet)
+        XCTAssertEqual(closest.length, .inches(1.0 / 16))
+        XCTAssertEqual(closest.label, "1/16\"")
+        // At 700 pt/in, 0.01' is 84 points and fits.
+        let hundredth = ScaleBar.mark(fitting: 90, pointsPerInch: 700, units: .decimalFeet)
+        XCTAssertEqual(hundredth.label, "0.01'")
+        XCTAssertEqual(hundredth.length.inches, 0.12, accuracy: 1e-12)
+        // At 1 pt/in, 7.5' fits: 5.00'.
+        XCTAssertEqual(ScaleBar.mark(fitting: 90, pointsPerInch: 1, units: .decimalFeet).label, "5.00'")
+        // At 30 pt/in, 3" (0.25') fits: 0.20'.
+        XCTAssertEqual(ScaleBar.mark(fitting: 90, pointsPerInch: 30, units: .decimalFeet).label, "0.20'")
+    }
+
+    /// The length a scale bar label reads, in inches: `12'-6 1/2"`, `1/16"`, `12.54'`, `350 mm` or `12.540 m`.
+    private static func inches(readFrom label: String) -> Double? {
+        func fraction(_ text: Substring) -> Double? {
+            let parts = text.split(separator: "/")
+            if parts.count == 1 { return Double(parts[0]) }
+            guard parts.count == 2, let n = Double(parts[0]), let d = Double(parts[1]) else { return nil }
+            return n / d
+        }
+        func mixed(_ text: Substring) -> Double? {
+            var total = 0.0
+            for part in text.split(separator: " ") {
+                guard let value = fraction(part) else { return nil }
+                total += value
+            }
+            return total
+        }
+        if label.hasSuffix(" mm") { return Double(label.dropLast(3)).map { $0 / 25.4 } }
+        if label.hasSuffix(" m") { return Double(label.dropLast(2)).map { $0 * 1000 / 25.4 } }
+        if label.hasSuffix("\""), let dash = label.firstIndex(of: "-") {
+            guard let feet = Double(label[..<dash].dropLast()),
+                  let inches = mixed(label[label.index(after: dash)...].dropLast()) else { return nil }
+            return feet * 12 + inches
+        }
+        if label.hasSuffix("\"") { return mixed(label.dropLast()[...]) }
+        if label.hasSuffix("'") { return Double(label.dropLast()).map { $0 * 12 } }
+        return nil
+    }
+
     // MARK: Position
 
     func testThePositionReadsInCanvasUnitsWithYCountingUp() {

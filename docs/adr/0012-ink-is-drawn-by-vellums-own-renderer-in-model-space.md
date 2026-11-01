@@ -7,8 +7,9 @@ PencilKit does not fit the zoom. `PKCanvasView` zooms as a `UIScrollView`, and d
 ## Consequences
 
 - A stroke is a list of `CanvasPoint`s in real-world inches, its pen (pen or highlighter), its `MarkupColour` and its width, all in `VellumCore` and tested on Linux. Nothing about it is stored in screen space.
-- A stroke's width is a real-world length, fixed when it is drawn as the chosen line weight at that zoom. Ink behaves like ink on paper: handwriting written close up shrinks with its letters when Zach zooms out rather than swelling into a blob, and a redline keeps its width relative to what it marks. Ink is never drawn thinner than a hairline, so it never vanishes.
-- The eraser erases whole strokes, and undo and redo cover drawing and erasing for the session, in `InkSession`.
+- A stroke's pen, markup colour and width are fixed when the Pencil touches down (`PenSettings.beginStroke`), so changing colour or pinching with the other hand mid-stroke never changes what is committed. Its width is a real-world length: the chosen line weight at the zoom it touched down at. Ink behaves like ink on paper: handwriting written close up shrinks with its letters when Zach zooms out rather than swelling into a blob, and a redline keeps its width relative to what it marks. Ink is never drawn thinner than a hairline, so it never vanishes.
+- The eraser erases whole strokes, and undo and redo cover drawing and erasing for the session, in `InkSession`. One sweep of the eraser, touchdown to lift, is one undo step, and every sweep is its own.
+- Every coalesced sample is ink, the last batch at lift included, so a stroke's tail is the curve Zach drew, not a chord.
 - Latency is ours to keep low: the stroke in progress is a shape layer updated on every touch with the Pencil's predicted touches, and finished ink is drawn only when the ink or the view changes. If it is not fast enough on the Duo, a Metal renderer can replace the drawing without touching the model.
 - Scribble (handwriting into text) is not free. Text boxes (#7) will need it brought in on their own.
-- The zoom stops at 1,000 points per inch, under an inch across the Duo, because that is where 1/16", the finest length the canvas units show, still fits the scale bar.
+- The zoom stops at 1,000 points per inch, under an inch across the Duo, because that is where 1/16", the finest length the canvas units show, still fits the scale bar. The scale bar only offers lengths its label shows exactly; in decimal feet, closer in than 0.01' fits, it reads 1/16" in inches.

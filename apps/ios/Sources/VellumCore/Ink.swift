@@ -231,6 +231,8 @@ public struct InkSession: Sendable {
     private var undoStack: [Edit] = []
     private var redoStack: [Edit] = []
     private var nextID: Int
+    /// Whether the top undo step belongs to the eraser sweep in progress, so the sweep's next hit joins it.
+    private var sweepHasEntry = false
 
     /// One undoable step. An erase records every stroke it removed, with the index it was removed from, in the order
     /// they went, so undo can put each back exactly where it was.
@@ -247,12 +249,10 @@ public struct InkSession: Sendable {
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
 
-    /// Adds a stroke drawn at the given screen weight and zoom. A stroke with no points leaves nothing and returns nil.
+    /// Commits a stroke the Pencil has finished, with the pen, colour and width it took at touchdown.
     @discardableResult
-    public mutating func draw(_ points: [CanvasPoint], tool: InkTool, colour: MarkupColour, weight: LineWeight,
-                              pointsPerInch: Double) -> InkStroke? {
-        let width = Length(inches: weight.screenWidth(for: tool) / pointsPerInch)
-        return draw(points, tool: tool, colour: colour, width: width)
+    public mutating func commit(_ stroke: StrokeInProgress) -> InkStroke? {
+        draw(stroke.points, tool: stroke.tool, colour: stroke.colour, width: stroke.width)
     }
 
     /// Adds a stroke with a real-world width. A stroke with no points leaves nothing and returns nil.
@@ -263,26 +263,38 @@ public struct InkSession: Sendable {
         nextID += 1
         let index = ink.strokes.count
         ink.insert(stroke, at: index)
-        record(.draw(stroke, index: index), joining: false)
+        record(.draw(stroke, index: index))
         return stroke
     }
 
-    /// Erases every stroke within `tolerance` of a point, whole. With `continuing`, the strokes join the previous erase
-    /// as one undo step, so a single sweep of the eraser undoes in one go. Returns the strokes erased.
+    /// Starts a sweep of the eraser: everything one sweep erases, from touchdown to lift, undoes as one step, and a
+    /// new sweep is always a new step, even when it starts on blank canvas.
+    public mutating func beginEraserSweep() { sweepHasEntry = false }
+
+    /// Erases every stroke within `tolerance` of a point, whole, as part of the current sweep. Returns the strokes
+    /// erased.
     @discardableResult
-    public mutating func erase(at point: CanvasPoint, tolerance: Length, continuing: Bool = false) -> [InkStroke] {
+    public mutating func erase(at point: CanvasPoint, tolerance: Length) -> [InkStroke] {
         let hit = ink.strokes(hitAt: point, tolerance: tolerance)
         var removed: [(index: Int, stroke: InkStroke)] = []
         for stroke in hit {
             guard let index = ink.index(of: stroke.id) else { continue }
             removed.append((index, ink.remove(at: index)))
         }
-        if !removed.isEmpty { record(.erase(removed), joining: continuing) }
+        guard !removed.isEmpty else { return [] }
+        if sweepHasEntry, case .erase(let earlier)? = undoStack.last {
+            redoStack.removeAll()
+            undoStack[undoStack.count - 1] = .erase(earlier + removed)
+        } else {
+            record(.erase(removed))
+            sweepHasEntry = true
+        }
         return removed.map(\.stroke)
     }
 
     public mutating func undo() {
         guard let edit = undoStack.popLast() else { return }
+        sweepHasEntry = false
         switch edit {
         case .draw(_, let index):
             _ = ink.remove(at: index)
@@ -294,6 +306,7 @@ public struct InkSession: Sendable {
 
     public mutating func redo() {
         guard let edit = redoStack.popLast() else { return }
+        sweepHasEntry = false
         switch edit {
         case .draw(let stroke, let index):
             ink.insert(stroke, at: index)
@@ -303,13 +316,10 @@ public struct InkSession: Sendable {
         undoStack.append(edit)
     }
 
-    private mutating func record(_ edit: Edit, joining: Bool) {
+    private mutating func record(_ edit: Edit) {
         redoStack.removeAll()
-        if joining, case .erase(let more) = edit, case .erase(let earlier)? = undoStack.last {
-            undoStack[undoStack.count - 1] = .erase(earlier + more)
-        } else {
-            undoStack.append(edit)
-        }
+        undoStack.append(edit)
+        sweepHasEntry = false
     }
 }
 

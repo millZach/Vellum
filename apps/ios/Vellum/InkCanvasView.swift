@@ -43,8 +43,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     private let liveLayer = CAShapeLayer()
     private var liveTouch: UITouch?
-    private var livePoints: [CanvasPoint] = []
-    private var liveInk: InkTool?
+    /// The stroke being drawn, with the pen, colour and width it took at touchdown.
+    private var liveStroke: StrokeInProgress?
     private var erasing = false
     private var lastPinchScale: CGFloat = 1
     private var lastPanTranslation: CGPoint = .zero
@@ -185,12 +185,12 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         if editor.tool == .eraser {
             liveTouch = touch
             erasing = true
-            editor.erase(at: point, continuing: false)
-        } else if let ink = editor.tool.inkTool {
+            editor.beginEraserSweep()
+            editor.erase(at: point)
+        } else if let stroke = editor.beginStroke(at: point) {
             liveTouch = touch
-            liveInk = ink
-            livePoints = [point]
-            styleLiveLayer(for: ink)
+            liveStroke = stroke
+            styleLiveLayer(for: stroke)
             updateLiveLayer(predicted: [])
         }
     }
@@ -200,17 +200,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             super.touchesMoved(touches, with: event)
             return
         }
-        let samples = event?.coalescedTouches(for: touch) ?? [touch]
-        for sample in samples {
-            let point = canvasPoint(sample)
-            if erasing {
-                editor.erase(at: point, continuing: true)
-            } else if let last = livePoints.last,
-                      last.distance(to: point).inches * editor.viewport.pointsPerInch >= 0.5 {
-                livePoints.append(point)
-            }
-        }
-        if let last = samples.last { editor.penPosition = canvasPoint(last) }
+        consume(event?.coalescedTouches(for: touch) ?? [touch], ending: false)
         if !erasing {
             let predicted = (event?.predictedTouches(for: touch) ?? []).map(canvasPoint)
             updateLiveLayer(predicted: predicted)
@@ -222,10 +212,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             super.touchesEnded(touches, with: event)
             return
         }
-        if !erasing, let last = event?.coalescedTouches(for: touch)?.last {
-            let point = canvasPoint(last)
-            if livePoints.last != point { livePoints.append(point) }
-        }
+        // The final batch can hold several samples since the last move: all of them are the stroke's tail.
+        consume(event?.coalescedTouches(for: touch) ?? [touch], ending: true)
         finishStroke(keep: true)
     }
 
@@ -234,18 +222,36 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             super.touchesCancelled(touches, with: event)
             return
         }
-        // A Pencil stroke the system interrupts is still Zach's ink: keep what was drawn. Only a finger stroke on the
-        // simulator, cancelled because it turned into a two-finger pan, is dropped.
-        finishStroke(keep: touch.type == .pencil)
+        // A Pencil stroke the system interrupts is still Zach's ink: keep what was drawn, tail included. Only a finger
+        // stroke on the simulator, cancelled because it turned into a two-finger pan, is dropped.
+        let keep = touch.type == .pencil
+        if keep { consume(event?.coalescedTouches(for: touch) ?? [touch], ending: true) }
+        finishStroke(keep: keep)
+    }
+
+    /// Feeds every one of the Pencil's samples to the eraser or the stroke. Samples closer than half a screen point
+    /// are thinned, except the last one when the Pencil lifts, so the stroke ends where the Pencil left the glass.
+    private func consume(_ samples: [UITouch], ending: Bool) {
+        let spacing = editor.viewport.canvasLength(ofScreen: 0.5)
+        for (i, sample) in samples.enumerated() {
+            let point = canvasPoint(sample)
+            if erasing {
+                editor.erase(at: point)
+            } else if ending && i == samples.count - 1 {
+                liveStroke?.end(at: point)
+            } else {
+                liveStroke?.add(point, spacing: spacing)
+            }
+        }
+        if let last = samples.last { editor.penPosition = canvasPoint(last) }
     }
 
     private func finishStroke(keep: Bool) {
-        if keep, !erasing, let ink = liveInk, !livePoints.isEmpty {
-            editor.draw(livePoints, with: ink)
+        if keep, let stroke = liveStroke {
+            editor.commit(stroke)
         }
         liveTouch = nil
-        liveInk = nil
-        livePoints = []
+        liveStroke = nil
         erasing = false
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -254,19 +260,22 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         setNeedsDisplay()
     }
 
-    private func styleLiveLayer(for ink: InkTool) {
+    private func styleLiveLayer(for stroke: StrokeInProgress) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        liveLayer.strokeColor = Palette.ink(editor.colour, dark: isDark).cgColor
-        liveLayer.opacity = Float(ink.opacity)
-        liveLayer.lineWidth = (editor.weights[ink] ?? .default).screenWidth(for: ink)
+        liveLayer.strokeColor = Palette.ink(stroke.colour, dark: isDark).cgColor
+        liveLayer.opacity = Float(stroke.tool.opacity)
         CATransaction.commit()
     }
 
+    /// Redraws the stroke being drawn at its fixed real-world width, so a pinch mid-stroke shows what will be kept.
     private func updateLiveLayer(predicted: [CanvasPoint]) {
+        guard let stroke = liveStroke else { return }
+        let viewport = editor.viewport
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        liveLayer.path = Self.path(for: livePoints + predicted, viewport: editor.viewport)
+        liveLayer.lineWidth = max(stroke.width.inches * viewport.pointsPerInch, 0.75)
+        liveLayer.path = Self.path(for: stroke.points + predicted, viewport: viewport)
         CATransaction.commit()
     }
 

@@ -51,9 +51,9 @@ private struct ToolRail: View {
 
     var body: some View {
         VStack(spacing: 2) {
-            ForEach(0..<3, id: \.self) { group in
-                if group > 0 { RailDivider() }
-                ForEach(CanvasTool.allCases.filter { $0.group == group }) { tool in
+            ForEach(CanvasTool.Group.allCases, id: \.self) { group in
+                if group != CanvasTool.Group.allCases.first { RailDivider() }
+                ForEach(group.tools) { tool in
                     toolButton(tool)
                 }
             }
@@ -260,7 +260,7 @@ private struct StatusBar: View {
 
     var body: some View {
         let units = editor.canvas.units
-        let barLength = ScaleBar.length(fitting: Self.scaleBarSpace, pointsPerInch: editor.viewport.pointsPerInch, units: units)
+        let bar = ScaleBar.mark(fitting: Self.scaleBarSpace, pointsPerInch: editor.viewport.pointsPerInch, units: units)
         HStack(spacing: 14) {
             Text(editor.penPosition.map(units.formatPosition) ?? "X –  Y –")
                 .monospacedDigit()
@@ -270,13 +270,13 @@ private struct StatusBar: View {
             HStack(spacing: 6) {
                 ScaleBarShape()
                     .stroke(Chrome.text, lineWidth: 1.5)
-                    .frame(width: ScaleBar.points(for: barLength, pointsPerInch: editor.viewport.pointsPerInch), height: 6)
-                Text(units.format(barLength)).monospacedDigit()
+                    .frame(width: ScaleBar.points(for: bar.length, pointsPerInch: editor.viewport.pointsPerInch), height: 6)
+                Text(bar.label).monospacedDigit()
             }
             .frame(width: Self.scaleBarSpace + 70, alignment: .leading)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Scale bar")
-            .accessibilityValue(units.format(barLength))
+            .accessibilityValue(bar.label)
             Text(editor.tool.prompt)
                 .foregroundStyle(Chrome.secondaryText)
                 .lineLimit(1)

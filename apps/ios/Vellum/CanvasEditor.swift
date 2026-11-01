@@ -16,9 +16,8 @@ final class CanvasEditor {
     var canvas: VellumCore.Canvas
     private(set) var session: InkSession
     var viewport: Viewport
-    var tool: CanvasTool = .pen
-    var colour: MarkupColour = .red
-    var weights: [InkTool: LineWeight] = [.pen: .default, .highlighter: .default]
+    /// The tool, markup colour and line weights in hand. A stroke takes them at touchdown (`beginStroke`).
+    var pen = PenSettings()
     /// Where the Pencil last touched the canvas. The Duo has no hover, so this is the last touch, not a live cursor.
     var penPosition: CanvasPoint?
     let saveState = SaveState.notSavedYet
@@ -46,9 +45,19 @@ final class CanvasEditor {
     var canUndo: Bool { session.canUndo }
     var canRedo: Bool { session.canRedo }
 
+    var tool: CanvasTool {
+        get { pen.tool }
+        set { pen.tool = newValue }
+    }
+
+    var colour: MarkupColour {
+        get { pen.colour }
+        set { pen.colour = newValue }
+    }
+
     var weight: LineWeight {
-        get { tool.inkTool.flatMap { weights[$0] } ?? .default }
-        set { if let ink = tool.inkTool { weights[ink] = newValue } }
+        get { pen.weight }
+        set { pen.weight = newValue }
     }
 
     /// Called by the ink view whenever its size changes.
@@ -70,15 +79,26 @@ final class CanvasEditor {
         }
     }
 
-    func draw(_ points: [CanvasPoint], with ink: InkTool) {
-        session.draw(points, tool: ink, colour: colour, weight: weights[ink] ?? .default,
-                     pointsPerInch: viewport.pointsPerInch)
+    /// Starts a stroke where the Pencil touched down, with the pen, colour, weight and zoom as they are now; nil when
+    /// the tool in hand leaves no ink.
+    func beginStroke(at point: CanvasPoint) -> StrokeInProgress? {
+        pen.beginStroke(at: point, pointsPerInch: viewport.pointsPerInch)
+    }
+
+    /// Adds a stroke the Pencil has finished to the ink.
+    func commit(_ stroke: StrokeInProgress) {
+        session.commit(stroke)
         syncInk()
     }
 
+    /// Starts a sweep of the eraser, which undoes as one step.
+    func beginEraserSweep() {
+        session.beginEraserSweep()
+    }
+
     /// Erases whole strokes under the eraser: within 8 screen points of the Pencil's tip at this zoom.
-    func erase(at point: CanvasPoint, continuing: Bool) {
-        let erased = session.erase(at: point, tolerance: viewport.canvasLength(ofScreen: 8), continuing: continuing)
+    func erase(at point: CanvasPoint) {
+        let erased = session.erase(at: point, tolerance: viewport.canvasLength(ofScreen: 8))
         if !erased.isEmpty { syncInk() }
     }
 

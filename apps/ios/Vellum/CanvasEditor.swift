@@ -23,6 +23,10 @@ final class CanvasEditor {
     let saveState = SaveState.notSavedYet
     /// Changes whenever the ink does, so the ink view knows to redraw.
     private(set) var inkRevision = 0
+    /// Where every stroke is, kept in step with the ink, for the eraser and the renderer (ADR-0012).
+    @ObservationIgnored private(set) var inkIndex: InkIndex
+    /// Told what changed whenever the ink does, so the renderer redraws only that, without waiting on SwiftUI.
+    @ObservationIgnored var onInkChange: (@MainActor (InkIndex.Change) -> Void)?
     /// Set once the view has its size and the starting zoom has been applied.
     @ObservationIgnored private var hasPlacedView = false
     private let startingView: StartingView
@@ -37,6 +41,7 @@ final class CanvasEditor {
     init(canvas: VellumCore.Canvas = VellumCore.Canvas(), startingView: StartingView = .origin) {
         self.canvas = canvas
         session = InkSession(ink: canvas.ink)
+        inkIndex = InkIndex(canvas.ink)
         viewport = Viewport(pointsPerInch: Self.startingPointsPerInch, screenWidth: 951, screenHeight: 669)
         self.startingView = startingView
     }
@@ -98,7 +103,7 @@ final class CanvasEditor {
 
     /// Erases whole strokes under the eraser: within 8 screen points of the Pencil's tip at this zoom.
     func erase(at point: CanvasPoint) {
-        let erased = session.erase(at: point, tolerance: viewport.canvasLength(ofScreen: 8))
+        let erased = session.erase(at: point, tolerance: viewport.canvasLength(ofScreen: 8), index: inkIndex)
         if !erased.isEmpty { syncInk() }
     }
 
@@ -124,5 +129,7 @@ final class CanvasEditor {
     private func syncInk() {
         canvas.ink = session.ink
         inkRevision += 1
+        let change = inkIndex.sync(with: session.ink)
+        onInkChange?(change)
     }
 }

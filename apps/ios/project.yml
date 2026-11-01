@@ -26,6 +26,12 @@ targets:
       - Vellum
     dependencies:
       - package: VellumCore
+    # XcodeGen writes this Info.plist (gitignored) and Xcode merges it with the keys generated below. The one key here
+    # has no INFOPLIST_KEY_ build setting: it lets custom drawing run at ProMotion's 120 Hz instead of 60 on iPhone.
+    info:
+      path: Vellum/Info.plist
+      properties:
+        CADisableMinimumFrameDurationOnPhone: true
     scheme: {}
     settings:
       base:

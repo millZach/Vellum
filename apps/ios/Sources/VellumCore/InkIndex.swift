@@ -166,10 +166,23 @@ public struct InkIndex: Sendable {
 
     // MARK: Looking things up
 
+    /// The work a lookup did, for the work budgets (docs/perf): strokes whose cached bounds it compared, and stroke
+    /// points it looked at.
+    public struct Work: Hashable, Sendable {
+        public var strokesVisited = 0
+        public var pointsInspected = 0
+        public init() {}
+    }
+
     /// The ids of the strokes whose ink touches a rectangle, in the order they were drawn (bottom first).
     public func strokeIDs(in box: Box) -> [StrokeID] {
+        var work = Work()
+        return strokeIDs(in: box, work: &work)
+    }
+
+    public func strokeIDs(in box: Box, work: inout Work) -> [StrokeID] {
         var found: [StrokeID] = []
-        visit(box) { found.append($0.stroke.id) }
+        visit(box, &work) { found.append($0.stroke.id) }
         found.sort()
         return found
     }
@@ -177,7 +190,8 @@ public struct InkIndex: Sendable {
     /// The strokes whose ink touches a rectangle, in the order they were drawn (bottom first).
     public func strokes(in box: Box) -> [InkStroke] {
         var found: [Entry] = []
-        visit(box) { found.append($0) }
+        var work = Work()
+        visit(box, &work) { found.append($0) }
         found.sort { $0.stroke.id < $1.stroke.id }
         return found.map(\.stroke)
     }
@@ -188,18 +202,25 @@ public struct InkIndex: Sendable {
     /// it, the same test as `InkStroke.isHit`, made with squared distances and stopping at the first segment close
     /// enough.
     public func strokes(hitAt point: CanvasPoint, tolerance: Length) -> [InkStroke] {
+        var work = Work()
+        return strokes(hitAt: point, tolerance: tolerance, work: &work)
+    }
+
+    public func strokes(hitAt point: CanvasPoint, tolerance: Length, work: inout Work) -> [InkStroke] {
         let px = point.x.inches, py = point.y.inches, t = tolerance.inches
         let probe = Box(minX: px, minY: py, maxX: px, maxY: py).grown(by: t)
         var hits: [InkStroke] = []
-        visit(probe) { entry in
-            if Self.isHit(entry, px, py, t) { hits.append(entry.stroke) }
+        var inspected = 0
+        visit(probe, &work) { entry in
+            if Self.isHit(entry, px, py, t, inspected: &inspected) { hits.append(entry.stroke) }
         }
+        work.pointsInspected += inspected
         hits.sort { $0.id > $1.id }
         return hits
     }
 
     /// Calls `body` once for every stroke whose bounds touch `box`.
-    private func visit(_ box: Box, _ body: (Entry) -> Void) {
+    private func visit(_ box: Box, _ work: inout Work, _ body: (Entry) -> Void) {
         for (level, cells) in levels {
             let size = Self.cellSize(level)
             // A stroke reaches at most one cell past its own, so look one cell further up and left.
@@ -211,6 +232,7 @@ public struct InkIndex: Sendable {
                 for x in Int(lowX)...Int(highX) {
                     for y in Int(lowY)...Int(highY) {
                         guard let members = cells[Cell(x: x, y: y)] else { continue }
+                        work.strokesVisited += members.count
                         for id in members {
                             if let entry = entries[id], entry.box.intersects(box) { body(entry) }
                         }
@@ -221,6 +243,7 @@ public struct InkIndex: Sendable {
                 for (cell, members) in cells {
                     let x = Double(cell.x), y = Double(cell.y)
                     guard x >= lowX, x <= highX, y >= lowY, y <= highY else { continue }
+                    work.strokesVisited += members.count
                     for id in members {
                         if let entry = entries[id], entry.box.intersects(box) { body(entry) }
                     }
@@ -232,7 +255,7 @@ public struct InkIndex: Sendable {
     // MARK: Geometry
 
     /// The stroke's ink rectangle, the same as `InkStroke.bounds`, in one pass over its points.
-    static func box(of stroke: InkStroke) -> Box? {
+    public static func box(of stroke: InkStroke) -> Box? {
         guard let first = stroke.points.first else { return nil }
         var minX = first.x.inches, maxX = minX, minY = first.y.inches, maxY = minY
         for p in stroke.points.dropFirst() {
@@ -245,7 +268,7 @@ public struct InkIndex: Sendable {
 
     /// Whether the eraser at (px, py) with tolerance t touches the stroke: inside its bounds grown by t, then within
     /// half its width plus t of a segment, compared squared, stopping at the first segment that is.
-    static func isHit(_ entry: Entry, _ px: Double, _ py: Double, _ t: Double) -> Bool {
+    static func isHit(_ entry: Entry, _ px: Double, _ py: Double, _ t: Double, inspected: inout Int) -> Bool {
         let b = entry.box
         guard px >= b.minX - t, px <= b.maxX + t, py >= b.minY - t, py <= b.maxY + t else { return false }
         let reach = entry.stroke.width.inches / 2 + t
@@ -253,11 +276,14 @@ public struct InkIndex: Sendable {
         let points = entry.stroke.points
         guard let first = points.first else { return false }
         if points.count == 1 {
+            inspected += 1
             let dx = first.x.inches - px, dy = first.y.inches - py
             return dx * dx + dy * dy <= reachSquared
         }
         var ax = first.x.inches, ay = first.y.inches
+        inspected += 1
         for i in 1..<points.count {
+            inspected += 1
             let bx = points[i].x.inches, by = points[i].y.inches
             let dx = bx - ax, dy = by - ay
             let lengthSquared = dx * dx + dy * dy

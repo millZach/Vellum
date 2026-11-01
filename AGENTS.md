@@ -9,6 +9,7 @@ This is a brief, not a specification. It names what is expensive to get wrong an
 - **The repository is public.** No keys, tokens, Dropbox app secrets, signing files, team IDs beyond what Xcode already requires, or client drawings, PDFs, meeting audio or transcripts, ever, including in tests, fixtures, screenshots and verification notes. Fixtures are drawings made up for the test. Secrets reach CI only as GitHub Actions secrets, and reach the app only through a file `.gitignore` already lists. A change that needs a new secret says in the PR where it lives and how it gets there.
 - **Scale is the product.** A PDF placed on the canvas is the size it prints, and a dimension read off the canvas is a real length. A change that touches units, zoom or PDF placement proves its numbers in a test, not by eye.
 - **The pen's ink is Zach's work.** Nothing loses a stroke: not a crash, not a sync, not a send to an agent. Saving comes before anything clever.
+- **Speed is the product.** How fast and smooth Vellum feels comes first. Nothing heavy runs on the main thread or once per Pencil sample; disk writes and network transfers are kept to the minimum the job needs. Every PR that touches drawing, storage or sync reports its measured numbers, before and after, against the baselines in `docs/perf/README.md`.
 - **Agent work goes through Sotto.** Vellum does not drive AutoCAD or the laptop itself. It hands a job to Sotto, and the thread Sotto starts does the work (`CONTEXT.md` names the parts once the grill settles them).
 
 ## Read first

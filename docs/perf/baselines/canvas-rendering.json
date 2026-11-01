@@ -1,0 +1,77 @@
+{
+  "area": "canvas-rendering",
+  "issue": 21,
+  "about": "Canvas rendering, input and eraser work (docs/perf/README.md). Counts are budgets enforced by apps/ios/Tests/VellumCoreTests/CanvasRenderingBudgetTests.swift; times are main-thread busy time per frame from the Debug benchmark on the iPhone Duo simulator in CI, compared by apps/ios/Scripts/perf-compare.py with a warning at 25% worse.",
+  "entries": [
+    {
+      "metric": "paths_rebuilt_per_redraw",
+      "kind": "count",
+      "value": 0,
+      "before": 10000,
+      "unit": "paths",
+      "tolerance": 0,
+      "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "A pan, and a pinch within a level, after the view was drawn once. Main built a path for every visible stroke on every redraw."
+    },
+    {
+      "metric": "area_invalidated_per_new_stroke_pt2",
+      "kind": "count",
+      "value": 204678,
+      "before": 636219,
+      "unit": "square screen points",
+      "tolerance": 0,
+      "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "A 60 x 30 pt stroke in the middle of the screen at zoom to everything: the 4 tiles it touches (the tile anchor sits at the screen centre, the worst case). Main redrew the whole 951 x 669 view, background and grid included."
+    },
+    {
+      "metric": "cull_strokes_visited",
+      "kind": "count",
+      "value": 2477,
+      "before": 10000,
+      "unit": "strokes",
+      "tolerance": 0,
+      "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "Culling a view at 4x the zoom of everything. Main compared every stroke."
+    },
+    {
+      "metric": "cull_points_inspected",
+      "kind": "count",
+      "value": 0,
+      "before": 794528,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "Bounds are cached in the index. Main recomputed every stroke's bounds from its points on every redraw."
+    },
+    {
+      "metric": "eraser_points_inspected_per_sample",
+      "kind": "count",
+      "value": 350,
+      "before": 724153,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "Mean over the benchmark's 479-sample sweep at everything, tolerance 8 pt. Main recomputed every stroke's bounds and measured every segment of strokes near the tip."
+    },
+    {
+      "metric": "eraser_strokes_visited_per_sample",
+      "kind": "count",
+      "value": 63,
+      "before": 10000,
+      "unit": "strokes",
+      "tolerance": 0,
+      "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "Mean over the same sweep."
+    },
+    {
+      "metric": "live_path_points_per_move",
+      "kind": "count",
+      "value": 70,
+      "before": 10003,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "Most points turned into path on one Pencil move over a 10,000-sample stroke, two samples and two predictions a move. Main rebuilt the whole stroke every move."
+    }
+  ]
+}

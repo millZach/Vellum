@@ -4,12 +4,14 @@ import VellumCore
 
 /// The canvas itself: the grid, the ink, and the Pencil drawing on it. Ink is drawn by Vellum's own renderer rather
 /// than PencilKit (ADR-0012), so every stroke lives in model space and is drawn through one `Viewport`.
+///
+/// SwiftUI only tells the view about a new view of the canvas (zoom to everything) and light or dark; ink changes
+/// reach it straight from the editor, and its own pans and pinches it applies itself, so neither waits on SwiftUI.
 struct InkCanvasView: UIViewRepresentable {
     let editor: CanvasEditor
     let isDark: Bool
-    /// Passed in so SwiftUI calls `updateUIView` whenever the ink or the view of it changes.
-    let inkRevision: Int
     let viewport: Viewport
+    let units: CanvasUnits
 
     func makeUIView(context: Context) -> InkCanvasUIView {
         InkCanvasUIView(editor: editor)
@@ -17,20 +19,37 @@ struct InkCanvasView: UIViewRepresentable {
 
     func updateUIView(_ view: InkCanvasUIView, context: Context) {
         view.isDark = isDark
-        view.setNeedsDisplay()
+        view.units = units
+        view.viewportDidChange()
     }
 }
 
 /// Draws the canvas and reads the Pencil. The Pencil draws (or erases); fingers pan and pinch. Nothing depends on
 /// pressure or hover, which the USB-C Pencil and the Duo don't have (ADR-0001).
 ///
-/// The stroke being drawn is a separate shape layer updated on every touch, with the Pencil's coalesced and predicted
-/// touches, so it keeps up with the pen; finished ink is drawn once into the view and only redrawn when the ink or
-/// the view changes.
+/// Nothing is drawn in `draw(_:)`. The ground is the layer's colour, the grid is two shape layers of a few dozen
+/// lines, and finished ink is cached tiles (`InkTileRenderer`) that a pan or pinch moves without redrawing. The
+/// stroke being drawn is chunked shape layers (`LiveStrokeChunks`): full chunks are built once, and each Pencil move
+/// rebuilds only the open chunk and the predicted tail, so a move costs the same however long the stroke is. While
+/// a finger or the Pencil is down a display link asks for ProMotion's 120 Hz and publishes the pen's position to the
+/// status bar at most once a frame; it stops when the canvas is still.
 final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private let editor: CanvasEditor
     var isDark = false {
-        didSet { if isDark != oldValue { setNeedsDisplay() } }
+        didSet {
+            guard isDark != oldValue else { return }
+            renderer.isDark = isDark
+            applyColours()
+        }
+    }
+
+    /// The grid steps by round lengths in the canvas units, so it is redrawn when they change.
+    var units: CanvasUnits = .default {
+        didSet {
+            guard units != oldValue else { return }
+            shownViewport = nil
+            viewportDidChange()
+        }
     }
 
     /// On the simulator there is no Pencil, so one finger draws and two fingers pan and pinch. On the Duo only the
@@ -41,24 +60,52 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private static let fingerDraws = false
     #endif
 
-    private let liveLayer = CAShapeLayer()
+    private let renderer: InkTileRenderer
+    private let minorGrid = CAShapeLayer()
+    private let majorGrid = CAShapeLayer()
+    /// The stroke being drawn: one layer per chunk, with the group's opacity so a highlighter's chunks don't darken
+    /// where they meet.
+    private let liveLayer = CALayer()
+    private var liveChunkLayers: [CAShapeLayer] = []
+    private let liveTailLayer = CAShapeLayer()
+    private var liveChunks = LiveStrokeChunks()
+    private var livePredicted: [CanvasPoint] = []
     private var liveTouch: UITouch?
     /// The stroke being drawn, with the pen, colour and width it took at touchdown.
     private var liveStroke: StrokeInProgress?
     private var erasing = false
     private var lastPinchScale: CGFloat = 1
     private var lastPanTranslation: CGPoint = .zero
+    /// The view of the canvas the layers were last placed for.
+    private var shownViewport: Viewport?
+
+    /// Runs only while something is moving, asking for 120 Hz.
+    private var displayLink: CADisplayLink?
+    private var fingersDown = 0
+    /// Where the Pencil is, waiting to go to the status bar on the next frame.
+    private var pendingPenPosition: CanvasPoint?
 
     init(editor: CanvasEditor) {
         self.editor = editor
+        renderer = InkTileRenderer(index: { [unowned editor] in editor.inkIndex })
         super.init(frame: .zero)
         isOpaque = true
-        contentMode = .redraw
         isMultipleTouchEnabled = true
-        liveLayer.fillColor = nil
-        liveLayer.lineCap = .round
-        liveLayer.lineJoin = .round
+        for grid in [minorGrid, majorGrid] {
+            grid.actions = noAnimations
+            grid.fillColor = nil
+            layer.addSublayer(grid)
+        }
+        layer.addSublayer(renderer.layer)
+        layer.addSublayer(renderer.pendingInkLayer)
+        liveLayer.actions = noAnimations
+        liveLayer.allowsGroupOpacity = true
         layer.addSublayer(liveLayer)
+        configure(liveTailLayer)
+        liveLayer.addSublayer(liveTailLayer)
+        applyColours()
+
+        editor.onInkChange = { [weak self] change in self?.renderer.inkChanged(change) }
 
         let directTouches = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
@@ -83,52 +130,57 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        liveLayer.frame = bounds
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for sublayer in [minorGrid, majorGrid, renderer.layer, renderer.pendingInkLayer, liveLayer] {
+            sublayer.frame = bounds
+        }
+        CATransaction.commit()
+        renderer.displayScale = traitCollection.displayScale
         editor.viewDidResize(width: Double(bounds.width), height: Double(bounds.height))
-        setNeedsDisplay()
+        shownViewport = nil
+        viewportDidChange()
         #if DEBUG
         DebugBenchmark.attach(self, editor: editor)
         #endif
     }
 
-    // MARK: Drawing
+    // MARK: Showing the canvas
 
-    override func draw(_ rect: CGRect) {
-        guard let context = UIGraphicsGetCurrentContext() else { return }
+    /// Places everything for the editor's view of the canvas, if it changed: one transform per level of tiles, the
+    /// grid's few lines, and the stroke being drawn, so nothing lags a pan or a pinch.
+    func viewportDidChange() {
         let viewport = editor.viewport
-        context.setFillColor(Palette.ground(dark: isDark).cgColor)
-        context.fill(bounds)
-        drawGrid(in: context, viewport: viewport)
-
-        let visible = viewport.visibleRect
-        context.setLineCap(.round)
-        context.setLineJoin(.round)
-        for stroke in editor.ink.strokes {
-            guard let box = stroke.bounds, box.intersects(visible) else { continue }
-            draw(stroke, in: context, viewport: viewport)
-        }
+        guard viewport != shownViewport, bounds.width > 0 else { return }
+        let zoomChanged = viewport.pointsPerInch != shownViewport?.pointsPerInch
+        shownViewport = viewport
+        renderer.show(viewport)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        updateGrid(viewport)
+        if liveStroke != nil { rebuildLive(viewport, widthChanged: zoomChanged) }
+        CATransaction.commit()
     }
 
-    private func draw(_ stroke: InkStroke, in context: CGContext, viewport: Viewport) {
-        let path = Self.path(for: stroke.points, viewport: viewport)
-        context.saveGState()
-        context.setAlpha(stroke.tool.opacity)
-        context.setStrokeColor(Palette.ink(stroke.colour, dark: isDark).cgColor)
-        // Never thinner than a hairline, so zoomed-out ink never vanishes.
-        context.setLineWidth(max(stroke.width.inches * viewport.pointsPerInch, 0.75))
-        context.addPath(path)
-        context.strokePath()
-        context.restoreGState()
+    private func applyColours() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.backgroundColor = Palette.ground(dark: isDark).cgColor
+        minorGrid.strokeColor = Palette.grid(dark: isDark).withAlphaComponent(isDark ? 0.05 : 0.10).cgColor
+        majorGrid.strokeColor = Palette.grid(dark: isDark).withAlphaComponent(isDark ? 0.10 : 0.20).cgColor
+        CATransaction.commit()
     }
 
     /// Minor and major grid lines at round lengths in the canvas units, faint enough to sit under ink.
-    private func drawGrid(in context: CGContext, viewport: Viewport) {
+    private func updateGrid(_ viewport: Viewport) {
         let units = editor.canvas.units
         let minor = ScaleBar.length(fitting: 40, pointsPerInch: viewport.pointsPerInch, units: units).inches
         let major = ScaleBar.length(fitting: 240, pointsPerInch: viewport.pointsPerInch, units: units).inches
         let visible = viewport.visibleRect
-        for (step, alpha) in [(minor, isDark ? 0.05 : 0.10), (major, isDark ? 0.10 : 0.20)] {
-            guard step * viewport.pointsPerInch >= 8 else { continue }
+        let hairline = 1 / max(1, traitCollection.displayScale)
+        for (grid, step) in [(minorGrid, minor), (majorGrid, major)] {
+            grid.lineWidth = hairline
+            guard step * viewport.pointsPerInch >= 8 else { grid.path = nil; continue }
             let path = CGMutablePath()
             var x = (visible.minX.inches / step).rounded(.down) * step
             while x <= visible.maxX.inches {
@@ -144,27 +196,99 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
                 path.addLine(to: CGPoint(x: Double(bounds.width), y: sy))
                 y += step
             }
-            context.setStrokeColor(Palette.grid(dark: isDark).withAlphaComponent(alpha).cgColor)
-            context.setLineWidth(1 / max(1, traitCollection.displayScale))
-            context.addPath(path)
-            context.strokePath()
+            grid.path = path
         }
     }
 
-    private static func path(for points: [CanvasPoint], viewport: Viewport) -> CGPath {
+    // MARK: The stroke being drawn
+
+    private func configure(_ shape: CAShapeLayer) {
+        shape.actions = noAnimations
+        shape.fillColor = nil
+        shape.lineCap = .round
+        shape.lineJoin = .round
+    }
+
+    private func screenPath(_ points: ArraySlice<CanvasPoint>, _ viewport: Viewport) -> CGPath {
         let path = CGMutablePath()
         guard let first = points.first else { return path }
         let start = viewport.screenPoint(for: first)
         path.move(to: CGPoint(x: start.x, y: start.y))
-        if points.count == 1 {
-            // A dot: a zero-length line with round caps.
-            path.addLine(to: CGPoint(x: start.x, y: start.y))
-        }
+        if points.count == 1 { path.addLine(to: CGPoint(x: start.x, y: start.y)) }
         for point in points.dropFirst() {
             let s = viewport.screenPoint(for: point)
             path.addLine(to: CGPoint(x: s.x, y: s.y))
         }
         return path
+    }
+
+    private func startLive(_ stroke: StrokeInProgress) {
+        liveChunks = LiveStrokeChunks()
+        livePredicted = []
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        liveLayer.opacity = Float(stroke.tool.opacity)
+        let open = CAShapeLayer()
+        configure(open)
+        liveLayer.insertSublayer(open, below: liveTailLayer)
+        liveChunkLayers = [open]
+        for shape in liveChunkLayers + [liveTailLayer] {
+            shape.strokeColor = Palette.ink(stroke.colour, dark: isDark).cgColor
+        }
+        CATransaction.commit()
+        updateLive()
+    }
+
+    /// Brings the layers up to the stroke's points: freezes chunks that filled, rebuilds the open chunk, and replaces
+    /// the predicted tail. The work is the open chunk and the tail, never the whole stroke.
+    private func updateLive() {
+        guard let stroke = liveStroke else { return }
+        let viewport = editor.viewport
+        let width = max(stroke.width.inches * viewport.pointsPerInch, InkTileRenderer.minimumWidth)
+        let update = liveChunks.update(pointCount: stroke.points.count)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for range in update.newlyFrozen {
+            // The open layer becomes this frozen chunk; a fresh layer takes over as the open one.
+            let frozen = liveChunkLayers[liveChunkLayers.count - 1]
+            frozen.lineWidth = width
+            frozen.path = screenPath(stroke.points[range], viewport)
+            let open = CAShapeLayer()
+            configure(open)
+            open.strokeColor = frozen.strokeColor
+            liveLayer.insertSublayer(open, below: liveTailLayer)
+            liveChunkLayers.append(open)
+        }
+        let open = liveChunkLayers[liveChunkLayers.count - 1]
+        open.lineWidth = width
+        open.path = screenPath(stroke.points[update.open], viewport)
+        let tail = LiveStrokeChunks.tail(confirmed: stroke.points, predicted: livePredicted)
+        liveTailLayer.lineWidth = width
+        liveTailLayer.path = tail.isEmpty ? nil : screenPath(tail[...], viewport)
+        CATransaction.commit()
+    }
+
+    /// Redraws the stroke being drawn for a new view of the canvas, at its fixed real-world width, so a pan or pinch
+    /// mid-stroke moves it with the ink and shows what will be kept.
+    private func rebuildLive(_ viewport: Viewport, widthChanged: Bool) {
+        guard let stroke = liveStroke else { return }
+        let width = max(stroke.width.inches * viewport.pointsPerInch, InkTileRenderer.minimumWidth)
+        for (layer, range) in zip(liveChunkLayers, liveChunks.frozen + [liveChunks.open]) {
+            layer.path = screenPath(stroke.points[range], viewport)
+            if widthChanged { layer.lineWidth = width }
+        }
+        let tail = LiveStrokeChunks.tail(confirmed: stroke.points, predicted: livePredicted)
+        liveTailLayer.path = tail.isEmpty ? nil : screenPath(tail[...], viewport)
+        if widthChanged { liveTailLayer.lineWidth = width }
+    }
+
+    private func clearLive() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for layer in liveChunkLayers { layer.removeFromSuperlayer() }
+        liveChunkLayers = []
+        liveTailLayer.path = nil
+        CATransaction.commit()
     }
 
     // MARK: The Pencil
@@ -220,26 +344,27 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     /// does neither.
     func beginInput(at location: CGPoint) -> Bool {
         let point = canvasPoint(location)
-        editor.penPosition = point
         if editor.tool == .eraser {
             erasing = true
             editor.beginEraserSweep()
             editor.erase(at: point)
-            return true
         } else if let stroke = editor.beginStroke(at: point) {
             liveStroke = stroke
-            styleLiveLayer(for: stroke)
-            updateLiveLayer(predicted: [])
-            return true
+            startLive(stroke)
+        } else {
+            return false
         }
-        return false
+        editor.penPosition = point
+        startDisplayLink()
+        return true
     }
 
     /// The Pencil moved: its coalesced samples since the last move, and where it is predicted to go.
     func moveInput(samples: [CGPoint], predicted: [CGPoint]) {
         consume(samples, ending: false)
         if !erasing {
-            updateLiveLayer(predicted: predicted.map(canvasPoint))
+            livePredicted = predicted.map(canvasPoint)
+            updateLive()
         }
     }
 
@@ -263,40 +388,48 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
                 liveStroke?.add(point, spacing: spacing)
             }
         }
-        if let last = samples.last { editor.penPosition = canvasPoint(last) }
+        // The status bar hears about it on the next frame, not on every sample.
+        if let last = samples.last { pendingPenPosition = canvasPoint(last) }
     }
 
     private func finishStroke(keep: Bool) {
+        // The committed stroke goes to the renderer, which shows it until its tiles are drawn, before the live
+        // layers go, so it never blinks.
         if keep, let stroke = liveStroke {
             editor.commit(stroke)
         }
         liveTouch = nil
         liveStroke = nil
         erasing = false
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        liveLayer.path = nil
-        CATransaction.commit()
-        setNeedsDisplay()
+        clearLive()
+        publishPenPosition()
+        stopDisplayLinkIfIdle()
     }
 
-    private func styleLiveLayer(for stroke: StrokeInProgress) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        liveLayer.strokeColor = Palette.ink(stroke.colour, dark: isDark).cgColor
-        liveLayer.opacity = Float(stroke.tool.opacity)
-        CATransaction.commit()
+    // MARK: Frames
+
+    private func startDisplayLink() {
+        guard displayLink == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        displayLink = link
     }
 
-    /// Redraws the stroke being drawn at its fixed real-world width, so a pinch mid-stroke shows what will be kept.
-    private func updateLiveLayer(predicted: [CanvasPoint]) {
-        guard let stroke = liveStroke else { return }
-        let viewport = editor.viewport
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        liveLayer.lineWidth = max(stroke.width.inches * viewport.pointsPerInch, 0.75)
-        liveLayer.path = Self.path(for: stroke.points + predicted, viewport: viewport)
-        CATransaction.commit()
+    private func stopDisplayLinkIfIdle() {
+        guard liveTouch == nil, liveStroke == nil, !erasing, fingersDown == 0 else { return }
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    @objc private func frame(_ link: CADisplayLink) {
+        publishPenPosition()
+    }
+
+    private func publishPenPosition() {
+        guard let point = pendingPenPosition else { return }
+        pendingPenPosition = nil
+        if editor.penPosition != point { editor.penPosition = point }
     }
 
     // MARK: Fingers
@@ -305,10 +438,13 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         switch pan.state {
         case .began:
             lastPanTranslation = .zero
+            gestureBegan()
         case .changed:
             let t = pan.translation(in: self)
             panBy(dx: t.x - lastPanTranslation.x, dy: t.y - lastPanTranslation.y)
             lastPanTranslation = t
+        case .ended, .cancelled, .failed:
+            gestureEnded()
         default:
             break
         }
@@ -318,27 +454,42 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         switch pinch.state {
         case .began:
             lastPinchScale = 1
+            gestureBegan()
         case .changed:
             zoomBy(pinch.scale / lastPinchScale, about: pinch.location(in: self))
             lastPinchScale = pinch.scale
+        case .ended, .cancelled, .failed:
+            gestureEnded()
         default:
             break
         }
     }
 
+    private func gestureBegan() {
+        fingersDown += 1
+        startDisplayLink()
+    }
+
+    private func gestureEnded() {
+        fingersDown = max(0, fingersDown - 1)
+        stopDisplayLinkIfIdle()
+    }
+
     /// Moves the canvas with the fingers, by a distance in screen points.
     func panBy(dx: CGFloat, dy: CGFloat) {
         editor.viewport.pan(dx: Double(dx), dy: Double(dy))
+        viewportDidChange()
     }
 
     /// Zooms by a factor about a screen point, as a pinch does.
     func zoomBy(_ factor: CGFloat, about at: CGPoint) {
         editor.viewport.zoom(by: Double(factor), about: ScreenPoint(x: Double(at.x), y: Double(at.y)))
+        viewportDidChange()
     }
 
     #if DEBUG
-    /// Tile renders still in flight, for the Debug benchmark; this renderer draws synchronously.
-    var pendingRenderCount: Int { 0 }
+    /// Tile drawings still in flight, for the Debug benchmark.
+    var pendingRenderCount: Int { renderer.pendingCount }
     #endif
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,

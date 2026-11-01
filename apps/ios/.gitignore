@@ -9,3 +9,5 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 .build-captures/
+# Written by XcodeGen from project.yml's info properties.
+Vellum/Info.plist

@@ -126,7 +126,7 @@ final class DebugBenchmark: NSObject {
     }
 
     private func start() {
-        record("benchmark strokes=\(editor.ink.strokes.count) view=\(Int(view?.bounds.width ?? 0))x\(Int(view?.bounds.height ?? 0)) maximumFramesPerSecond=\(view?.window?.windowScene?.screen.maximumFramesPerSecond ?? 0)")
+        record("benchmark strokes=\(editor.ink.strokes.count) view=\(Int(view?.bounds.width ?? 0))x\(Int(view?.bounds.height ?? 0)) maximumFramesPerSecond=\(view?.window?.windowScene?.screen.maximumFramesPerSecond ?? 0) promotionOptIn=\(Bundle.main.object(forInfoDictionaryKey: "CADisableMinimumFrameDurationOnPhone") as? Bool ?? false)")
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true,
                                                           CFIndex.max) { _, _ in
             MainActor.assumeIsolated { DebugBenchmark.shared?.runLoopWillSleep() }

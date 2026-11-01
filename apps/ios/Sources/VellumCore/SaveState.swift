@@ -16,7 +16,7 @@ public enum SaveState: Hashable, Sendable {
         case .savedOnThisDuo: "Saved on this Duo"
         case .saving: "Saving…"
         case .notSaved(let outOfSpace): outOfSpace ? "Not saved: this Duo is full" : "Not saved: will retry"
-        case .neverSaved: "Test canvas: never saved"
+        case .neverSaved: "Never saved"
         }
     }
 

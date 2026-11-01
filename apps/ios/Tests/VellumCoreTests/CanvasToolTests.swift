@@ -57,7 +57,7 @@ final class CanvasToolTests: XCTestCase {
         XCTAssertEqual(SaveState.saving.title, "Saving…")
         XCTAssertEqual(SaveState.notSaved(outOfSpace: true).title, "Not saved: this Duo is full")
         XCTAssertEqual(SaveState.notSaved(outOfSpace: false).title, "Not saved: will retry")
-        XCTAssertEqual(SaveState.neverSaved.title, "Test canvas: never saved")
+        XCTAssertEqual(SaveState.neverSaved.title, "Never saved")
         XCTAssertFalse(SaveState.neverSaved.isSaved)
         for state in [SaveState.savedOnThisDuo, .saving, .notSaved(outOfSpace: true), .notSaved(outOfSpace: false),
                       .neverSaved] {

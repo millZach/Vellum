@@ -82,10 +82,12 @@ final class InkTileBookTests: XCTestCase {
         let viewport = everything
         harness.book.show(viewport)
         let level = harness.book.current!
-        let tile = level.tiles.values.first!
+        // A tile with ink under it, whatever order the level keeps its tiles in.
+        let (tile, stroke) = level.tiles.values.lazy.compactMap { tile in
+            Self.ink.strokes.first { InkIndex.box(of: $0)!.intersects(level.tiling.box(of: tile.key)) }.map { (tile, $0) }
+        }.first!
         XCTAssertTrue(harness.book.begin(tile, in: level))
         let startedAt = tile.epoch
-        let stroke = Self.ink.strokes.first { InkIndex.box(of: $0)!.intersects(level.tiling.box(of: tile.key)) }!
         let before = harness.book.work.tilesDrawn
         harness.book.inkChanged(InkIndex.Change(removed: [stroke], addedOnTop: false))
         XCTAssertGreaterThan(tile.epoch, startedAt)

@@ -51,6 +51,26 @@ for appearance in light dark; do
   done
 done
 
+# The Drawings tab's Dropbox states (#10). The build has no app key, so plain launches above show "isn't set up";
+# these Debug-only launch arguments use a made-up key: signed out (Connect Dropbox), signed in to made-up folders, and
+# the Settings sheet with Sign Out.
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  for state in connect folders settings; do
+    case "$state" in
+      settings) set -- --ui-dropbox folders --ui-settings ;;
+      *) set -- --ui-dropbox "$state" ;;
+    esac
+    xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+    xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+    xcrun simctl launch "$udid" "$bundle" --ui-tab drawings "$@" >/dev/null
+    sleep "${WAIT:-6}"
+    file="$out/unfolded-drawings-dropbox-$state-$appearance.png"
+    xcrun simctl io "$udid" screenshot --display=$display "$file"
+    sips -g pixelWidth -g pixelHeight "$file" | tail -2 | tr '\n' ' '; echo
+  done
+done
+
 # The Home Screen, to show the installed app icon. Vellum has to be on the first page: if SpringBoard put it on a later
 # page, it swaps places with the first page's first app in SpringBoard's saved layout while the simulator is shut down.
 xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true

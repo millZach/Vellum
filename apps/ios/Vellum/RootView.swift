@@ -1,8 +1,8 @@
 import SwiftUI
 import VellumCore
 
-/// The iOS tab bar with Canvases, Drawings, Jobs and Meetings. Each tab is empty until its ticket builds it; the
-/// canvas screen is ticket #6.
+/// The iOS tab bar with Canvases, Drawings, Jobs and Meetings. Drawings shows Zach's Dropbox (#10); the other tabs are
+/// empty until their tickets build them, and the canvas screen is ticket #6.
 struct RootView: View {
     @State private var selection: AppTab = RootView.launchTab
 
@@ -10,7 +10,11 @@ struct RootView: View {
         TabView(selection: $selection) {
             ForEach(AppTab.allCases) { tab in
                 Tab(tab.descriptor.title, systemImage: tab.descriptor.systemImage, value: tab) {
-                    PlaceholderScreen(tab: tab)
+                    if tab == .drawings {
+                        DrawingsScreen()
+                    } else {
+                        PlaceholderScreen(tab: tab)
+                    }
                 }
             }
         }

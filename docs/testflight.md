@@ -23,6 +23,8 @@ Repository secrets on `millZach/Vellum` (Settings > Secrets and variables > Acti
 - `APPLE_TEAM_ID`: passed to `xcodebuild` as `DEVELOPMENT_TEAM` when archiving and to the export options, which are written on the runner and deleted.
 - `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID` and `APP_STORE_CONNECT_KEY` (the `.p8` contents): an App Store Connect API key with the Admin role, which automatic signing needs to use Apple's cloud-managed distribution certificate. The key is written to the runner's temporary folder and removed at the end of the run, pass or fail.
 
+- `DROPBOX_APP_KEY`: the Dropbox app's key, passed to `xcodebuild` as the `DROPBOX_APP_KEY` build setting, which puts it in the app's Info.plist and its `db-<key>` callback scheme (ADR-0013). `Scripts/testflight.sh` refuses to archive without a key shaped like one and checks the archived Info.plist carries it, without printing it. Every other build has the placeholder `not-set-up` and says Dropbox isn't set up. The Dropbox app itself (full Dropbox access, public clients allowed for PKCE, the redirect URI `db-<key>://2/token`) is set up in Dropbox's app console; no Dropbox app secret is used or kept anywhere.
+
 No certificate or provisioning profile is kept anywhere.
 
 ## Installing on the Duo

@@ -49,6 +49,13 @@ jobs:
           xcrun simctl list devices available | grep -i duo || echo "No iPhone Duo simulator on this image"
       - name: Generate the project and build the unsigned simulator app
         run: sh apps/ios/Scripts/build-simulator.sh
+      # PR builds have no Dropbox app key (ADR-0013): the app carries project.yml's placeholder and says so.
+      - name: Check the build carries the Dropbox placeholder, not a key
+        run: |
+          plist=apps/ios/.build-native/Build/Products/Debug-iphonesimulator/Vellum.app/Info.plist
+          test "$(/usr/libexec/PlistBuddy -c 'Print :DropboxAppKey' "$plist")" = not-set-up
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$plist")" = db-not-set-up
+          echo "DropboxAppKey = not-set-up, callback scheme db-not-set-up"
       # The TestFlight workflow numbers its builds with this script; printing one here proves its format on macOS.
       - name: Print a TestFlight build number
         run: |

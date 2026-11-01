@@ -15,6 +15,10 @@ settings:
     MARKETING_VERSION: "0.1.0"
     # The build number for TestFlight comes from the workflow run (Scripts/testflight.sh); this one is for local builds.
     CURRENT_PROJECT_VERSION: "1"
+    # The Dropbox app key reaches the app only as this build setting (ADR-0013): Scripts/testflight.sh passes the
+    # DROPBOX_APP_KEY repository secret, and every other build keeps this placeholder and says Dropbox isn't set up.
+    # A local build can pass a key on the command line: xcodebuild ... DROPBOX_APP_KEY=<key>.
+    DROPBOX_APP_KEY: not-set-up
 packages:
   VellumCore:
     path: .
@@ -34,6 +38,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
         GENERATE_INFOPLIST_FILE: YES
+        # Merged with the generated keys: the Dropbox app key and its db-<key> callback scheme.
+        INFOPLIST_FILE: Vellum/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Vellum
         INFOPLIST_KEY_LSRequiresIPhoneOS: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES

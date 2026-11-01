@@ -75,7 +75,7 @@ data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
 rm -f "$data/Documents/benchmark.txt" "$data/Documents/benchmark.json"
 xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-fixture-large --ui-benchmark >/dev/null
 waited=0
-while [ "$waited" -lt 180 ] && ! grep -q '^done' "$data/Documents/benchmark.txt" 2>/dev/null; do
+while [ "$waited" -lt 240 ] && ! grep -q '^done' "$data/Documents/benchmark.txt" 2>/dev/null; do
   sleep 5; waited=$((waited + 5))
 done
 cp "$data/Documents/benchmark.txt" "$out/benchmark.txt" 2>/dev/null || echo "The benchmark wrote no results" > "$out/benchmark.txt"

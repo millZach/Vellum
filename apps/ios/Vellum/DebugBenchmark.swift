@@ -43,6 +43,8 @@ final class DebugBenchmark: NSObject {
     private var frame = 0
     /// Frames of settling before a scenario's measured frames.
     private var warmUp = 0
+    private var scenarioStart: CFTimeInterval = 0
+    private static let scenarioTimeLimit: CFTimeInterval = 20
     private var tickStart: CFTimeInterval?
     private var lastTimestamp: CFTimeInterval?
     private var work: [Double] = []
@@ -173,9 +175,13 @@ final class DebugBenchmark: NSObject {
         lastTimestamp = link.timestamp
         expectedInterval = link.targetTimestamp - link.timestamp
         let scenario = scenarios[scenarioIndex]
+        if frame == 0 { scenarioStart = now }
+        // A renderer too slow to finish in 20 seconds gets its last step now (which lifts the Pencil), and the frames
+        // it managed are reported.
+        let outOfTime = now - scenarioStart > Self.scenarioTimeLimit
         tickStart = now
-        scenario.step(self, frame)
-        frame += 1
+        scenario.step(self, outOfTime ? scenario.frames - 1 : frame)
+        frame = outOfTime ? scenario.frames : frame + 1
         if frame == scenario.frames {
             scenario.tearDown(self)
             report(scenario)

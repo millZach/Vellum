@@ -47,6 +47,32 @@ struct KeychainTokenStore: DropboxTokenStore {
     }
 }
 
+/// Keeps the folder listings and Dropbox's cursors in one small file in Caches, so the first visit after a launch
+/// shows the folders at once and asks Dropbox only what changed. It holds no token; the system may clear it, which
+/// only costs one full listing. The session reads and writes it off the main actor.
+struct CachesListingStore: DropboxListingStore {
+    private var file: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("dropbox-listings.json")
+    }
+
+    func load() -> [String: DropboxListing] {
+        guard let data = try? Data(contentsOf: file),
+              let listings = try? JSONDecoder().decode([String: DropboxListing].self, from: data)
+        else { return [:] }
+        return listings
+    }
+
+    func save(_ listings: [String: DropboxListing]) {
+        guard let data = try? JSONEncoder().encode(listings) else { return }
+        try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    func delete() {
+        try? FileManager.default.removeItem(at: file)
+    }
+}
+
 /// Sends VellumCore's Dropbox requests with an ephemeral URLSession, so no reply carrying a token is cached on disk.
 /// No connection becomes `DropboxError.offline`.
 struct URLSessionDropboxTransport: DropboxTransport {

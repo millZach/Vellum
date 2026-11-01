@@ -6,7 +6,7 @@ import VellumCore
 /// out, then the top-level folders, which proves Vellum's full Dropbox access. Settings, with Sign Out, opens from the
 /// toolbar. Browsing deeper and placing PDFs is #11.
 struct DrawingsScreen: View {
-    @State private var dropbox = DropboxConnection.live()
+    @State private var dropbox = DropboxConnection.app
     /// Debug builds accept `--ui-settings` to open with the Settings sheet up, for the captures.
     @State private var showsSettings = DrawingsScreen.launchesWithSettings
 
@@ -33,6 +33,8 @@ struct DropboxFoldersView: View {
     var body: some View {
         Group {
             switch dropbox.phase {
+            case .checkingSignIn:
+                Color.clear
             case .notSetUp:
                 ContentUnavailableView {
                     Label("Dropbox isn't set up in this build", systemImage: "externaldrive.badge.xmark")
@@ -84,7 +86,7 @@ struct DropboxFoldersView: View {
                 .refreshable { await dropbox.refresh() }
             }
         }
-        .task { await dropbox.refresh() }
+        .task { await dropbox.appeared() }
     }
 }
 
@@ -101,6 +103,8 @@ struct DropboxSettingsSheet: View {
                     switch dropbox.phase {
                     case .notSetUp:
                         Text("Dropbox isn't set up in this build.")
+                    case .checkingSignIn:
+                        EmptyView()
                     case .signedOut:
                         Text("Not connected.")
                         if let notice = dropbox.notice {

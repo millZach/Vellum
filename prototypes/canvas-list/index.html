@@ -1,0 +1,43 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Never merge to main; kept as the tag prototype/canvas-list.
+  Question: how should the Canvases tab list Zach's canvases on the Duo unfolded (951 x 669 pt)?
+  Three options. Everything here is made up.
+-->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vellum Canvases list — prototype</title><link rel="icon" href="data:,">
+<style>
+ body{margin:0;font:15px/1.4 -apple-system,system-ui,sans-serif;background:#ece8df;color:#1d1d1f}
+ header{padding:16px 16px 4px}h1{font-size:20px;margin:0 0 4px}header p{margin:0;color:#555}
+ .opt{margin:16px;background:#fffdf9;border-radius:18px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+ .opt h2{font-size:18px;margin:0 0 2px}.why{margin:0 0 10px;color:#555;font-size:14px}
+ .duo{position:relative;width:100%;max-width:900px;aspect-ratio:951/669;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #d9d4c9;font-size:clamp(7px,1.15vw,12px)}
+ .rail{position:absolute;right:1.2%;top:50%;transform:translateY(-50%);width:6%;background:#f2f2f4;border-radius:2em;display:flex;flex-direction:column;gap:.6em;padding:.8em 0;align-items:center}
+ .rail span{width:2.4em;height:2.4em;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#555}.rail span.on{background:#dfe9f5;color:#2f5d8a}
+ .page{position:absolute;left:3%;right:10%;top:5%;bottom:4%}
+ .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:.8em}.head h3{margin:0;font-size:1.9em}
+ .new{background:#2f5d8a;color:#fff;border-radius:.7em;padding:.5em 1em;font-weight:600}
+ .row{display:flex;align-items:center;gap:1em;padding:.7em .4em;border-bottom:1px solid #eee;font-size:1.15em}
+ .row .meta{color:#777;font-size:.85em}.row .grow{flex:1}.row .chev{color:#bbb}
+ .thumb{background:#f3efe6;border:1px solid #e3ddd0;border-radius:.5em;position:relative;overflow:hidden}
+ .thumb svg{position:absolute;inset:0;width:100%;height:100%}
+ .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1em}
+ .card .thumb{aspect-ratio:4/3}.card b{display:block;margin-top:.4em;font-size:1.1em}.card span{color:#777;font-size:.9em}
+ .two{position:absolute;left:3%;right:10%;top:5%;bottom:4%;display:grid;grid-template-columns:38% 1fr;gap:1.2em}
+ .two .list .row.sel{background:#e6edf5;border-radius:.6em}
+ .preview{display:flex;flex-direction:column;gap:.6em}.preview .thumb{flex:1}
+ .acts{display:flex;gap:.5em}.acts span{border:1px solid #ccc;border-radius:.6em;padding:.4em .9em}.acts span.go{background:#2f5d8a;color:#fff;border-color:#2f5d8a}
+</style></head><body>
+<header><h1>Canvases tab: three options</h1><p>How Vellum lists your canvases. Tap opens one; swipe or long-press offers Rename and Delete in every option.</p></header>
+<script>
+const C=[["Boiler 4 walkdown","Today 2:14 PM","312 strokes · 2 sheets"],["Control room rework","Oct 28","1,204 strokes · 4 sheets"],["MCC-4 meeting notes","Oct 24","88 strokes · meeting"],["Feedwater bypass sketch","Oct 22","45 strokes"],["Chemical feed layout","Oct 15","610 strokes · 1 sheet"],["Untitled canvas","Oct 9","3 strokes"],["Panel 12 redline","Oct 2","220 strokes · 1 sheet"],["Site visit notes","Sep 28","150 strokes"]];
+const ink=i=>`<svg viewBox="0 0 120 90"><path d="M10 ${60-i*3} H${70+i*3} V${30+i}" stroke="#333" stroke-width="2" fill="none"/><ellipse cx="${40+i*5}" cy="${50-i}" rx="14" ry="9" stroke="#d6342c" stroke-width="2" fill="none"/><path d="M${80-i} 20 l12 12 M${92-i} 20 l-12 12" stroke="#1f9d55" stroke-width="2"/><rect x="${60+i*2}" y="55" width="36" height="24" fill="#fff" stroke="#9aa" /></svg>`;
+const rail=`<div class="rail"><span class="on">✎</span><span>▤</span><span>➤</span><span>◉</span></div>`;
+const head=`<div class="head"><h3>Canvases</h3><span class="new">＋ New canvas</span></div>`;
+const A=`<div class="duo"><div class="page">${head}${C.map(c=>`<div class="row"><div class="grow"><b>${c[0]}</b><div class="meta">${c[2]}</div></div><span class="meta">${c[1]}</span><span class="chev">›</span></div>`).join('')}</div>${rail}</div>`;
+const B=`<div class="duo"><div class="page">${head}<div class="grid">${C.map((c,i)=>`<div class="card"><div class="thumb">${ink(i)}</div><b>${c[0]}</b><span>${c[1]}</span></div>`).join('')}</div></div>${rail}</div>`;
+const Cx=`<div class="duo"><div class="two"><div class="list">${head}${C.slice(0,7).map((c,i)=>`<div class="row ${i==0?'sel':''}"><div class="grow"><b>${c[0]}</b><div class="meta">${c[1]} · ${c[2]}</div></div></div>`).join('')}</div><div class="preview"><div class="thumb">${ink(0)}</div><div class="acts"><span class="go">Open</span><span>Rename</span><span>Delete…</span></div></div></div>${rail}</div>`;
+document.write(`<section class="opt"><h2>A — Plain list</h2><p class="why">Name, what's in it, and when you last changed it. Fastest to scan; no pictures.</p>${A}</section>
+<section class="opt"><h2>B — Thumbnail grid</h2><p class="why">A small picture of each canvas's ink, four across. Easiest to spot a sketch by its look.</p>${B}</section>
+<section class="opt"><h2>C — List with preview</h2><p class="why">Uses the wide Duo screen: the list on the left, a bigger preview and Open / Rename / Delete on the right.</p>${Cx}</section>`);
+</script></body></html>

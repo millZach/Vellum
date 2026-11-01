@@ -863,3 +863,172 @@ private extension DropboxConnection.Phase {
         if case .signedIn(let folders) = self { folders.map(\.name) } else { nil }
     }
 }
+
+// MARK: - Baselines (docs/perf/baselines/dropbox.json)
+
+/// One entry of an area's baseline file.
+private struct Baseline: Decodable {
+    let metric: String
+    let kind: String
+    let value: Double
+    let unit: String
+    let tolerance: Double
+
+    /// The Dropbox area's baselines, read from the repository, so the file is the one place each number lives.
+    static let dropbox: [String: Baseline] = {
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent()   // Tests/VellumCoreTests
+            .appendingPathComponent("../../../../docs/perf/baselines/dropbox.json").standardizedFileURL
+        guard let data = try? Data(contentsOf: file), let all = try? JSONDecoder().decode([Baseline].self, from: data)
+        else { return [:] }
+        return Dictionary(all.map { ($0.metric, $0) }) { $1 }
+    }()
+}
+
+/// A transport that answers each request after `delay` with the next reply, as a slow network would.
+private final class SlowDropbox: DropboxTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var replies: [String]
+    private let delay: UInt64
+    init(delayMilliseconds: UInt64, _ replies: [String]) {
+        self.replies = replies
+        delay = delayMilliseconds * 1_000_000
+    }
+    func send(_ request: DropboxHTTPRequest) async throws -> DropboxHTTPResponse {
+        try await Task.sleep(nanoseconds: delay)
+        let body = lock.withLock { replies.isEmpty ? "" : replies.removeFirst() }
+        return DropboxHTTPResponse(status: 200, body: Data(body.utf8))
+    }
+}
+
+@MainActor
+final class DropboxBudgetTests: XCTestCase {
+    /// Fails when a count is over its budget; says so when it has come in under, so the budget can be tightened.
+    private func assertWithinBudget(_ metric: String, _ measured: Int, file: StaticString = #filePath,
+                                    line: UInt = #line) {
+        guard let baseline = Baseline.dropbox[metric], baseline.kind == "count" else {
+            return XCTFail("no count baseline named \(metric) in docs/perf/baselines/dropbox.json", file: file, line: line)
+        }
+        print("PERF dropbox \(metric)=\(measured) \(baseline.unit) (budget \(Int(baseline.value)))")
+        XCTAssertLessThanOrEqual(Double(measured), baseline.value,
+                                 "\(metric) is over its budget in docs/perf/baselines/dropbox.json", file: file, line: line)
+        if Double(measured) < baseline.value {
+            print("PERF dropbox \(metric) came in under its budget: lower it in docs/perf/baselines/dropbox.json")
+        }
+    }
+
+    /// Records a timing and warns, never fails, when it is worse than its baseline by more than the tolerance.
+    private func record(_ metric: String, milliseconds measured: Double, file: StaticString = #filePath,
+                        line: UInt = #line) {
+        guard let baseline = Baseline.dropbox[metric], baseline.kind == "time" else {
+            return XCTFail("no time baseline named \(metric) in docs/perf/baselines/dropbox.json", file: file, line: line)
+        }
+        let shown = String(format: "%.1f", measured)
+        print("PERF dropbox \(metric)=\(shown) ms (baseline \(baseline.value) ms)")
+        if measured > baseline.value * (1 + baseline.tolerance) {
+            print("::warning title=Performance (dropbox)::\(metric) took \(shown) ms, more than "
+                + "\(Int(baseline.tolerance * 100))% over its \(baseline.value) ms baseline")
+        }
+    }
+
+    private func connection(_ store: any DropboxTokenStore, _ dropbox: any DropboxTransport, clock: TestClock = TestClock(),
+                            revokeDeadline: Duration = .seconds(4)) -> DropboxConnection {
+        DropboxConnection(session: DropboxSession(appKey: key, transport: dropbox, store: store,
+                                                  revokeDeadline: revokeDeadline, now: { clock.time }))
+    }
+
+    func testTheBaselineFileIsRead() {
+        XCTAssertFalse(Baseline.dropbox.isEmpty, "docs/perf/baselines/dropbox.json is missing or unreadable")
+    }
+
+    func testRequestsPerDrawingsVisit() async {
+        let clock = TestClock()
+        let dropbox = ScriptedDropbox([.http(200, onePage), .http(200, noChanges)])
+        let connection = connection(MemoryStore(fresh), dropbox, clock: clock)
+        await connection.appeared()
+        assertWithinBudget("requests-first-drawings-visit", dropbox.requests.count)
+        await connection.appeared()
+        assertWithinBudget("requests-unchanged-revisit-within-recent-check", dropbox.requests.count - 1)
+        clock.advance(DropboxSession.recentCheck)
+        await connection.appeared()
+        assertWithinBudget("requests-unchanged-revisit-later", dropbox.requests.count - 1)
+    }
+
+    func testKeychainReadsAndWrites() async throws {
+        let store = CountingStore(fresh)
+        let clock = TestClock()
+        let dropbox = ScriptedDropbox([.http(200, topLevel), .http(200, secondPage), .http(200, noChanges)])
+        let connection = connection(store, dropbox, clock: clock)
+        await connection.appeared()                                // two pages
+        clock.advance(DropboxSession.recentCheck)
+        await connection.refresh()                                 // one page of changes
+        assertWithinBudget("keychain-reads-per-session", store.loads)
+        assertWithinBudget("keychain-reads-per-listing-page", (store.loads - 1) / dropbox.requests.count)
+        assertWithinBudget("keychain-writes-per-listing", store.saves)
+    }
+
+    func testOneRenewalPerConcurrentBurst() async throws {
+        let dropbox = SuspendingDropbox(expecting: 5)
+        let session = DropboxSession(appKey: key, transport: dropbox, store: MemoryStore(fresh), now: { now })
+        let top = Task { try await session.folders(in: "") }
+        try await dropbox.waitForRequests(1)
+        let inner = Task { try await session.folders(in: "/Archive") }
+        try await dropbox.waitForRequests(2)
+        dropbox.answer(0, .http(401, #"{"error_summary":"expired_access_token/"}"#))
+        try await dropbox.waitForRequests(3)
+        dropbox.answer(1, .http(401, #"{"error_summary":"expired_access_token/"}"#))
+        try await Task.sleep(nanoseconds: 20_000_000)
+        dropbox.answer(2, .http(200, renewed))
+        try await dropbox.waitForRequests(5)
+        dropbox.answer(3, .http(200, onePage))
+        dropbox.answer(4, .http(200, onePage))
+        _ = try await top.value
+        _ = try await inner.value
+        assertWithinBudget("token-renewals-per-concurrent-burst",
+                           dropbox.requests.filter { $0.url.lastPathComponent == "token" }.count)
+    }
+
+    func testOneChainForConcurrentListingsOfOneFolder() async throws {
+        let dropbox = SuspendingDropbox(expecting: 1)
+        let session = DropboxSession(appKey: key, transport: dropbox, store: MemoryStore(fresh), now: { now })
+        let one = Task { try await session.topLevelFolders() }
+        try await dropbox.waitForRequests(1)
+        let two = Task { try await session.topLevelFolders() }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        dropbox.answer(0, .http(200, onePage))
+        _ = try await one.value
+        _ = try await two.value
+        assertWithinBudget("requests-concurrent-listings-of-one-folder", dropbox.requests.count)
+    }
+
+    func testSignOutShownWithAStalledNetwork() async throws {
+        let dropbox = SuspendingDropbox(expecting: 2)
+        let connection = connection(MemoryStore(fresh), dropbox)
+        let appear = Task { await connection.appeared() }
+        try await dropbox.waitForRequests(1)
+        dropbox.answer(0, .http(200, onePage))
+        await appear.value
+        let start = Date()
+        await connection.signOut()                                 // the revoke never comes back
+        let took = Date().timeIntervalSince(start) * 1000
+        XCTAssertEqual(connection.phase, .signedOut)
+        record("sign-out-shown-stalled-network", milliseconds: took)
+    }
+
+    func testFirstFolderShownWithASlowTransport() async throws {
+        let first = #"{"entries":[{".tag":"folder","name":"Archive","path_display":"/Archive","id":"id:1"}],"cursor":"c1","has_more":true}"#
+        let second = #"{"entries":[{".tag":"folder","name":"Clients","path_display":"/Clients","id":"id:2"}],"cursor":"c2","has_more":true}"#
+        let third = #"{"entries":[{".tag":"folder","name":"Vellum","path_display":"/Vellum","id":"id:3"}],"cursor":"c3","has_more":false}"#
+        let connection = connection(MemoryStore(fresh), SlowDropbox(delayMilliseconds: 200, [first, second, third]))
+        let start = Date()
+        let appear = Task { await connection.appeared() }
+        var shown: TimeInterval?
+        while shown == nil, Date().timeIntervalSince(start) < 5 {
+            if case .signedIn(let folders) = connection.phase, !folders.isEmpty { shown = Date().timeIntervalSince(start) }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        await appear.value
+        let firstShown = try XCTUnwrap(shown, "no folder was shown")
+        XCTAssertEqual(connection.phase.folderNames, ["Archive", "Clients", "Vellum"])
+        record("first-folder-shown-slow-transport", milliseconds: firstShown * 1000)
+    }
+}

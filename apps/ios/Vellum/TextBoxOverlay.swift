@@ -91,8 +91,10 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
 
     private func place(_ original: TextBox) {
         guard let host, let viewport else { return }
-        let moving = dragging.map { $0.ids.contains(original.id) } ?? false
-        let box = moving ? original.transformed(by: dragging!.transform) : original
+        // A drag of the selection moves and scales the label by its transform; the text is laid out as saved.
+        let dragScale = dragging.flatMap { $0.ids.contains(original.id) ? $0.transform.scale : nil }
+        let moving = dragScale != nil
+        let box = dragging.map { moving ? original.transformed(by: $0.transform) : original } ?? original
         let fontOnScreen = box.fontSize.inches * viewport.pointsPerInch
         let screenRect = rect(box.rect, viewport)
         let onScreen = screenRect.intersects(host.bounds.insetBy(dx: -40, dy: -40))
@@ -103,22 +105,24 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
             return
         }
         let ratio = viewport.pointsPerInch / (shown?.pointsPerInch ?? 0)
-        let stale = shown == nil || shown!.label.text != box.text || (!isGesturing && ratio != 1 && !moving)
-            || ratio < 0.5 || ratio > 2
+        let stale = shown == nil || shown!.label.text != original.text
+            || (!moving && (ratio < 0.5 || ratio > 2 || (!isGesturing && ratio != 1)))
         if stale {
             let label = shown?.label ?? makeLabel(in: host)
-            let scale = min(1, Self.largestLaidOutFont / max(fontOnScreen, 1e-9))
+            let font = original.fontSize.inches * viewport.pointsPerInch
+            let size = rect(original.rect, viewport).size
+            let scale = min(1, Self.largestLaidOutFont / max(font, 1e-9))
             label.transform = .identity
-            label.text = box.text
-            label.font = .systemFont(ofSize: fontOnScreen * scale)
-            label.textColor = colour(box)
-            label.bounds = CGRect(x: 0, y: 0, width: screenRect.width * CGFloat(scale), height: screenRect.height * CGFloat(scale))
-            label.accessibilityLabel = box.text
+            label.text = original.text
+            label.font = .systemFont(ofSize: font * scale)
+            label.textColor = colour(original)
+            label.bounds = CGRect(x: 0, y: 0, width: size.width * CGFloat(scale), height: size.height * CGFloat(scale))
+            label.accessibilityLabel = original.text
             shown = Shown(label: label, pointsPerInch: viewport.pointsPerInch, fontScale: scale)
             labels[original.id] = shown
         }
         guard let shown else { return }
-        let k = viewport.pointsPerInch / shown.pointsPerInch / shown.fontScale
+        let k = viewport.pointsPerInch / shown.pointsPerInch / shown.fontScale * (dragScale ?? 1)
         shown.label.isHidden = false
         shown.label.transform = CGAffineTransform(scaleX: k, y: k)
         shown.label.center = CGPoint(x: screenRect.midX, y: screenRect.midY)

@@ -82,15 +82,17 @@ public struct FingerStrokeGate: Equatable, Sendable {
     /// passed with one finger; an eraser sweep then erases the samples it held.
     @discardableResult
     public mutating func tick(at time: Double) -> Bool {
-        guard case .pending(let since) = phase, time - since >= Self.secondFingerWindow else { return false }
+        guard case .pending(let since) = phase, time >= since + Self.secondFingerWindow else { return false }
         phase = .confirmed
         return true
     }
 
-    /// Another finger touched down while the stroke's finger is on the glass.
+    /// Another finger touched down while the stroke's finger is on the glass. The window is compared as a deadline
+    /// (`since + secondFingerWindow`), not as an elapsed time, so a finger landing exactly at the edge is after it
+    /// whatever the rounding of the subtraction.
     public mutating func secondFinger(at time: Double) -> SecondFinger {
         switch phase {
-        case .pending(let since) where time - since < Self.secondFingerWindow:
+        case .pending(let since) where time < since + Self.secondFingerWindow:
             phase = .cancelled
             return .cancel
         case .pending, .confirmed:

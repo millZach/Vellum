@@ -2,7 +2,7 @@
 # TestFlight can offer it to the Duo (ADR-0001). Runs on every push to main that changes the app or
 # this workflow, and by hand
 # (Actions > TestFlight > Run workflow, or `gh workflow run testflight.yml`); never on a pull request.
-# The App Store Connect key and the team ID are repository secrets; see docs/testflight.md.
+# The App Store Connect key, the team ID and the Dropbox app key are repository secrets; see docs/testflight.md.
 name: TestFlight
 
 on:
@@ -48,6 +48,8 @@ jobs:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # The Dropbox app key becomes the DROPBOX_APP_KEY build setting (ADR-0013); it never enters the repository.
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
           KEY_PATH: ${{ runner.temp }}/AuthKey.p8
         # The build number is the upload's UTC date and time (Scripts/build-number.sh), so it rises even when an old run
         # is retried after a newer one uploaded.

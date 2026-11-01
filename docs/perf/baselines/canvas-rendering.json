@@ -84,6 +84,33 @@
       "note": "Erasing a stroke that spans the whole made-up plant while zoomed all the way in (1,000 pt/in): tile positions or cached tiles looked at to find the tiles it touched, counted by InkTileBook. The before is what #23 first did, every tile position in the stroke's bounds; main had no tiles."
     },
     {
+      "metric": "finger_cancelled_strokes_committed",
+      "kind": "count",
+      "value": 0,
+      "unit": "strokes",
+      "tolerance": 0,
+      "measured": "feat/draw-with-finger 2026-11-01 (deterministic; checked by CI VellumCore tests)",
+      "note": "Draw with finger (#24): a finger stroke drawn live for 30 ms, then a second finger 60 ms after touchdown, inside FingerStrokeGate.secondFingerWindow (130 ms), through the canvas view's finger path on an InkSession. Strokes added to the ink and undo steps made. New with #24."
+    },
+    {
+      "metric": "finger_cancelled_bytes_saved",
+      "kind": "count",
+      "value": 0,
+      "unit": "bytes",
+      "tolerance": 0,
+      "measured": "feat/draw-with-finger 2026-11-01 (deterministic; checked by CI VellumCore tests)",
+      "note": "The same cancelled finger stroke: bytes of ink-log records (framed) handed to the canvas saver. New with #24."
+    },
+    {
+      "metric": "finger_cancelled_sweep_strokes_erased",
+      "kind": "count",
+      "value": 0,
+      "unit": "strokes",
+      "tolerance": 0,
+      "measured": "feat/draw-with-finger 2026-11-01 (deterministic; checked by CI VellumCore tests)",
+      "note": "A finger eraser sweep over three strokes cancelled by a second finger 80 ms after touchdown: strokes erased. The sweep holds its samples while pending, so nothing is erased. New with #24."
+    },
+    {
       "metric": "draw_frame_ms_max",
       "kind": "time",
       "value": 4.27,

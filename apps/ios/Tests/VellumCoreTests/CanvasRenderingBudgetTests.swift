@@ -210,6 +210,27 @@ final class CanvasRenderingBudgetTests: XCTestCase {
         }
     }
 
+    /// Draw with finger (#24): a finger stroke a second finger cancels inside the window commits nothing and saves
+    /// nothing, and a cancelled finger eraser sweep erases nothing. There was no finger path before, so "before" is 0.
+    func testACancelledFingerStrokeCommitsAndSavesNothing() throws {
+        var stroke = FingerCanvas()
+        stroke.down(at: 0, x: 1)
+        stroke.move(at: 0.03, x: 1.5)
+        stroke.secondFinger(at: 0.06)
+        stroke.up(x: 2)
+        check("finger_cancelled_strokes_committed",
+              Double(stroke.session.ink.strokes.count + stroke.session.undoSteps), before: 0)
+        check("finger_cancelled_bytes_saved", Double(try stroke.bytesSaved()), before: 0)
+
+        var sweep = FingerCanvas(strokesAcross: 3)
+        _ = try sweep.bytesSaved()
+        sweep.tool = .eraser
+        sweep.down(at: 0, x: 0.5, y: 0.5)
+        sweep.move(at: 0.05, x: 0.5, y: 2.5)
+        sweep.secondFinger(at: 0.08)
+        check("finger_cancelled_sweep_strokes_erased", Double(3 - sweep.session.ink.strokes.count), before: 0)
+    }
+
     func testTilesCoverTheirRegionWithoutGaps() {
         let tiling = InkTiling(level: 3, anchor: CanvasPoint(x: .inches(1_000), y: .inches(-500)))
         let box = InkIndex.Box(minX: 990, minY: -530, maxX: 1_200, maxY: -400)

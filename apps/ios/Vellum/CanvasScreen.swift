@@ -47,9 +47,11 @@ struct CanvasScreen: View {
 private struct CanvasLayer: View {
     let editor: CanvasEditor
     let isDark: Bool
+    @AppStorage(FingerDrawingSetting.storageKey) private var fingerDraws = FingerDrawingSetting.default
 
     var body: some View {
-        InkCanvasView(editor: editor, isDark: isDark, viewport: editor.viewport, units: editor.canvas.units)
+        InkCanvasView(editor: editor, isDark: isDark, viewport: editor.viewport, units: editor.canvas.units,
+                      fingerDraws: fingerDraws)
     }
 }
 

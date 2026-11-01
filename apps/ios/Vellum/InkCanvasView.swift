@@ -12,6 +12,8 @@ struct InkCanvasView: UIViewRepresentable {
     let isDark: Bool
     let viewport: Viewport
     let units: CanvasUnits
+    /// The Draw with finger switch (#24).
+    let fingerDraws: Bool
 
     func makeUIView(context: Context) -> InkCanvasUIView {
         InkCanvasUIView(editor: editor)
@@ -20,12 +22,15 @@ struct InkCanvasView: UIViewRepresentable {
     func updateUIView(_ view: InkCanvasUIView, context: Context) {
         view.isDark = isDark
         view.units = units
+        view.fingerDraws = fingerDraws
         view.viewportDidChange()
     }
 }
 
-/// Draws the canvas and reads the Pencil. The Pencil draws (or erases); fingers pan and pinch. Nothing depends on
-/// pressure or hover, which the USB-C Pencil and the Duo don't have (ADR-0001).
+/// Draws the canvas and reads the Pencil. The Pencil draws (or erases); fingers pan and pinch. With Draw with finger
+/// on (#24), one finger draws as the Pencil does and two fingers pan and pinch; a finger stroke goes through a
+/// `FingerStrokeGate`, so a second finger landing just after the first cancels it. Nothing depends on pressure or
+/// hover, which the USB-C Pencil and the Duo don't have (ADR-0001).
 ///
 /// Nothing is drawn in `draw(_:)`. The ground is the layer's colour, the grid is two shape layers of a few dozen
 /// lines, and finished ink is cached tiles (`InkTileRenderer`) that a pan or pinch moves without redrawing. The
@@ -54,13 +59,24 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    /// On the simulator there is no Pencil, so one finger draws and two fingers pan and pinch. On the Duo only the
-    /// Pencil draws.
-    #if targetEnvironment(simulator)
-    private static let fingerDraws = true
-    #else
-    private static let fingerDraws = false
-    #endif
+    /// The Draw with finger switch, set when it changes, never looked up per touch. Off, fingers only pan and pinch
+    /// and a touch costs what it did before the switch existed.
+    var fingerDraws = FingerDrawingSetting.default {
+        didSet {
+            guard fingerDraws != oldValue else { return }
+            pan.minimumNumberOfTouches = fingerDraws ? 2 : 1
+            accessibilityHint = FingerDrawingSetting.accessibilityHint(fingerDraws: fingerDraws)
+            fingersOnGlass = 0
+        }
+    }
+    private let pan = UIPanGestureRecognizer()
+    /// With Draw with finger on: whether the finger stroke in progress is ink yet.
+    private var fingerGate = FingerStrokeGate()
+    /// With Draw with finger on: fingers on the canvas, so a finger only starts a stroke alone.
+    private var fingersOnGlass = 0
+    /// A finger's eraser sweep, while it is pending, holds its samples here and erases them once it is confirmed.
+    private var holdsEraser = false
+    private var heldEraserPoints: [CanvasPoint] = []
 
     private let renderer: InkTileRenderer
     private let minorGrid = CAShapeLayer()
@@ -96,6 +112,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         super.init(frame: .zero)
         isOpaque = true
         isMultipleTouchEnabled = true
+        heldEraserPoints.reserveCapacity(256)
         for grid in [minorGrid, majorGrid] {
             grid.actions = noAnimations
             grid.fillColor = nil
@@ -111,9 +128,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         #endif
 
         let directTouches = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.addTarget(self, action: #selector(handlePan(_:)))
         pan.allowedTouchTypes = directTouches
-        pan.minimumNumberOfTouches = Self.fingerDraws ? 2 : 1
+        pan.minimumNumberOfTouches = 1
         pan.maximumNumberOfTouches = 2
         pan.delegate = self
         addGestureRecognizer(pan)
@@ -125,7 +142,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
         isAccessibilityElement = true
         accessibilityLabel = "Canvas"
-        accessibilityHint = "Draw with the Apple Pencil. Pan and pinch with your fingers."
+        accessibilityHint = FingerDrawingSetting.accessibilityHint(fingerDraws: fingerDraws)
     }
 
     @available(*, unavailable)
@@ -145,6 +162,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         viewportDidChange()
         #if DEBUG || BENCHMARK
         DebugBenchmark.attach(self, editor: editor)
+        #endif
+        #if DEBUG
+        DebugFingerStroke.attach(self)
         #endif
     }
 
@@ -284,7 +304,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     // MARK: The Pencil
 
     private func draws(_ touch: UITouch) -> Bool {
-        touch.type == .pencil || (Self.fingerDraws && touch.type == .direct)
+        touch.type == .pencil || (fingerDraws && touch.type == .direct)
     }
 
     private func canvasPoint(_ p: CGPoint) -> CanvasPoint {
@@ -294,9 +314,32 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private func location(_ touch: UITouch) -> CGPoint { touch.preciseLocation(in: self) }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard liveTouch == nil, let touch = touches.first(where: draws), beginInput(at: location(touch)) else {
+        if fingerDraws {
+            var landed = 0, landedAt = 0.0
+            for touch in touches where touch.type == .direct {
+                landed += 1
+                landedAt = touch.timestamp
+            }
+            fingersOnGlass += landed
+            if landed > 0, let live = liveTouch, live.type == .direct { secondFingerDown(at: landedAt) }
+            // The Pencil takes over from a finger (a resting hand, most often): a confirmed finger stroke is kept, a
+            // pending one dropped, and the Pencil draws as always.
+            if let live = liveTouch, live.type == .direct, touches.contains(where: { $0.type == .pencil }) {
+                endInput(samples: [], keep: fingerGate.interrupted())
+            }
+        }
+        // A finger starts a stroke only alone on the glass; the Pencil always does.
+        guard liveTouch == nil, let touch = touches.first(where: draws),
+              touch.type == .pencil || fingersOnGlass == 1 else {
             super.touchesBegan(touches, with: event)
             return
+        }
+        if touch.type == .pencil {
+            guard beginInput(at: location(touch)) else { return super.touchesBegan(touches, with: event) }
+        } else {
+            guard fingerDown(at: location(touch), time: touch.timestamp) else {
+                return super.touchesBegan(touches, with: event)
+            }
         }
         liveTouch = touch
     }
@@ -306,38 +349,57 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             super.touchesMoved(touches, with: event)
             return
         }
+        if touch.type == .direct { fingerTick(at: touch.timestamp) }
         moveInput(samples: (event?.coalescedTouches(for: touch) ?? [touch]).map(location),
                   predicted: (event?.predictedTouches(for: touch) ?? []).map(location))
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if fingerDraws { fingersLifted(touches) }
         guard let touch = liveTouch, touches.contains(touch) else {
             super.touchesEnded(touches, with: event)
             return
         }
+        // A finger stroke lifted inside the window was still one finger, so it is kept like the Pencil's.
+        let keep = touch.type == .pencil || fingerGate.lift()
         // The final batch can hold several samples since the last move: all of them are the stroke's tail.
-        endInput(samples: (event?.coalescedTouches(for: touch) ?? [touch]).map(location), keep: true)
+        endInput(samples: (event?.coalescedTouches(for: touch) ?? [touch]).map(location), keep: keep)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if fingerDraws { fingersLifted(touches) }
         guard let touch = liveTouch, touches.contains(touch) else {
             super.touchesCancelled(touches, with: event)
             return
         }
-        // A Pencil stroke the system interrupts is still Zach's ink: keep what was drawn, tail included. Only a finger
-        // stroke on the simulator, cancelled because it turned into a two-finger pan, is dropped.
-        let keep = touch.type == .pencil
+        // A Pencil stroke the system interrupts is still Zach's ink: keep what was drawn, tail included. So is a
+        // confirmed finger stroke; a pending one is most likely the start of a pan, and is dropped.
+        let keep = touch.type == .pencil || fingerGate.interrupted()
         endInput(samples: keep ? (event?.coalescedTouches(for: touch) ?? [touch]).map(location) : [], keep: keep)
+    }
+
+    private func fingersLifted(_ touches: Set<UITouch>) {
+        for touch in touches where touch.type == .direct { fingersOnGlass -= 1 }
+        fingersOnGlass = max(0, fingersOnGlass)
     }
 
     /// The Pencil touched down at a screen point: starts a stroke or an eraser sweep. False when the tool in hand
     /// does neither.
     func beginInput(at location: CGPoint) -> Bool {
+        beginInput(at: location, holdingEraser: false)
+    }
+
+    private func beginInput(at location: CGPoint, holdingEraser: Bool) -> Bool {
         let point = canvasPoint(location)
         if editor.tool == .eraser {
             erasing = true
-            editor.beginEraserSweep()
-            editor.erase(at: point)
+            if holdingEraser {
+                holdsEraser = true
+                heldEraserPoints.append(point)
+            } else {
+                editor.beginEraserSweep()
+                editor.erase(at: point)
+            }
         } else if let stroke = editor.beginStroke(at: point) {
             liveStroke = stroke
             startLive(stroke)
@@ -350,6 +412,46 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         pencilIsDown = true
         startDisplayLink()
         return true
+    }
+
+    // MARK: A finger, with Draw with finger on
+
+    /// One finger touched down alone, with Draw with finger on: starts a pending stroke, drawn live at once, or a
+    /// pending eraser sweep, which holds its samples. False when the tool in hand does neither.
+    func fingerDown(at location: CGPoint, time: Double) -> Bool {
+        guard beginInput(at: location, holdingEraser: true) else { return false }
+        fingerGate.fingerDown(at: time)
+        return true
+    }
+
+    /// The finger moved or a frame passed: once the window has passed with one finger the stroke is ink, and a held
+    /// eraser sweep erases what it held.
+    func fingerTick(at time: Double) {
+        guard fingerGate.isPending, fingerGate.tick(at: time) else { return }
+        releaseHeldEraser()
+    }
+
+    /// A second finger landed while a finger stroke is in progress: inside the window the stroke is dropped, after it
+    /// the stroke ends where it is, kept. Either way the fingers go on to pan and pinch.
+    func secondFingerDown(at time: Double) {
+        switch fingerGate.secondFinger(at: time) {
+        case .cancel: endInput(samples: [], keep: false)
+        case .end: endInput(samples: [], keep: true)
+        case .none: break
+        }
+    }
+
+    /// The finger lifted, with its last samples.
+    func fingerUp(samples: [CGPoint]) {
+        endInput(samples: samples, keep: fingerGate.lift())
+    }
+
+    private func releaseHeldEraser() {
+        guard holdsEraser else { return }
+        holdsEraser = false
+        editor.beginEraserSweep()
+        for point in heldEraserPoints { editor.erase(at: point) }
+        heldEraserPoints.removeAll(keepingCapacity: true)
     }
 
     /// The Pencil moved: its coalesced samples since the last move, and where it is predicted to go.
@@ -374,7 +476,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         for (i, sample) in samples.enumerated() {
             let point = canvasPoint(sample)
             if erasing {
-                editor.erase(at: point)
+                if holdsEraser { heldEraserPoints.append(point) } else { editor.erase(at: point) }
             } else if ending && i == samples.count - 1 {
                 liveStroke?.end(at: point)
             } else {
@@ -386,6 +488,15 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func finishStroke(keep: Bool) {
+        if holdsEraser {
+            // A finger's sweep that was never confirmed: erased once kept, forgotten once dropped.
+            if keep {
+                releaseHeldEraser()
+            } else {
+                holdsEraser = false
+                heldEraserPoints.removeAll(keepingCapacity: true)
+            }
+        }
         if erasing { editor.endEraserSweep() }
         if let stroke = liveStroke, let base = liveBase {
             // The live layers catch up with the last samples, drop the prediction, and go to the renderer with the
@@ -412,6 +523,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         liveBase = nil
         liveChunkLayers = []
         erasing = false
+        if fingerDraws { fingerGate = FingerStrokeGate() }
         publishPenPosition()
         stopDisplayLinkIfIdle()
     }
@@ -433,6 +545,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func frame(_ link: CADisplayLink) {
+        // A finger held still on the eraser is confirmed by time passing, not by a move.
+        if holdsEraser { fingerTick(at: link.timestamp) }
         publishPenPosition()
     }
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
+# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
 # app. The fold is moved by Scripts/duo/posture.m, a simulator-side tool that calls SpringBoard's display tool service,
 # the way Sotto captured its Duo layouts (Sotto tag prototype/iphone-duo-layout).
 # usage: capture-duo.sh [output folder]   (default .build-captures)
@@ -121,6 +121,16 @@ for appearance in light dark; do
     xcrun simctl io "$udid" screenshot --display=$display "$file"
     sips -g pixelWidth -g pixelHeight "$file" | tail -2 | tr '\n' ' '; echo
   done
+done
+
+# Draw with finger (#24), in light and dark. The Debug-only `--ui-draw-with-finger` turns the switch on for that
+# launch only (a registered default, never saved). The Settings sheet with the switch on, and a new canvas where the
+# Debug-only `--ui-finger-stroke` drives the canvas view's finger path, since the simulator cannot touch the glass: a
+# finger cancelled by a second one 50 ms in, which leaves no ink, then a wave drawn with one finger, which is kept.
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  capture settings-draw-with-finger --ui-tab drawings --ui-settings --ui-draw-with-finger
+  capture canvas-finger-stroke --ui-tab canvases --ui-reset --ui-new-canvas --ui-finger-stroke --ui-draw-with-finger
 done
 
 # Frame timing on the 10,000-stroke canvas (#21): the benchmark pans, pinches, draws and erases through the canvas

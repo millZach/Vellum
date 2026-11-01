@@ -177,16 +177,31 @@ private struct WeightPicker: View {
 
 // MARK: - Top bar
 
-/// The canvas's name, its units, light or dark, and undo and redo.
+/// The canvas's name, its units, light or dark, and undo and redo. A long press on the name offers the made-up test
+/// canvas (`TestCanvas`).
 private struct TopBar: View {
     @Bindable var editor: CanvasEditor
     @AppStorage(AppearanceSetting.storageKey) private var appearance = AppearanceSetting.default.rawValue
+    @Environment(\.testCanvas) private var testCanvas
+    @State private var offersTestCanvas = false
 
     var body: some View {
         HStack(spacing: 10) {
             Text(editor.canvas.name)
                 .font(.system(size: 14, weight: .bold))
                 .lineLimit(1)
+                .onLongPressGesture(minimumDuration: 0.8) {
+                    if testCanvas != nil { offersTestCanvas = true }
+                }
+                .confirmationDialog("Test canvas", isPresented: $offersTestCanvas, titleVisibility: .visible) {
+                    if let testCanvas {
+                        Button(testCanvas.isOpen ? "Back to My Canvas" : "Open the 10,000-Stroke Test Canvas") {
+                            testCanvas.toggle()
+                        }
+                    }
+                } message: {
+                    Text("A made-up canvas for trying pan, pinch, draw and erase. It is never saved, and your canvas stays as it is.")
+                }
             Picker("Canvas units", selection: $editor.canvas.units) {
                 ForEach(CanvasUnits.allCases, id: \.self) { units in
                     Text(units.shortTitle).tag(units)

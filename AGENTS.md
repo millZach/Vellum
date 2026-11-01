@@ -44,7 +44,7 @@ Pull requests go through the merge train: post `READY TO MERGE #N`, wait for `GO
 ## Commits and pull requests
 
 - Commit subject: one plain-English imperative sentence, no type prefix, no trailing period. Body: prose on what changed and why.
-- Branch from `main` as `feat/`, `fix/`, `chore/`, `test/` or `prototype/` plus a short slug. One PR closes one issue.
+- Branch from `main` as `feat/`, `fix/`, `chore/`, `test/`, `perf/` or `prototype/` plus a short slug. One PR closes one issue.
 - PR body: `docs/agents/pull-requests.md`.
 
 ## Agent skills

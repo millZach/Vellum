@@ -1,9 +1,10 @@
-#if DEBUG
+#if DEBUG || BENCHMARK
 import QuartzCore
 import UIKit
 import VellumCore
 
-/// Debug-only frame timing for the canvas (#21). With `--ui-benchmark`, usually on the made-up 10,000-stroke canvas
+/// Frame timing for the canvas (#21), in Debug builds and in the optimised build `Scripts/capture-duo.sh` makes with
+/// the BENCHMARK flag; never in a TestFlight build. With `--ui-benchmark`, usually on the made-up 10,000-stroke canvas
 /// (`--ui-fixture-large`), it drives a pan, a pinch, a drawn stroke and an eraser sweep through the canvas view's own
 /// input paths, one step per display frame, and logs for every frame how long the main thread was busy from the
 /// display link's tick until the run loop went back to sleep (input, model, SwiftUI updates and the Core Animation
@@ -51,6 +52,8 @@ final class DebugBenchmark: NSObject {
     private var intervals: [Double] = []
     private var expectedInterval = 1.0 / 120
     private var settleStart: CFTimeInterval?
+    /// The scenario whose last step ran; it is reported once that frame's work is counted.
+    private var finishing: Scenario?
     private var lines: [String] = []
     private var measurements: [String: Double] = [:]
     private var strokePoint = CGPoint.zero
@@ -126,7 +129,12 @@ final class DebugBenchmark: NSObject {
     }
 
     private func start() {
-        record("benchmark strokes=\(editor.ink.strokes.count) view=\(Int(view?.bounds.width ?? 0))x\(Int(view?.bounds.height ?? 0)) maximumFramesPerSecond=\(view?.window?.windowScene?.screen.maximumFramesPerSecond ?? 0) promotionOptIn=\(Bundle.main.object(forInfoDictionaryKey: "CADisableMinimumFrameDurationOnPhone") as? Bool ?? false)")
+        #if DEBUG
+        let build = "debug"
+        #else
+        let build = "release"
+        #endif
+        record("benchmark build=\(build) strokes=\(editor.ink.strokes.count) view=\(Int(view?.bounds.width ?? 0))x\(Int(view?.bounds.height ?? 0)) maximumFramesPerSecond=\(view?.window?.windowScene?.screen.maximumFramesPerSecond ?? 0) promotionOptIn=\(Bundle.main.object(forInfoDictionaryKey: "CADisableMinimumFrameDurationOnPhone") as? Bool ?? false)")
         let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true,
                                                           CFIndex.max) { _, _ in
             MainActor.assumeIsolated { DebugBenchmark.shared?.runLoopWillSleep() }
@@ -157,6 +165,16 @@ final class DebugBenchmark: NSObject {
         if let start = tickStart, warmUp == 0 { work.append((now - start) * 1000) }
         tickStart = nil
 
+        if let scenario = finishing {
+            // The last step's frame (the Pencil lifting and the stroke committing) is counted by now, so every
+            // scenario reports all its frames.
+            finishing = nil
+            scenario.tearDown(self)
+            report(scenario)
+            settleStart = now
+            return
+        }
+
         if let settleStart {
             // Waiting for background tile renders to finish after a scenario.
             if (view?.pendingRenderCount ?? 0) == 0 || now - settleStart > 5 {
@@ -182,11 +200,7 @@ final class DebugBenchmark: NSObject {
         tickStart = now
         scenario.step(self, outOfTime ? scenario.frames - 1 : frame)
         frame = outOfTime ? scenario.frames : frame + 1
-        if frame == scenario.frames {
-            scenario.tearDown(self)
-            report(scenario)
-            settleStart = now
-        }
+        if frame == scenario.frames { finishing = scenario }
     }
 
     private func runLoopWillSleep() {
@@ -205,9 +219,15 @@ final class DebugBenchmark: NSObject {
             + " interval_ms median=\(format(percentile(sortedIntervals, 0.5)))"
             + " p95=\(format(percentile(sortedIntervals, 0.95))) max=\(format(sortedIntervals.last ?? 0))"
             + " long_frames=\(long) display_interval_ms=\(format(expectedInterval * 1000))")
-        measurements["\(scenario.name)_frame_ms_p50"] = percentile(sortedWork, 0.5)
-        measurements["\(scenario.name)_frame_ms_p95"] = percentile(sortedWork, 0.95)
-        measurements["\(scenario.name)_frame_ms_max"] = sortedWork.last ?? 0
+        // An optimised build's metrics end in _release, so both builds compare with their own baselines.
+        #if DEBUG
+        let suffix = ""
+        #else
+        let suffix = "_release"
+        #endif
+        measurements["\(scenario.name)_frame_ms_p50\(suffix)"] = percentile(sortedWork, 0.5)
+        measurements["\(scenario.name)_frame_ms_p95\(suffix)"] = percentile(sortedWork, 0.95)
+        measurements["\(scenario.name)_frame_ms_max\(suffix)"] = sortedWork.last ?? 0
     }
 
     private func finish() {

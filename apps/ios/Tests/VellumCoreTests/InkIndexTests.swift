@@ -3,20 +3,10 @@ import XCTest
 
 /// The spatial index of ink: kept in step with the ink, and finding exactly what a look at every stroke would.
 final class InkIndexTests: XCTestCase {
-    /// A small, fixed random generator, so every run tests the same made-up ink.
-    private struct Random {
-        var state: UInt64
-        mutating func next() -> Double {
-            state = state &* 6364136223846793005 &+ 1442695040888963407
-            return Double(state >> 11) / Double(1 << 53)
-        }
-        mutating func range(_ low: Double, _ high: Double) -> Double { low + next() * (high - low) }
-    }
-
     /// Made-up ink at every scale the canvas has: dots, handwriting a few inches across, redlines feet long and plant
     /// runs hundreds of feet long, spread over a few hundred feet.
     private func randomInk(count: Int, seed: UInt64) -> InkSession {
-        var random = Random(state: seed)
+        var random = MadeUpInk.SeededRandom(state: seed)
         var session = InkSession()
         for _ in 0..<count {
             let size = [0.0, 0.05, 3, 40, 2_000][Int(random.next() * 5)]
@@ -45,7 +35,7 @@ final class InkIndexTests: XCTestCase {
         let session = randomInk(count: 1_500, seed: 7)
         let index = InkIndex(session.ink)
         XCTAssertEqual(index.count, 1_500)
-        var random = Random(state: 99)
+        var random = MadeUpInk.SeededRandom(state: 99)
         for _ in 0..<300 {
             let w = [0.01, 1, 50, 1_000, 10_000][Int(random.next() * 5)]
             let x = random.range(-3_500, 3_500), y = random.range(-2_500, 2_500)
@@ -58,7 +48,7 @@ final class InkIndexTests: XCTestCase {
     func testEraserHitsMatchALookAtEveryStrokeOnRandomInk() {
         let session = randomInk(count: 1_500, seed: 11)
         let index = InkIndex(session.ink)
-        var random = Random(state: 5)
+        var random = MadeUpInk.SeededRandom(state: 5)
         var hitsSeen = 0
         for _ in 0..<2_000 {
             let point = CanvasPoint(x: .inches(random.range(-3_200, 3_200)), y: .inches(random.range(-2_200, 2_200)))
@@ -118,7 +108,7 @@ final class InkIndexTests: XCTestCase {
         // An eraser sweep takes strokes out, found through the index.
         session.beginEraserSweep()
         var erased: [InkStroke] = []
-        var random = Random(state: 8)
+        var random = MadeUpInk.SeededRandom(state: 8)
         while erased.isEmpty {
             let point = CanvasPoint(x: .inches(random.range(-3_000, 3_000)), y: .inches(random.range(-2_000, 2_000)))
             erased = session.erase(at: point, tolerance: .inches(200), index: index)
@@ -167,7 +157,7 @@ final class InkIndexTests: XCTestCase {
         var withIndex = randomInk(count: 600, seed: 31)
         var without = withIndex
         var index = InkIndex(withIndex.ink)
-        var random = Random(state: 17)
+        var random = MadeUpInk.SeededRandom(state: 17)
         withIndex.beginEraserSweep(); without.beginEraserSweep()
         for _ in 0..<400 {
             let point = CanvasPoint(x: .inches(random.range(-3_000, 3_000)), y: .inches(random.range(-2_000, 2_000)))

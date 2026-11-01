@@ -10,8 +10,8 @@
       "before": 10000,
       "unit": "paths",
       "tolerance": 0,
-      "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
-      "note": "A pan, and a pinch within a level, after the view was drawn once. Main built a path for every visible stroke on every redraw."
+      "measured": "perf/canvas-rendering 2026-11-01 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "A pan, and a pinch to the next level, after the view was drawn once, through InkTileBook and the path cache as the renderer uses them. Main built a path for every visible stroke on every redraw."
     },
     {
       "metric": "area_invalidated_per_new_stroke_pt2",
@@ -20,8 +20,8 @@
       "before": 636219,
       "unit": "square screen points",
       "tolerance": 0,
-      "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
-      "note": "A 60 x 30 pt stroke in the middle of the screen at zoom to everything: the 4 tiles it touches (the tile anchor sits at the screen centre, the worst case). Main redrew the whole 951 x 669 view, background and grid included."
+      "measured": "perf/canvas-rendering 2026-11-01 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "A 60 x 30 pt stroke in the middle of the screen at zoom to everything: the screen area of the tiles InkTileBook asks the renderer to draw for it, 4 tiles (the tile anchor sits at the screen centre, the worst case). Main redrew the whole 951 x 669 view, background and grid included."
     },
     {
       "metric": "cull_strokes_visited",
@@ -72,6 +72,16 @@
       "tolerance": 0,
       "measured": "perf/canvas-rendering 2026-10-31 forge Linux Swift 6.4.2 (deterministic)",
       "note": "Most points turned into path on one Pencil move over a 10,000-sample stroke, two samples and two predictions a move. Main rebuilt the whole stroke every move."
+    },
+    {
+      "metric": "tile_keys_probed_per_erased_stroke",
+      "kind": "count",
+      "value": 16,
+      "before": 448473792,
+      "unit": "tile positions",
+      "tolerance": 0,
+      "measured": "perf/canvas-rendering 2026-11-01 forge Linux Swift 6.4.2 (deterministic)",
+      "note": "Erasing a stroke that spans the whole made-up plant while zoomed all the way in (1,000 pt/in): tile positions or cached tiles looked at to find the tiles it touched, counted by InkTileBook. The before is what #23 first did, every tile position in the stroke's bounds; main had no tiles."
     },
     {
       "metric": "draw_frame_ms_max",

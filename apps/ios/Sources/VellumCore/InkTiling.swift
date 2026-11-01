@@ -91,59 +91,106 @@ public struct InkTiling: Hashable, Sendable {
 }
 
 /// Each stroke's path built once, in model space relative to the stroke's first point, and kept until the stroke
-/// leaves the canvas (ADR-0012). The renderer builds a path the first time a tile needs it and every later tile, pan
-/// or zoom reuses it. Safe to use from the tile-drawing threads.
+/// leaves the canvas (ADR-0012). The renderer builds a path the first time a tile needs it, on a tile-drawing thread,
+/// and every later tile, pan or zoom reuses it. Safe to use from any thread.
+///
+/// Builds are single-flight: a thread wanting a path another thread is building waits for it rather than building it
+/// again, so each stroke is built once and `buildCount` counts real work. A stroke removed while its path is being
+/// built is not put back: the build finishes for the tile that asked, but the cache does not keep it.
 public final class StrokePathCache<Path>: @unchecked Sendable {
+    private enum Entry {
+        case building
+        case built(Path)
+    }
+
     private let build: @Sendable ([CanvasPoint], CanvasPoint) -> Path
-    private var paths: [StrokeID: Path] = [:]
-    private let lock = SpinLock()
-    /// How many paths have been built, for the work budgets (docs/perf).
-    public private(set) var buildCount = 0
+    private var entries: [StrokeID: Entry] = [:]
+    /// Strokes removed while their paths were being built: those builds are not kept.
+    private var removedWhileBuilding: Set<StrokeID> = []
+    private let mutex = PThreadMutex()
+    private var builds = 0
 
     /// `build` makes a path from a stroke's points relative to an origin (its first point).
     public init(build: @escaping @Sendable ([CanvasPoint], CanvasPoint) -> Path) { self.build = build }
 
+    /// How many paths have been built, for the work budgets (docs/perf).
+    public var buildCount: Int { mutex.withLock { builds } }
+
     /// A stroke's path, and the canvas point its coordinates count from.
     public func path(for stroke: InkStroke) -> (path: Path, origin: CanvasPoint) {
         let origin = stroke.points.first ?? .origin
-        lock.lock()
-        if let path = paths[stroke.id] { lock.unlock(); return (path, origin) }
-        lock.unlock()
+        mutex.lock()
+        // Another thread is building it: wait for that rather than build it twice.
+        while case .building? = entries[stroke.id] { mutex.wait() }
+        if case .built(let path)? = entries[stroke.id] {
+            mutex.unlock()
+            return (path, origin)
+        }
+        entries[stroke.id] = .building
+        builds += 1
+        mutex.unlock()
+
         let path = build(stroke.points, origin)
-        lock.lock()
-        if paths[stroke.id] == nil { paths[stroke.id] = path; buildCount += 1 }
-        let kept = paths[stroke.id]!
-        lock.unlock()
-        return (kept, origin)
+
+        mutex.lock()
+        if removedWhileBuilding.remove(stroke.id) == nil {
+            entries[stroke.id] = .built(path)
+        } else {
+            entries[stroke.id] = nil
+        }
+        mutex.broadcast()
+        mutex.unlock()
+        return (path, origin)
     }
 
-    /// Forgets the paths of strokes that left the canvas.
+    /// Forgets the paths of strokes that left the canvas, including any being built now.
     public func remove(_ ids: [StrokeID]) {
-        lock.lock()
-        for id in ids { paths[id] = nil }
-        lock.unlock()
+        guard !ids.isEmpty else { return }
+        mutex.lock()
+        for id in ids {
+            switch entries[id] {
+            case .built?: entries[id] = nil
+            case .building?: removedWhileBuilding.insert(id)
+            case nil: break
+            }
+        }
+        mutex.unlock()
     }
 
+    /// Paths kept.
     public var count: Int {
-        lock.lock(); defer { lock.unlock() }
-        return paths.count
+        mutex.withLock { entries.values.reduce(0) { if case .built = $1 { return $0 + 1 } else { return $0 } } }
     }
 }
 
-/// A plain lock that builds on Linux and Darwin without Foundation.
-final class SpinLock: @unchecked Sendable {
+/// A pthread mutex with a condition, for code that builds on Linux and Darwin without Foundation.
+final class PThreadMutex: @unchecked Sendable {
     private let mutex: UnsafeMutablePointer<pthread_mutex_t>
+    private let condition: UnsafeMutablePointer<pthread_cond_t>
 
     init() {
         mutex = .allocate(capacity: 1)
         pthread_mutex_init(mutex, nil)
+        condition = .allocate(capacity: 1)
+        pthread_cond_init(condition, nil)
     }
 
     deinit {
+        pthread_cond_destroy(condition)
+        condition.deallocate()
         pthread_mutex_destroy(mutex)
         mutex.deallocate()
     }
 
     func lock() { pthread_mutex_lock(mutex) }
     func unlock() { pthread_mutex_unlock(mutex) }
+    /// Waits for a `broadcast`, with the mutex held; it is held again on return.
+    func wait() { pthread_cond_wait(condition, mutex) }
+    func broadcast() { pthread_cond_broadcast(condition) }
+
+    func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock()
+        defer { unlock() }
+        return try body()
+    }
 }

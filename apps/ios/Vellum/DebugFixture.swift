@@ -49,12 +49,6 @@ enum DebugFixture {
         return VellumCore.Canvas(name: "Boiler 4 walkdown (example)", ink: session.ink)
     }
 
-    /// The made-up 10,000-stroke canvas for measuring the renderer (#21), opened with `--ui-fixture-large`: the same
-    /// strokes the VellumCore work budgets measure (`MadeUpInk.largeWalkdown`).
-    static var largeCanvas: VellumCore.Canvas {
-        VellumCore.Canvas(name: "Large walkdown (made up)", ink: MadeUpInk.largeWalkdown())
-    }
-
     // Points in feet.
     private static func point(_ p: (Double, Double)) -> CanvasPoint { CanvasPoint(x: .feet(p.0), y: .feet(p.1)) }
 

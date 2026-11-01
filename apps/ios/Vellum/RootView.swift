@@ -7,13 +7,18 @@ struct RootView: View {
     @State private var selection: AppTab = RootView.launchTab
     /// The open canvas lives here, above the tabs, so switching tabs keeps its ink for the session.
     @State private var editor = RootView.launchEditor()
+    /// The made-up test canvas while it is open in place of `editor` (`TestCanvas`); never saved.
+    @State private var testEditor: CanvasEditor?
 
     var body: some View {
         TabView(selection: $selection) {
             ForEach(AppTab.allCases) { tab in
                 Tab(tab.descriptor.title, systemImage: tab.descriptor.systemImage, value: tab) {
                     if tab == .canvases {
-                        CanvasScreen(editor: editor)
+                        let shown = testEditor ?? editor
+                        CanvasScreen(editor: shown)
+                            .id(ObjectIdentifier(shown))
+                            .environment(\.testCanvas, TestCanvasSwitch(isOpen: testEditor != nil, toggle: toggleTestCanvas))
                     } else if tab == .drawings {
                         DrawingsScreen()
                     } else {
@@ -21,6 +26,18 @@ struct RootView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Opens the test canvas, built off the main thread, or goes back to Zach's canvas.
+    private func toggleTestCanvas() {
+        guard testEditor == nil else {
+            testEditor = nil
+            return
+        }
+        Task { @MainActor in
+            let canvas = await Task.detached(priority: .userInitiated) { TestCanvas.make() }.value
+            testEditor = CanvasEditor(canvas: canvas, startingView: .everything)
         }
     }
 
@@ -34,12 +51,14 @@ struct RootView: View {
 
     /// A new, empty canvas. Debug builds accept `--ui-fixture` to open the made-up fixture canvas instead, and
     /// `--ui-zoom closeup` to open it close up on its valve rather than on everything; `--ui-fixture-large` opens the
-    /// made-up 10,000-stroke canvas for measuring the renderer.
+    /// made-up 10,000-stroke test canvas for measuring the renderer, in Debug and benchmark builds.
     private static func launchEditor() -> CanvasEditor {
-        #if DEBUG
+        #if DEBUG || BENCHMARK
         if ProcessInfo.processInfo.arguments.contains("--ui-fixture-large") {
-            return CanvasEditor(canvas: DebugFixture.largeCanvas, startingView: .everything)
+            return CanvasEditor(canvas: TestCanvas.make(), startingView: .everything)
         }
+        #endif
+        #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-fixture") {
             let closeUp = launchArgument("--ui-zoom") == "closeup"
             return CanvasEditor(canvas: DebugFixture.canvas,

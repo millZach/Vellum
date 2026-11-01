@@ -108,45 +108,76 @@ final class CanvasRenderingBudgetTests: XCTestCase {
               before: Double(Self.ink.strokes.count))
     }
 
-    /// A pan or a pinch within a level redraws from cached paths: paths built per redraw once the view has been
-    /// drawn. Main built a path for every visible stroke on every redraw.
+    /// A pan, and a pinch to the next level, after the view was drawn once: paths built for the tiles the renderer's
+    /// book asks for. Main built a path for every visible stroke on every redraw.
     func testARedrawRebuildsNoPaths() {
-        let cache = StrokePathCache<Int> { points, _ in points.count }
+        let harness = InkTileHarness(index: Self.index)
         var viewport = Self.everything
-        func drawVisibleTiles() -> Int {
-            let tiling = InkTiling(level: InkTiling.level(for: viewport.pointsPerInch), anchor: viewport.centre)
-            var strokes = 0
-            for key in tiling.keys(covering: InkIndex.Box(viewport.visibleRect)) {
-                let box = tiling.box(of: key).grown(by: tiling.margin(minimumWidth: 1))
-                for stroke in Self.index.strokes(in: box) { _ = cache.path(for: stroke); strokes += 1 }
-            }
-            return strokes
-        }
-        _ = drawVisibleTiles()
-        let firstBuilds = cache.buildCount
+        harness.book.show(viewport)
+        harness.drawAll()
+        let firstBuilds = harness.paths.buildCount
         XCTAssertEqual(firstBuilds, Self.ink.strokes.count, "everything is in view, so every path is built once")
         viewport.pan(dx: 240, dy: 60)
-        _ = drawVisibleTiles()
+        harness.book.show(viewport)
+        harness.drawAll()
         viewport.zoom(by: 1.3, about: ScreenPoint(x: 400, y: 300))
-        _ = drawVisibleTiles()
+        harness.book.show(viewport)
+        harness.drawAll()
+        XCTAssertGreaterThan(harness.book.work.tilesDrawn, 0, "the pan and the zoom drew tiles")
         let visibleAtEverything = Self.index.strokeIDs(in: InkIndex.Box(Self.everything.visibleRect)).count
-        check("paths_rebuilt_per_redraw", Double(cache.buildCount - firstBuilds), before: Double(visibleAtEverything))
+        check("paths_rebuilt_per_redraw", Double(harness.paths.buildCount - firstBuilds), before: Double(visibleAtEverything))
     }
 
-    /// A short stroke, 60 by 30 points, drawn in the middle of the screen at everything: the screen area redrawn.
-    /// Main redrew the whole view, background and grid included.
+    /// A short stroke, 60 by 30 points, drawn in the middle of the screen at everything: the screen area of the tiles
+    /// the renderer's book asks to draw for it. Main redrew the whole view, background and grid included.
     func testANewStrokeRedrawsOnlyTheTilesItTouches() {
         let viewport = Self.everything
-        let tiling = InkTiling(level: InkTiling.level(for: viewport.pointsPerInch), anchor: viewport.centre)
+        let harness = InkTileHarness(index: Self.index)
+        harness.book.show(viewport)
+        harness.drawAll()
         let corner = viewport.canvasPoint(for: ScreenPoint(x: 951 / 2 - 30, y: 669 / 2 - 15))
         let size = viewport.canvasLength(ofScreen: 60), height = viewport.canvasLength(ofScreen: 30)
         let stroke = InkStroke(id: StrokeID(99_999), tool: .pen, colour: .red, width: viewport.canvasLength(ofScreen: 3),
                                points: [corner, corner.offsetBy(dx: size, dy: height)])
-        let box = InkIndex.box(of: stroke)!.grown(by: tiling.margin(minimumWidth: 1))
-        let tiles = tiling.keys(covering: box).count
-        let tileOnScreen = InkTiling.tileSize * viewport.pointsPerInch / tiling.scale
-        check("area_invalidated_per_new_stroke_pt2", (Double(tiles) * tileOnScreen * tileOnScreen).rounded(.up),
-              before: 951 * 669)
+        harness.book.work = .init()
+        harness.book.inkChanged(InkIndex.Change(added: [stroke], addedOnTop: true))
+        XCTAssertTrue(harness.requests.allSatisfy { $0.adding?.map(\.id) == [stroke.id] }, "drawn over, not redrawn")
+        check("area_invalidated_per_new_stroke_pt2", harness.book.work.areaDrawn.rounded(.up), before: 951 * 669)
+    }
+
+    /// The same measure catches a renderer that redraws everything: a full redraw asks for at least the screen.
+    func testTheInvalidationMeasureSeesAFullRedraw() {
+        let harness = InkTileHarness(index: Self.index)
+        harness.book.show(Self.everything)
+        harness.drawAll()
+        harness.book.work = .init()
+        harness.book.redrawEverything()
+        XCTAssertGreaterThanOrEqual(harness.book.work.areaDrawn, 951 * 669)
+        XCTAssertGreaterThan(harness.book.work.areaDrawn, Self.baseline["area_invalidated_per_new_stroke_pt2"] ?? 0)
+    }
+
+    /// Erasing a stroke that spans the whole plant while zoomed all the way in: tile positions looked at to find the
+    /// tiles it touched. Looking at every position its bounds span (what #23 first did) is hundreds of millions.
+    func testErasingALongStrokeLooksOnlyAtCachedTiles() {
+        let bounds = Self.ink.bounds!
+        let long = InkStroke(id: StrokeID(99_998), tool: .pen, colour: .red, width: .inches(1),
+                             points: [bounds.origin, bounds.origin.offsetBy(dx: bounds.size.width, dy: bounds.size.height)])
+        var index = Self.index
+        index.insert(long)
+        let harness = InkTileHarness(index: index)
+        var viewport = Self.everything
+        viewport.zoom(by: Viewport.maximumPointsPerInch / viewport.pointsPerInch, about: ScreenPoint(x: 951 / 2, y: 669 / 2))
+        viewport.centre = CanvasPoint(x: .inches(bounds.origin.x.inches + bounds.size.width.inches / 2),
+                                      y: .inches(bounds.origin.y.inches + bounds.size.height.inches / 2))
+        harness.book.show(viewport)
+        harness.drawAll()
+        let level = harness.book.current!
+        let range = level.tiling.keyRange(covering: InkIndex.box(of: long)!.grown(by: level.tiling.margin(minimumWidth: 1)))
+        harness.book.work = .init()
+        harness.book.inkChanged(InkIndex.Change(removed: [long], addedOnTop: false))
+        XCTAssertLessThanOrEqual(harness.book.work.keysProbed, level.tiles.count)
+        check("tile_keys_probed_per_erased_stroke", Double(harness.book.work.keysProbed),
+              before: Double(range.x.count) * Double(range.y.count))
     }
 
     /// The stroke being drawn, 10,000 samples long, two a move and two predicted: points turned into path per move,

@@ -86,23 +86,27 @@ for appearance in light dark; do
   done
 done
 
-# Frame timing on the 10,000-stroke canvas (#21): the Debug-only benchmark pans, pinches, draws and erases through the
-# canvas view's input paths and writes benchmark.txt to the app's Documents folder. Simulator numbers are indicative.
-xcrun simctl ui "$udid" appearance light
-xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
-xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
-data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
-rm -f "$data/Documents/benchmark.txt" "$data/Documents/benchmark.json"
-xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-fixture-large --ui-benchmark >/dev/null
-waited=0
-while [ "$waited" -lt 240 ] && ! grep -q '^done' "$data/Documents/benchmark.txt" 2>/dev/null; do
-  sleep 5; waited=$((waited + 5))
-done
-cp "$data/Documents/benchmark.txt" "$out/benchmark.txt" 2>/dev/null || echo "The benchmark wrote no results" > "$out/benchmark.txt"
-cp "$data/Documents/benchmark.json" "$out/benchmark.json" 2>/dev/null || true
-echo "Benchmark (simulator, indicative only):"
-cat "$out/benchmark.txt"
-xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+# Frame timing on the 10,000-stroke canvas (#21): the benchmark pans, pinches, draws and erases through the canvas
+# view's input paths and writes benchmark.txt and benchmark.json to the app's Documents folder. Simulator numbers are
+# indicative. benchmark <suffix>: runs the installed app's benchmark and keeps benchmark<suffix>.txt and .json.
+benchmark() {
+  xcrun simctl ui "$udid" appearance light
+  xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+  rm -f "$data/Documents/benchmark.txt" "$data/Documents/benchmark.json"
+  xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-fixture-large --ui-benchmark >/dev/null
+  waited=0
+  while [ "$waited" -lt 240 ] && ! grep -q '^done' "$data/Documents/benchmark.txt" 2>/dev/null; do
+    sleep 5; waited=$((waited + 5))
+  done
+  cp "$data/Documents/benchmark.txt" "$out/benchmark$1.txt" 2>/dev/null || echo "The benchmark wrote no results" > "$out/benchmark$1.txt"
+  cp "$data/Documents/benchmark.json" "$out/benchmark$1.json" 2>/dev/null || true
+  echo "Benchmark$1 (simulator, indicative only):"
+  cat "$out/benchmark$1.txt"
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+}
+benchmark ""
 
 # The Home Screen, to show the installed app icon. Vellum has to be on the first page: if SpringBoard put it on a later
 # page, it swaps places with the first page's first app in SpringBoard's saved layout while the simulator is shut down.
@@ -155,3 +159,11 @@ cp "$app"/AppIcon*.png "$out/bundle-icons/" 2>/dev/null || echo "No AppIcon PNGs
 ls -l "$out/bundle-icons"
 xcrun --sdk iphonesimulator assetutil --info "$app/Assets.car" > "$out/bundle-icons/Assets.car.json" || echo "assetutil could not read Assets.car"
 grep -E "\"(Name|Appearance|RenditionName|PixelWidth)\"" "$out/bundle-icons/Assets.car.json" | head -40 || true
+
+# The same benchmark in an optimised build: Release, with the BENCHMARK flag that compiles the benchmark and the
+# --ui-fixture-large launch argument in (TestFlight builds have neither). Its metrics end in _release.
+xcodebuild -project Vellum.xcodeproj -scheme Vellum -configuration Release -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath .build-native CODE_SIGNING_ALLOWED=NO \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) BENCHMARK' build -quiet
+xcrun simctl install "$udid" .build-native/Build/Products/Release-iphonesimulator/Vellum.app
+benchmark "-release"

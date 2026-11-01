@@ -29,8 +29,10 @@ struct InkCanvasView: UIViewRepresentable {
 ///
 /// Nothing is drawn in `draw(_:)`. The ground is the layer's colour, the grid is two shape layers of a few dozen
 /// lines, and finished ink is cached tiles (`InkTileRenderer`) that a pan or pinch moves without redrawing. The
-/// stroke being drawn is chunked shape layers (`LiveStrokeChunks`): full chunks are built once, and each Pencil move
-/// rebuilds only the open chunk and the predicted tail, so a move costs the same however long the stroke is. While
+/// stroke being drawn is chunked shape layers (`LiveStrokeChunks`) in screen points of the view at touchdown: full
+/// chunks are built once, each Pencil move rebuilds only the open chunk and the predicted tail, so a move costs the
+/// same however long the stroke is, and a pan or pinch mid-stroke changes one transform. When the Pencil lifts, the
+/// layers go to the renderer, which shows them until the stroke's tiles are drawn. While
 /// a finger or the Pencil is down a display link asks for ProMotion's 120 Hz and publishes the pen's position to the
 /// status bar at most once a frame; it stops when the canvas is still.
 final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
@@ -64,10 +66,11 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private let minorGrid = CAShapeLayer()
     private let majorGrid = CAShapeLayer()
     /// The stroke being drawn: one layer per chunk, with the group's opacity so a highlighter's chunks don't darken
-    /// where they meet.
-    private let liveLayer = CALayer()
+    /// where they meet, in screen points of `liveBase`, the view at touchdown.
+    private var liveLayer = CALayer()
     private var liveChunkLayers: [CAShapeLayer] = []
-    private let liveTailLayer = CAShapeLayer()
+    private var liveTailLayer = CAShapeLayer()
+    private var liveBase: Viewport?
     private var liveChunks = LiveStrokeChunks()
     private var livePredicted: [CanvasPoint] = []
     private var liveTouch: UITouch?
@@ -98,11 +101,6 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         }
         layer.addSublayer(renderer.layer)
         layer.addSublayer(renderer.pendingInkLayer)
-        liveLayer.actions = noAnimations
-        liveLayer.allowsGroupOpacity = true
-        layer.addSublayer(liveLayer)
-        configure(liveTailLayer)
-        liveLayer.addSublayer(liveTailLayer)
         applyColours()
 
         editor.onInkChange = { [weak self] change in self?.renderer.inkChanged(change) }
@@ -132,7 +130,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         super.layoutSubviews()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for sublayer in [minorGrid, majorGrid, renderer.layer, renderer.pendingInkLayer, liveLayer] {
+        for sublayer in [minorGrid, majorGrid, renderer.layer, renderer.pendingInkLayer] {
             sublayer.frame = bounds
         }
         CATransaction.commit()
@@ -140,7 +138,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         editor.viewDidResize(width: Double(bounds.width), height: Double(bounds.height))
         shownViewport = nil
         viewportDidChange()
-        #if DEBUG
+        #if DEBUG || BENCHMARK
         DebugBenchmark.attach(self, editor: editor)
         #endif
     }
@@ -148,17 +146,16 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     // MARK: Showing the canvas
 
     /// Places everything for the editor's view of the canvas, if it changed: one transform per level of tiles, the
-    /// grid's few lines, and the stroke being drawn, so nothing lags a pan or a pinch.
+    /// grid's few lines, and one transform for the stroke being drawn, so nothing lags a pan or a pinch.
     func viewportDidChange() {
         let viewport = editor.viewport
         guard viewport != shownViewport, bounds.width > 0 else { return }
-        let zoomChanged = viewport.pointsPerInch != shownViewport?.pointsPerInch
         shownViewport = viewport
         renderer.show(viewport)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         updateGrid(viewport)
-        if liveStroke != nil { rebuildLive(viewport, widthChanged: zoomChanged) }
+        if let liveBase { liveLayer.transform = InkTileRenderer.transform(from: liveBase, to: viewport) }
         CATransaction.commit()
     }
 
@@ -223,17 +220,32 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func startLive(_ stroke: StrokeInProgress) {
+        let base = editor.viewport
+        liveBase = base
         liveChunks = LiveStrokeChunks()
         livePredicted = []
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        // A fresh group for each stroke: the last one went to the renderer with its stroke.
+        liveLayer = CALayer()
+        liveLayer.actions = noAnimations
+        liveLayer.allowsGroupOpacity = true
+        liveLayer.anchorPoint = .zero
+        liveLayer.position = .zero
+        liveLayer.bounds = bounds
         liveLayer.opacity = Float(stroke.tool.opacity)
+        layer.addSublayer(liveLayer)
+        liveTailLayer = CAShapeLayer()
+        configure(liveTailLayer)
+        liveLayer.addSublayer(liveTailLayer)
         let open = CAShapeLayer()
         configure(open)
         liveLayer.insertSublayer(open, below: liveTailLayer)
         liveChunkLayers = [open]
+        let width = max(stroke.width.inches * base.pointsPerInch, InkTileRenderer.minimumWidth)
         for shape in liveChunkLayers + [liveTailLayer] {
             shape.strokeColor = Palette.ink(stroke.colour, dark: isDark).cgColor
+            shape.lineWidth = width
         }
         CATransaction.commit()
         updateLive()
@@ -242,52 +254,25 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     /// Brings the layers up to the stroke's points: freezes chunks that filled, rebuilds the open chunk, and replaces
     /// the predicted tail. The work is the open chunk and the tail, never the whole stroke.
     private func updateLive() {
-        guard let stroke = liveStroke else { return }
-        let viewport = editor.viewport
-        let width = max(stroke.width.inches * viewport.pointsPerInch, InkTileRenderer.minimumWidth)
+        guard let stroke = liveStroke, let base = liveBase else { return }
         let update = liveChunks.update(pointCount: stroke.points.count)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for range in update.newlyFrozen {
             // The open layer becomes this frozen chunk; a fresh layer takes over as the open one.
             let frozen = liveChunkLayers[liveChunkLayers.count - 1]
-            frozen.lineWidth = width
-            frozen.path = screenPath(stroke.points[range], viewport)
+            frozen.path = screenPath(stroke.points[range], base)
             let open = CAShapeLayer()
             configure(open)
             open.strokeColor = frozen.strokeColor
+            open.lineWidth = frozen.lineWidth
             liveLayer.insertSublayer(open, below: liveTailLayer)
             liveChunkLayers.append(open)
         }
         let open = liveChunkLayers[liveChunkLayers.count - 1]
-        open.lineWidth = width
-        open.path = screenPath(stroke.points[update.open], viewport)
+        open.path = screenPath(stroke.points[update.open], base)
         let tail = LiveStrokeChunks.tail(confirmed: stroke.points, predicted: livePredicted)
-        liveTailLayer.lineWidth = width
-        liveTailLayer.path = tail.isEmpty ? nil : screenPath(tail[...], viewport)
-        CATransaction.commit()
-    }
-
-    /// Redraws the stroke being drawn for a new view of the canvas, at its fixed real-world width, so a pan or pinch
-    /// mid-stroke moves it with the ink and shows what will be kept.
-    private func rebuildLive(_ viewport: Viewport, widthChanged: Bool) {
-        guard let stroke = liveStroke else { return }
-        let width = max(stroke.width.inches * viewport.pointsPerInch, InkTileRenderer.minimumWidth)
-        for (layer, range) in zip(liveChunkLayers, liveChunks.frozen + [liveChunks.open]) {
-            layer.path = screenPath(stroke.points[range], viewport)
-            if widthChanged { layer.lineWidth = width }
-        }
-        let tail = LiveStrokeChunks.tail(confirmed: stroke.points, predicted: livePredicted)
-        liveTailLayer.path = tail.isEmpty ? nil : screenPath(tail[...], viewport)
-        if widthChanged { liveTailLayer.lineWidth = width }
-    }
-
-    private func clearLive() {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for layer in liveChunkLayers { layer.removeFromSuperlayer() }
-        liveChunkLayers = []
-        liveTailLayer.path = nil
+        liveTailLayer.path = tail.isEmpty ? nil : screenPath(tail[...], base)
         CATransaction.commit()
     }
 
@@ -393,15 +378,28 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func finishStroke(keep: Bool) {
-        // The committed stroke goes to the renderer, which shows it until its tiles are drawn, before the live
-        // layers go, so it never blinks.
-        if keep, let stroke = liveStroke {
-            editor.commit(stroke)
+        if erasing { editor.endEraserSweep() }
+        if let stroke = liveStroke, let base = liveBase {
+            // The live layers catch up with the last samples, drop the prediction, and go to the renderer with the
+            // committed stroke; it shows them until the stroke's tiles are drawn, so the stroke never blinks.
+            livePredicted = []
+            updateLive()
+            let live = liveLayer
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            liveTailLayer.path = nil
+            if keep {
+                renderer.commitLive(live, drawnAt: base) { editor.commit(stroke) }
+            } else {
+                live.removeFromSuperlayer()
+            }
+            CATransaction.commit()
         }
         liveTouch = nil
         liveStroke = nil
+        liveBase = nil
+        liveChunkLayers = []
         erasing = false
-        clearLive()
         publishPenPosition()
         stopDisplayLinkIfIdle()
     }
@@ -487,7 +485,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         viewportDidChange()
     }
 
-    #if DEBUG
+    #if DEBUG || BENCHMARK
     /// Tile drawings still in flight, for the Debug benchmark.
     var pendingRenderCount: Int { renderer.pendingCount }
     #endif

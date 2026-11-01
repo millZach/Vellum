@@ -14,7 +14,8 @@ final class CanvasEditor {
     static let startingPointsPerInch = 1.5
 
     var canvas: VellumCore.Canvas
-    private(set) var session: InkSession
+    /// Not observed: views watch `canUndo` and `canRedo`, so an eraser hit does not update every view of the editor.
+    @ObservationIgnored private(set) var session: InkSession
     var viewport: Viewport
     /// The tool, markup colour and line weights in hand. A stroke takes them at touchdown (`beginStroke`).
     var pen = PenSettings()
@@ -47,8 +48,10 @@ final class CanvasEditor {
     }
 
     var ink: Ink { session.ink }
-    var canUndo: Bool { session.canUndo }
-    var canRedo: Bool { session.canRedo }
+    private(set) var canUndo = false
+    private(set) var canRedo = false
+    /// True during an eraser sweep, which publishes the ink to `canvas` once, when it ends (`endEraserSweep`).
+    @ObservationIgnored private var sweeping = false
 
     var tool: CanvasTool {
         get { pen.tool }
@@ -99,6 +102,15 @@ final class CanvasEditor {
     /// Starts a sweep of the eraser, which undoes as one step.
     func beginEraserSweep() {
         session.beginEraserSweep()
+        sweeping = true
+    }
+
+    /// Ends a sweep of the eraser and publishes what it erased to the canvas.
+    func endEraserSweep() {
+        guard sweeping else { return }
+        sweeping = false
+        canvas.ink = session.ink
+        inkRevision += 1
     }
 
     /// Erases whole strokes under the eraser: within 8 screen points of the Pencil's tip at this zoom.
@@ -108,11 +120,13 @@ final class CanvasEditor {
     }
 
     func undo() {
+        endEraserSweep()
         session.undo()
         syncInk()
     }
 
     func redo() {
+        endEraserSweep()
         session.redo()
         syncInk()
     }
@@ -127,10 +141,16 @@ final class CanvasEditor {
     }
 
     /// Publishes a change of ink. A stroke drawn or erased says exactly what changed; undo and redo let the index
-    /// find out by comparing itself with the ink.
+    /// find out by comparing itself with the ink. During an eraser sweep only the renderer hears at once: the canvas
+    /// (and every view reading it) gets the ink when the sweep ends, which also spares copying all the strokes on
+    /// every hit, since the canvas would otherwise share the session's array.
     private func syncInk(_ known: InkIndex.Change? = nil) {
-        canvas.ink = session.ink
-        inkRevision += 1
+        if !sweeping {
+            canvas.ink = session.ink
+            inkRevision += 1
+        }
+        if canUndo != session.canUndo { canUndo = session.canUndo }
+        if canRedo != session.canRedo { canRedo = session.canRedo }
         let change = known ?? inkIndex.sync(with: session.ink)
         onInkChange?(change)
     }

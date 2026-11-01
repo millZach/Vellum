@@ -5,22 +5,23 @@ import VellumCore
 /// Draws finished ink into cached tiles and moves them with the view (ADR-0012).
 ///
 /// Ink is drawn off the main thread into 256-point tiles at a level of detail (`InkTiling`), from paths built once
-/// per stroke in model space (`StrokePathCache`). Each level's tiles sit in one container layer whose transform maps
-/// the level onto the screen, so a pan or a pinch changes one transform and redraws nothing. Tiles coming into view
-/// are drawn as they appear; when the zoom leaves a level, the old level stays up, scaled, until the new level's
-/// visible tiles are drawn. A new stroke is drawn over the tiles it touches, and an erase, undo or redo redraws only
-/// the tiles it touches. Until a committed stroke's tiles are drawn, a shape layer shows it, so ink never blinks.
+/// per stroke in model space, on the drawing threads (`StrokePathCache`). Each level's tiles sit in one container
+/// layer whose transform maps the level onto the screen, so a pan or a pinch changes one transform and redraws
+/// nothing. Which tiles exist and which to draw is `InkTileBook`'s to decide; this class turns its decisions into
+/// layers and drawings. A committed stroke keeps showing on the layers it was drawn live on, moved by one transform,
+/// until its tiles are drawn, so ink never blinks and the main thread never builds its path.
 @MainActor
 final class InkTileRenderer {
+    typealias Book = InkTileBook<LevelLayer, TileLayer>
+
     let layer = CALayer()
     private let overlayLayer = CALayer()
     private let index: @MainActor () -> InkIndex
-    private var current: TileLevel?
-    private var fallback: TileLevel?
+    private var book: Book!
     private var viewport: Viewport?
-    /// Bumped on every change of ink or colours; a tile is up to date when it was drawn at its latest change.
-    private var epoch = 0
     private var overlays: [Overlay] = []
+    /// The live stroke's layers, handed over while its commit is in progress.
+    private var handover: (layer: CALayer, base: Viewport)?
     private let paths = StrokePathCache<CGPath> { points, origin in InkTileRenderer.path(points, from: origin) }
     private let queue: OperationQueue = {
         let queue = OperationQueue()
@@ -30,13 +31,15 @@ final class InkTileRenderer {
         queue.qualityOfService = .userInitiated
         return queue
     }()
-    /// Tile drawings waiting or in flight.
-    private(set) var pendingCount = 0
     /// Tiles waiting for their strokes to be found, and the frame ticker that takes them a few at a time.
-    private var waiting: [(tile: Tile, level: TileLevel)] = []
+    private var waiting: [(tile: Book.Tile, level: Book.Level)] = []
+    private var inFlight = 0
     private var ticker: FrameTicker?
     /// How much of a frame the main thread spends starting tiles: a quarter of 120 Hz's 8.3 ms.
     private static let frameShare = 0.002
+
+    /// Tile drawings waiting or in flight.
+    var pendingCount: Int { waiting.count + inFlight }
 
     var isDark = false {
         didSet { if isDark != oldValue { redrawEverything() } }
@@ -52,6 +55,40 @@ final class InkTileRenderer {
         self.index = index
         layer.actions = noAnimations
         overlayLayer.actions = noAnimations
+        let host = layer
+        // The book is main-thread only and calls these from the renderer's own calls.
+        book = Book(minimumWidth: Self.minimumWidth, hooks: Book.Hooks(
+            makeLevel: { _ in
+                MainActor.assumeIsolated {
+                    let level = LevelLayer()
+                    host.addSublayer(level.container)
+                    return level
+                }
+            },
+            makeTile: { key, level in
+                MainActor.assumeIsolated {
+                    let tile = TileLayer()
+                    let side = InkTiling.tileSize
+                    tile.layer.frame = CGRect(x: Double(key.x) * side, y: Double(key.y) * side, width: side, height: side)
+                    level.payload.container.addSublayer(tile.layer)
+                    return tile
+                }
+            },
+            discardLevel: { level in
+                MainActor.assumeIsolated {
+                    for tile in level.tiles.values { tile.payload.cancelled.set() }
+                    level.payload.container.removeFromSuperlayer()
+                }
+            },
+            discardTile: { tile, _ in
+                MainActor.assumeIsolated {
+                    tile.payload.cancelled.set()
+                    tile.payload.layer.removeFromSuperlayer()
+                }
+            },
+            draw: { [unowned self] tile, level, adding in
+                MainActor.assumeIsolated { self.draw(tile, in: level, adding: adding) }
+            }))
     }
 
     /// The layer committed strokes show on until their tiles are drawn; it goes above the tiles.
@@ -62,144 +99,89 @@ final class InkTileRenderer {
     /// Moves the tiles to a new view of the canvas and draws any that came into view.
     func show(_ viewport: Viewport) {
         self.viewport = viewport
-        let ppi = viewport.pointsPerInch
-        if let level = current, InkTiling.keeps(level: level.tiling.level, at: ppi), !level.tiling.isFar(from: viewport.centre) {
-            // Same level: only the transform changes.
-        } else {
-            switchLevel(to: InkTiling(level: InkTiling.level(for: ppi), anchor: viewport.centre))
-        }
         withoutAnimation {
-            if let current { place(current, for: viewport) }
-            if let fallback { place(fallback, for: viewport) }
-            placeOverlays(for: viewport)
-        }
-        requestVisibleTiles()
-    }
-
-    private func switchLevel(to tiling: InkTiling) {
-        withoutAnimation {
-            fallback?.removeAll()
-            fallback = current
-            let level = TileLevel(tiling: tiling, epoch: epoch)
-            layer.addSublayer(level.container)
-            current = level
+            book.show(viewport)
+            if let current = book.current { place(current, for: viewport) }
+            if let fallback = book.fallback { place(fallback, for: viewport) }
+            for overlay in overlays { overlay.layer.transform = Self.transform(from: overlay.base, to: viewport) }
         }
     }
 
     /// Maps a level onto the screen: level points scaled by zoom / level scale, offset to where the anchor is.
-    private func place(_ level: TileLevel, for viewport: Viewport) {
+    private func place(_ level: Book.Level, for viewport: Viewport) {
         let k = viewport.pointsPerInch / level.tiling.scale
         let anchor = viewport.screenPoint(for: CanvasPoint(x: .inches(level.tiling.anchorX), y: .inches(level.tiling.anchorY)))
-        level.container.transform = CATransform3DMakeAffineTransform(
+        level.payload.container.transform = CATransform3DMakeAffineTransform(
             CGAffineTransform(a: k, b: 0, c: 0, d: k, tx: anchor.x, ty: anchor.y))
     }
 
-    private func requestVisibleTiles() {
-        guard let level = current, let viewport else { return }
-        let visible = InkIndex.Box(viewport.visibleRect)
-        let side = InkTiling.tileSize / level.tiling.scale
-        let wanted = level.tiling.keyRange(covering: visible)
-        // Keep tiles a little way off screen so a pan back finds them; drop the rest.
-        let kept = level.tiling.keyRange(covering: visible.grown(by: side))
-        withoutAnimation {
-            for (key, tile) in level.tiles where !kept.x.contains(key.x) || !kept.y.contains(key.y) {
-                tile.layer.removeFromSuperlayer()
-                tile.removed = true
-                level.tiles[key] = nil
-            }
-            for y in wanted.y {
-                for x in wanted.x {
-                    let key = InkTiling.Key(x: x, y: y)
-                    guard level.tiles[key] == nil else { continue }
-                    let tile = level.addTile(key, epoch: epoch)
-                    schedule(tile, in: level, adding: nil)
-                }
-            }
-        }
-        dropFallbackIfCovered()
-    }
-
-    private func dropFallbackIfCovered() {
-        guard let fallback, let level = current, let viewport else { return }
-        let wanted = level.tiling.keyRange(covering: InkIndex.Box(viewport.visibleRect))
-        for y in wanted.y {
-            for x in wanted.x {
-                guard let tile = level.tiles[InkTiling.Key(x: x, y: y)], tile.renderedEpoch >= 0 else { return }
-            }
-        }
-        withoutAnimation { fallback.removeAll() }
-        self.fallback = nil
+    /// The transform taking screen points of one view of the canvas to another's: a scale and an offset.
+    static func transform(from base: Viewport, to viewport: Viewport) -> CATransform3D {
+        let k = viewport.pointsPerInch / base.pointsPerInch
+        let origin = viewport.screenPoint(for: base.canvasPoint(for: ScreenPoint(x: 0, y: 0)))
+        return CATransform3DMakeAffineTransform(CGAffineTransform(a: k, b: 0, c: 0, d: k, tx: origin.x, ty: origin.y))
     }
 
     // MARK: Changes of ink
 
-    /// Redraws only what a change of ink touched: a stroke drawn on top is drawn over its tiles; anything else
-    /// redraws the tiles it touched.
+    /// Commits the stroke being drawn: `commit` adds it to the ink, and the layers it was drawn on live, in screen
+    /// points of `base`, keep showing it until its tiles are drawn. If the commit adds nothing, the layers go.
+    func commitLive(_ live: CALayer, drawnAt base: Viewport, commit: () -> Void) {
+        handover = (live, base)
+        commit()
+        if let handover {
+            withoutAnimation { handover.layer.removeFromSuperlayer() }
+            self.handover = nil
+        }
+    }
+
+    /// Redraws only what a change of ink touched (`InkTileBook.inkChanged`).
     func inkChanged(_ change: InkIndex.Change) {
         guard !change.isEmpty else { return }
         paths.remove(change.removed.map(\.id))
-        epoch += 1
         withoutAnimation {
-            // The old level is stale now; the current one is redrawn where it changed.
-            fallback?.removeAll()
-            fallback = nil
-            for stroke in change.added where change.addedOnTop {
-                addOverlay(for: stroke)
-            }
-        }
-        guard let level = current else { return }
-        let margin = level.tiling.margin(minimumWidth: Self.minimumWidth)
-        var touched: [InkTiling.Key: [InkStroke]] = [:]
-        for stroke in change.added + change.removed {
-            guard let box = InkIndex.box(of: stroke) else { continue }
-            let range = level.tiling.keyRange(covering: box.grown(by: margin))
-            for y in range.y {
-                for x in range.x {
-                    let key = InkTiling.Key(x: x, y: y)
-                    guard level.tiles[key] != nil else { continue }
-                    touched[key, default: []].append(stroke)
+            book.inkChanged(change)
+            if !change.removed.isEmpty {
+                let removed = Set(change.removed.map(\.id))
+                overlays.removeAll { overlay in
+                    guard removed.contains(overlay.stroke.id) else { return false }
+                    overlay.layer.removeFromSuperlayer()
+                    return true
                 }
             }
-        }
-        for (key, strokes) in touched {
-            guard let tile = level.tiles[key] else { continue }
-            let upToDate = !tile.inFlight && tile.image != nil && tile.renderedEpoch == tile.epoch
-            tile.epoch = epoch
-            schedule(tile, in: level, adding: change.addedOnTop && upToDate ? strokes : nil)
+            if let handover, change.addedOnTop, change.removed.isEmpty, change.added.count == 1,
+               let stroke = change.added.first, let box = InkIndex.box(of: stroke) {
+                self.handover = nil
+                let overlay = Overlay(stroke: stroke, box: box, epoch: book.epoch, layer: handover.layer, base: handover.base)
+                overlayLayer.addSublayer(overlay.layer)
+                if let viewport { overlay.layer.transform = Self.transform(from: overlay.base, to: viewport) }
+                overlays.append(overlay)
+            }
         }
         removeFinishedOverlays()
     }
 
     private func redrawEverything() {
-        epoch += 1
         withoutAnimation {
-            fallback?.removeAll()
-            fallback = nil
-            for overlay in overlays { overlay.layer.strokeColor = Self.colour(overlay.stroke.colour, dark: isDark) }
-        }
-        guard let level = current else { return }
-        for tile in level.tiles.values {
-            tile.epoch = epoch
-            schedule(tile, in: level, adding: nil)
+            book.redrawEverything()
+            for overlay in overlays {
+                for case let shape as CAShapeLayer in overlay.layer.sublayers ?? [] {
+                    shape.strokeColor = Self.colour(overlay.stroke.colour, dark: isDark)
+                }
+            }
         }
     }
 
     // MARK: Drawing tiles
 
-    /// Starts drawing a tile, unless it is already being drawn (it is drawn again when that finishes). With
-    /// `adding`, the strokes are drawn over the tile's current image rather than the tile redrawn.
-    private func schedule(_ tile: Tile, in level: TileLevel, adding: [InkStroke]?) {
-        guard !tile.inFlight else { return }
-        if let adding, let image = tile.image {
-            start(tile, in: level, strokes: adding.sorted { $0.id < $1.id }, base: image)
+    /// The book asks for a tile: new strokes over its image start now; a redraw waits its turn, because finding a
+    /// tile's strokes is main-thread work and each frame takes only a couple of milliseconds of it.
+    private func draw(_ tile: Book.Tile, in level: Book.Level, adding: [InkStroke]?) {
+        if let adding, let image = tile.payload.image {
+            start(tile, in: level, strokes: adding, base: image)
             return
         }
-        // Finding a tile's strokes is main-thread work, so tiles wait their turn and each frame takes only a
-        // couple of milliseconds of them (`takeWaitingTiles`).
-        guard !tile.waiting else { return }
-        tile.waiting = true
         waiting.append((tile, level))
-        pendingCount += 1
         if ticker == nil {
             ticker = FrameTicker { [weak self] in self?.takeWaitingTiles() }
         }
@@ -209,51 +191,50 @@ final class InkTileRenderer {
     /// time is spent.
     private func takeWaitingTiles() {
         let began = CACurrentMediaTime()
-        while !waiting.isEmpty {
-            let (tile, level) = waiting.removeFirst()
-            tile.waiting = false
-            pendingCount -= 1
-            guard !tile.removed, level.isLive, !tile.inFlight else { continue }
+        var taken = 0
+        while taken < waiting.count {
+            let (tile, level) = waiting[taken]
+            taken += 1
+            guard book.begin(tile, in: level) else { continue }
             let tiling = level.tiling
             let box = tiling.box(of: tile.key).grown(by: tiling.margin(minimumWidth: Self.minimumWidth))
             start(tile, in: level, strokes: index().strokes(in: box), base: nil)
             if CACurrentMediaTime() - began > Self.frameShare { break }
         }
+        waiting.removeFirst(taken)
         if waiting.isEmpty {
             ticker?.stop()
             ticker = nil
         }
     }
 
-    private func start(_ tile: Tile, in level: TileLevel, strokes: [InkStroke], base: CGImage?) {
+    private func start(_ tile: Book.Tile, in level: Book.Level, strokes: [InkStroke], base: CGImage?) {
         let box = level.tiling.box(of: tile.key)
-        let tiling = level.tiling
         let job = TileJob(pixels: Int((InkTiling.tileSize * displayScale).rounded()), displayScale: displayScale,
-                          levelScale: tiling.scale, originX: box.minX, originY: box.minY, base: base,
-                          strokes: strokes, dark: isDark, paths: paths, cancelled: tile.cancelled)
+                          levelScale: level.tiling.scale, originX: box.minX, originY: box.minY, base: base,
+                          strokes: strokes, dark: isDark, paths: paths, cancelled: tile.payload.cancelled)
         let jobEpoch = tile.epoch
-        tile.inFlight = true
-        pendingCount += 1
+        inFlight += 1
+        // The book's tile and level are main-thread objects; the drawing thread only carries them back.
+        let ref = TileRef(tile: tile, level: level)
         queue.addOperation {
             let image = ImageBox(image: Self.draw(job))
             Task { @MainActor in
-                self.finish(tile, in: level, epoch: jobEpoch, image: image)
+                self.finish(ref.tile, in: ref.level, epoch: jobEpoch, image: image)
             }
         }
     }
 
-    private func finish(_ tile: Tile, in level: TileLevel, epoch jobEpoch: Int, image: ImageBox) {
-        pendingCount -= 1
-        tile.inFlight = false
-        guard !tile.removed, level.isLive else { return }
-        if let image = image.image {
-            tile.image = image
-            withoutAnimation { tile.layer.contents = image }
+    private func finish(_ tile: Book.Tile, in level: Book.Level, epoch jobEpoch: Int, image: ImageBox) {
+        inFlight -= 1
+        withoutAnimation {
+            if !tile.removed, level.isLive, let image = image.image {
+                tile.payload.image = image
+                tile.payload.layer.contents = image
+            }
+            book.finished(tile, in: level, epoch: jobEpoch, drewImage: image.image != nil)
         }
-        tile.renderedEpoch = jobEpoch
-        if tile.epoch > jobEpoch { schedule(tile, in: level, adding: nil) }
         removeFinishedOverlays()
-        if level === current { dropFallbackIfCovered() }
     }
 
     private struct TileJob: @unchecked Sendable {
@@ -271,6 +252,10 @@ final class InkTileRenderer {
 
     private struct ImageBox: @unchecked Sendable { let image: CGImage? }
 
+    private struct TileRef: @unchecked Sendable {
+        let tile: Book.Tile
+        let level: Book.Level
+    }
     /// Draws one tile: its ink at the level's scale, over `base` when only new strokes are added.
     private nonisolated static func draw(_ job: TileJob) -> CGImage? {
         // A tile that left the screen, or a level a pinch has already passed, is not worth drawing.
@@ -334,62 +319,37 @@ final class InkTileRenderer {
 
     // MARK: Committed strokes waiting for their tiles
 
+    /// A committed stroke's live layers, in screen points of the view it was drawn in.
     private final class Overlay {
         let stroke: InkStroke
         let box: InkIndex.Box
         let epoch: Int
-        let layer = CAShapeLayer()
-        init(stroke: InkStroke, box: InkIndex.Box, epoch: Int) {
+        let layer: CALayer
+        let base: Viewport
+        init(stroke: InkStroke, box: InkIndex.Box, epoch: Int, layer: CALayer, base: Viewport) {
             self.stroke = stroke
             self.box = box
             self.epoch = epoch
+            self.layer = layer
+            self.base = base
         }
     }
 
-    private func addOverlay(for stroke: InkStroke) {
-        guard let box = InkIndex.box(of: stroke) else { return }
-        let overlay = Overlay(stroke: stroke, box: box, epoch: epoch)
-        overlay.layer.actions = noAnimations
-        overlay.layer.fillColor = nil
-        overlay.layer.lineCap = .round
-        overlay.layer.lineJoin = .round
-        overlay.layer.strokeColor = Self.colour(stroke.colour, dark: isDark)
-        overlay.layer.opacity = Float(stroke.tool.opacity)
-        overlayLayer.addSublayer(overlay.layer)
-        overlays.append(overlay)
-        if let viewport { place(overlay, for: viewport) }
-    }
-
-    private func placeOverlays(for viewport: Viewport) {
-        for overlay in overlays { place(overlay, for: viewport) }
-    }
-
-    private func place(_ overlay: Overlay, for viewport: Viewport) {
-        let (path, origin) = paths.path(for: overlay.stroke)
-        let screen = viewport.screenPoint(for: origin)
-        var transform = CGAffineTransform(a: viewport.pointsPerInch, b: 0, c: 0, d: viewport.pointsPerInch,
-                                          tx: screen.x, ty: screen.y)
-        overlay.layer.frame = layer.bounds
-        overlay.layer.path = path.copy(using: &transform)
-        overlay.layer.lineWidth = max(overlay.stroke.width.inches * viewport.pointsPerInch, Self.minimumWidth)
-    }
-
-    /// Takes away each committed stroke's shape layer once every tile it touches has been drawn with it.
+    /// Takes away each committed stroke's live layers once every tile holding it has been drawn with it.
     private func removeFinishedOverlays() {
         guard !overlays.isEmpty else { return }
-        let margin = current.map { $0.tiling.margin(minimumWidth: Self.minimumWidth) } ?? 0
-        overlays.removeAll { overlay in
-            if let level = current {
-                let range = level.tiling.keyRange(covering: overlay.box.grown(by: margin))
-                for y in range.y {
-                    for x in range.x {
-                        if let tile = level.tiles[InkTiling.Key(x: x, y: y)],
-                           tile.renderedEpoch < overlay.epoch || tile.image == nil { return false }
+        withoutAnimation {
+            overlays.removeAll { overlay in
+                if let level = book.current {
+                    let margin = level.tiling.margin(minimumWidth: Self.minimumWidth)
+                    for tile in book.tiles(of: level, touching: overlay.box.grown(by: margin))
+                    where tile.renderedEpoch < overlay.epoch || !tile.hasImage {
+                        return false
                     }
                 }
+                overlay.layer.removeFromSuperlayer()
+                return true
             }
-            withoutAnimation { overlay.layer.removeFromSuperlayer() }
-            return true
         }
     }
 
@@ -410,61 +370,27 @@ final class InkTileRenderer {
     "onOrderIn": NSNull(), "onOrderOut": NSNull(), "frame": NSNull(),
 ]
 
-/// One level of detail's tiles, in one container layer.
+/// One level of detail's container layer, whose transform maps the level onto the screen.
 @MainActor
-private final class TileLevel {
-    let tiling: InkTiling
+final class LevelLayer {
     let container = CALayer()
-    var tiles: [InkTiling.Key: Tile] = [:]
-    /// False once the level is taken down; drawings finishing for it are dropped.
-    private(set) var isLive = true
 
-    init(tiling: InkTiling, epoch: Int) {
-        self.tiling = tiling
+    init() {
         container.actions = noAnimations
         container.anchorPoint = .zero
         container.bounds = .zero
         container.position = .zero
     }
-
-    func addTile(_ key: InkTiling.Key, epoch: Int) -> Tile {
-        let tile = Tile(key: key, epoch: epoch)
-        let side = InkTiling.tileSize
-        tile.layer.frame = CGRect(x: Double(key.x) * side, y: Double(key.y) * side, width: side, height: side)
-        container.addSublayer(tile.layer)
-        tiles[key] = tile
-        return tile
-    }
-
-    func removeAll() {
-        isLive = false
-        for tile in tiles.values { tile.removed = true }
-        tiles.removeAll()
-        container.removeFromSuperlayer()
-    }
 }
 
-/// One tile: its layer, its image, and which change of ink it was last drawn at.
+/// A tile's layer and image, and the flag that cancels its drawing when it leaves.
 @MainActor
-private final class Tile {
-    let key: InkTiling.Key
+final class TileLayer {
     let layer = CALayer()
     var image: CGImage?
-    /// The latest change of ink that touched the tile.
-    var epoch: Int
-    /// The change the tile's image was drawn at; -1 before it is first drawn.
-    var renderedEpoch = -1
-    var inFlight = false
-    var waiting = false
-    /// Set when the tile leaves the screen or its level is taken down; a drawing not yet started for it is skipped.
-    var removed = false {
-        didSet { if removed { cancelled.set() } }
-    }
     let cancelled = Flag()
 
-    init(key: InkTiling.Key, epoch: Int) {
-        self.key = key
-        self.epoch = epoch
+    init() {
         layer.actions = noAnimations
         layer.contentsGravity = .resize
         layer.isOpaque = false

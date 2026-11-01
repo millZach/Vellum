@@ -1,0 +1,92 @@
+/// The tools on the canvas screen's rail, top to bottom (ADR-0011): pen, highlighter, eraser, line and shape; then
+/// lasso and text box; then measure, dimension, frame and window. Tools a later ticket builds are on the rail but
+/// disabled, with a hint saying they are coming, so the rail Zach learns now is the rail he keeps.
+public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case pen
+    case highlighter
+    case eraser
+    case lineAndShape
+    case lasso
+    case textBox
+    case measure
+    case dimension
+    case frame
+    case window
+
+    /// The rail's three groups, top to bottom, with a divider between each.
+    public enum Group: CaseIterable, Hashable, Sendable {
+        /// Pen, highlighter, eraser, line and shape.
+        case ink
+        /// Lasso and text box.
+        case selectionAndText
+        /// Measure, dimension, frame and window: real-world lengths and regions.
+        case lengthsAndRegions
+
+        /// The group's tools, in rail order.
+        public var tools: [CanvasTool] { CanvasTool.allCases.filter { $0.group == self } }
+    }
+
+    /// Everything the rail and status bar show about one tool, kept together so a tool is described in one place.
+    public struct Descriptor: Hashable, Sendable {
+        public let title: String
+        /// The SF Symbol on the rail.
+        public let systemImage: String
+        public let group: Group
+        /// The ticket that builds the tool, while it is still to come; nil once it works.
+        public let comingIn: Int?
+        /// The ink the tool leaves; nil for the tools that don't leave ink.
+        public let inkTool: InkTool?
+        /// What the tool expects next, for the status bar.
+        public let prompt: String
+    }
+
+    public var descriptor: Descriptor {
+        switch self {
+        case .pen:
+            Descriptor(title: "Pen", systemImage: "pencil.tip", group: .ink, comingIn: nil, inkTool: .pen,
+                       prompt: "Draw with the Pencil")
+        case .highlighter:
+            Descriptor(title: "Highlighter", systemImage: "highlighter", group: .ink, comingIn: nil,
+                       inkTool: .highlighter, prompt: "Highlight with the Pencil")
+        case .eraser:
+            Descriptor(title: "Eraser", systemImage: "eraser", group: .ink, comingIn: nil, inkTool: nil,
+                       prompt: "Touch ink to erase a stroke")
+        case .lineAndShape:
+            Descriptor(title: "Line and shape", systemImage: "line.diagonal", group: .ink, comingIn: 7, inkTool: nil,
+                       prompt: "Draw a straight line")
+        case .lasso:
+            Descriptor(title: "Lasso", systemImage: "lasso", group: .selectionAndText, comingIn: 7, inkTool: nil,
+                       prompt: "Circle ink or text to select it")
+        case .textBox:
+            Descriptor(title: "Text box", systemImage: "character.textbox", group: .selectionAndText, comingIn: 7,
+                       inkTool: nil, prompt: "Tap where the text box goes")
+        case .measure:
+            Descriptor(title: "Measure", systemImage: "ruler", group: .lengthsAndRegions, comingIn: 8, inkTool: nil,
+                       prompt: "Measure: tap the first point")
+        case .dimension:
+            Descriptor(title: "Dimension", systemImage: "arrow.left.and.right", group: .lengthsAndRegions,
+                       comingIn: 8, inkTool: nil, prompt: "Dimension: tap the first point")
+        case .frame:
+            Descriptor(title: "Frame", systemImage: "rectangle.inset.filled", group: .lengthsAndRegions, comingIn: 8,
+                       inkTool: nil, prompt: "Tap to place a frame")
+        case .window:
+            Descriptor(title: "Window", systemImage: "square.dashed", group: .lengthsAndRegions, comingIn: 8,
+                       inkTool: nil, prompt: "Drag a window around a region")
+        }
+    }
+
+    public var id: String { rawValue }
+    public var title: String { descriptor.title }
+    public var systemImage: String { descriptor.systemImage }
+    public var group: Group { descriptor.group }
+    public var comingIn: Int? { descriptor.comingIn }
+    public var inkTool: InkTool? { descriptor.inkTool }
+    public var prompt: String { descriptor.prompt }
+
+    public var isAvailable: Bool { comingIn == nil }
+
+    /// The accessibility hint: what the tool does, or that it is not built yet.
+    public var hint: String {
+        isAvailable ? prompt : "Not available yet. \(title) comes in a later update."
+    }
+}

@@ -12,6 +12,14 @@ _Avoid_: page, board, document, sheet (a sheet is a placed PDF)
 What the pen leaves on the canvas: lines and handwriting, kept as strokes rather than pixels.
 _Avoid_: drawing (a drawing is a CAD file), sketch, annotation
 
+**Stroke**:
+One continuous line of ink, from where the pen touched down to where it lifted: its points in real-world lengths, its markup colour, the pen it came from (pen or highlighter) and its width. The eraser takes a stroke away whole.
+_Avoid_: line (a line is the line tool's), path, mark
+
+**Line weight**:
+How heavy a pen draws, chosen on the pen (fine, medium or bold), never from how hard the Pencil presses. A stroke keeps the weight it was drawn at as a real-world width, so it zooms with what it marks.
+_Avoid_: thickness, pressure, size
+
 **Markup colour**:
 What a colour of ink means to an agent: red is something to add, green is something to delete, blue is a note. Ink in other colours is a sketch.
 _Avoid_: pen colour, highlight

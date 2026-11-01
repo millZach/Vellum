@@ -23,7 +23,7 @@ final class CanvasesModel {
     /// A problem to show, in plain words.
     var problem: String?
 
-    @ObservationIgnored let library: CanvasLibrary?
+    let library: CanvasLibrary?
     /// Where the open canvas is remembered, so the app reopens it after it is closed or killed.
     private static let lastOpenKey = "lastOpenCanvas"
 
@@ -161,6 +161,6 @@ final class BackgroundTask: @unchecked Sendable {
         self.id = .invalid
         lock.unlock()
         guard id != .invalid else { return }
-        DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(id) }
+        Task { @MainActor in UIApplication.shared.endBackgroundTask(id) }
     }
 }

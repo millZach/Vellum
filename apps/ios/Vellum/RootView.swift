@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VellumCore
 
 /// The iOS tab bar with Canvases, Drawings, Jobs and Meetings. Canvases holds the list of canvases and, over it, the

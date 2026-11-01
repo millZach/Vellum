@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import VellumCore
 
@@ -26,7 +27,7 @@ final class CanvasEditor {
     /// Changes handed to the saver and not yet written.
     @ObservationIgnored private var savesInFlight = 0
     /// Saves the canvas; nil for a canvas that is only in memory (previews).
-    @ObservationIgnored let saver: CanvasSaver?
+    let saver: CanvasSaver?
     /// The canvas's id on the Duo; nil for one only in memory.
     var canvasID: UUID? { saver?.id }
     /// Changes whenever the ink does, so the ink view knows to redraw.

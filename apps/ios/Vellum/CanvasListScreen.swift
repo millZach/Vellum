@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VellumCore
 
 /// The Canvases tab's list, layout C (the tag `prototype/canvas-list`): the canvases down the left with New canvas at

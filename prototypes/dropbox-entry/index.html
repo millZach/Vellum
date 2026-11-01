@@ -1,0 +1,83 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Never merge to main; kept as the tag prototype/dropbox-entry.
+  Question: where should Vellum connect to Dropbox and show it is connected?
+  Two options on the Duo unfolded (951 x 669 pt), each in its signed-out and signed-in states.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vellum Dropbox connection — prototype</title>
+<link rel="icon" href="data:,">
+<style>
+  body { margin:0; font:15px/1.4 -apple-system,system-ui,sans-serif; background:#ece8df; color:#1d1d1f; }
+  header { padding:16px 16px 4px; } h1 { font-size:20px; margin:0 0 4px; } header p { margin:0; color:#555; }
+  .opt { margin:16px; background:#fffdf9; border-radius:18px; padding:14px; box-shadow:0 2px 10px rgba(0,0,0,.08); }
+  .opt h2 { font-size:18px; margin:0 0 2px; } .opt p.why { margin:0 0 10px; color:#555; font-size:14px; }
+  .pair { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; }
+  .cap { font-size:12px; color:#666; margin:4px 2px 8px; }
+  .duo { position:relative; width:100%; aspect-ratio:951/669; background:#fff; border-radius:12px; overflow:hidden; border:1px solid #d9d4c9; font-size:clamp(7px,1.15vw,12px); }
+  .rail { position:absolute; right:1.2%; top:50%; transform:translateY(-50%); width:6%; background:#f2f2f4; border-radius:2em; display:flex; flex-direction:column; gap:.6em; padding:.8em 0; align-items:center; }
+  .rail span { width:2.4em; height:2.4em; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:1em; color:#555; }
+  .rail span.on { background:#dfe9f5; color:#2f5d8a; }
+  .page { position:absolute; left:3%; right:10%; top:6%; bottom:5%; }
+  .page h3 { margin:0 0 .6em; font-size:1.8em; }
+  .empty { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:.5em; color:#555; }
+  .btn { background:#0061fe; color:#fff; border-radius:.7em; padding:.6em 1.2em; font-weight:600; font-size:1.1em; display:inline-block; }
+  .ghost { border:1px solid #ccc; border-radius:.7em; padding:.5em 1em; display:inline-block; color:#333; }
+  .row { display:flex; align-items:center; gap:.7em; padding:.55em .3em; border-bottom:1px solid #eee; font-size:1.1em; }
+  .row i { font-style:normal; color:#7aa7e6; }
+  .acct { display:flex; justify-content:space-between; align-items:center; color:#555; margin-bottom:.4em; }
+  .canvasbg { position:absolute; inset:0; background:#f3efe6; background-image:linear-gradient(rgba(120,110,90,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(120,110,90,.12) 1px,transparent 1px); background-size:2.4em 2.4em; }
+  .toolrail { position:absolute; left:.8%; top:2%; bottom:2%; width:5.4%; background:rgba(252,250,246,.95); border:1px solid #d9d4c9; border-radius:1em; }
+  .topbar { position:absolute; left:7.5%; top:2%; padding:.5em .9em; background:rgba(252,250,246,.95); border:1px solid #d9d4c9; border-radius:.8em; font-weight:600; }
+  .topact { position:absolute; right:10%; top:2%; display:flex; gap:.5em; }
+  .topact span { background:#fff; border:1px solid #d9d4c9; border-radius:.7em; padding:.45em .8em; }
+  .topact span.hot { border-color:#2f5d8a; color:#2f5d8a; box-shadow:0 0 0 2px #c9d9ea; }
+  .sheet { position:absolute; left:22%; right:24%; top:14%; bottom:10%; background:#fffdf9; border-radius:1.2em; box-shadow:0 1em 3em rgba(0,0,0,.25); padding:1.2em 1.4em; }
+  .sheet h4 { margin:0 0 .6em; font-size:1.5em; }
+  .scrim { position:absolute; inset:0; background:rgba(20,20,20,.25); }
+  .status { position:absolute; left:7.5%; right:10%; bottom:2%; padding:.45em .9em; background:rgba(252,250,246,.95); border:1px solid #d9d4c9; border-radius:.8em; color:#555; display:flex; justify-content:space-between; }
+  .status b { color:#2f7a4f; font-weight:600; }
+</style>
+</head>
+<body>
+<header><h1>Where Vellum connects to Dropbox</h1><p>Two options, each shown before and after you sign in. Everything here is made up.</p></header>
+
+<section class="opt">
+  <h2>A — Drawings tab</h2>
+  <p class="why">The Drawings tab is where your Dropbox lives: connect once there, then it lists your folders (and later the drawing index). Add sheet on the canvas opens the same browser. Sign out is in Settings.</p>
+  <div class="pair">
+    <div><div class="cap">Before signing in</div>
+      <div class="duo"><div class="page"><h3>Drawings</h3>
+        <div class="empty"><div style="font-size:2.6em">📁</div><b style="font-size:1.3em;color:#1d1d1f">Connect Dropbox to open your drawings</b><div>Vellum opens the project folders you already have, and saves canvases to Dropbox / Vellum.</div><span class="btn">Connect Dropbox</span></div></div>
+        <div class="rail"><span>✎</span><span class="on">▤</span><span>➤</span><span>◉</span></div></div></div>
+    <div><div class="cap">Signed in</div>
+      <div class="duo"><div class="page"><h3>Drawings</h3>
+        <div class="acct"><span>Dropbox · connected</span><span class="ghost">Settings</span></div>
+        <div class="row"><i>📁</i>Projects</div><div class="row"><i>📁</i>Standards</div><div class="row"><i>📁</i>Vellum</div><div class="row"><i>📁</i>Personal</div>
+        <div style="margin-top:.8em;color:#777">Search across all drawings arrives with the drawing index.</div></div>
+        <div class="rail"><span>✎</span><span class="on">▤</span><span>➤</span><span>◉</span></div></div></div>
+  </div>
+</section>
+
+<section class="opt">
+  <h2>B — Only when you need it</h2>
+  <p class="why">No Dropbox screen up front. The first time you press Add sheet (or Send), Vellum asks you to connect, right there on the canvas. The status bar then shows Dropbox is connected; sign out is in Settings.</p>
+  <div class="pair">
+    <div><div class="cap">Pressing Add sheet before signing in</div>
+      <div class="duo"><div class="canvasbg"></div><div class="toolrail"></div><div class="topbar">Boiler 4 walkdown</div>
+        <div class="topact"><span class="hot">＋ Add sheet</span><span>● Record</span><span>➤ Send</span></div>
+        <div class="scrim"></div>
+        <div class="sheet"><h4>Connect Dropbox</h4><p>Sheets come from your Dropbox project folders. Connect once and Vellum remembers it.</p><span class="btn">Connect Dropbox</span> <span class="ghost">Not now</span></div>
+        <div class="rail"><span class="on">✎</span><span>▤</span><span>➤</span><span>◉</span></div></div></div>
+    <div><div class="cap">Signed in: the canvas says so</div>
+      <div class="duo"><div class="canvasbg"></div><div class="toolrail"></div><div class="topbar">Boiler 4 walkdown</div>
+        <div class="topact"><span>＋ Add sheet</span><span>● Record</span><span>➤ Send</span></div>
+        <div class="status"><span>X 12'-6" Y 4'-0" · 50'-0" scale bar</span><b>Saved · synced to Dropbox</b></div>
+        <div class="rail"><span class="on">✎</span><span>▤</span><span>➤</span><span>◉</span></div></div></div>
+  </div>
+</section>
+</body>
+</html>

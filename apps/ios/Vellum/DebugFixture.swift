@@ -111,15 +111,21 @@ enum DebugLaunch {
     static func has(_ flag: String) -> Bool { ProcessInfo.processInfo.arguments.contains(flag) }
 
     /// Runs the debug launch arguments. Returns true when they opened what the app shows, so normal launch is skipped.
+    /// Their file work runs off the main thread, like the app's.
     static func run(_ model: CanvasesModel) async -> Bool {
-        guard let library = model.library else { return false }
         if has("--ui-reset") {
-            try? FileManager.default.removeItem(at: library.root)
-            try? FileManager.default.removeItem(at: CanvasPreviews.folder)
+            await Task.detached {
+                if let root = try? CanvasLibrary.onThisDevice().root { try? FileManager.default.removeItem(at: root) }
+                try? FileManager.default.removeItem(at: CanvasPreviews.folder)
+            }.value
             model.lastOpened = nil
         }
+        await model.prepare()
+        guard let library = model.library else { return false }
         if has("--ui-fixture") {
-            guard let id = save(DebugFixture.session, named: DebugFixture.name, in: library) else { return false }
+            let fixture = DebugFixture.session
+            guard let id = await Task.detached(operation: { save(fixture, named: DebugFixture.name, in: library) }).value
+            else { return false }
             await model.refresh()
             let closeUp = argument("--ui-zoom") == "closeup"
             await model.open(id, startingView: closeUp ? .region(DebugFixture.valveRegion) : .everything)
@@ -132,13 +138,15 @@ enum DebugLaunch {
             return true
         }
         if has("--ui-seed-list") {
-            seedList(in: library)
+            let full = DebugFixture.session
+            await Task.detached { seedList(full, in: library) }.value
             await model.refresh()
             model.finishLaunch()
             return true
         }
         if has("--ui-draw-fixture") {
-            guard let made = try? library.create(name: "Kill test (example)") else { return false }
+            guard let made = await Task.detached(operation: { try? library.create(name: "Kill test (example)") }).value
+            else { return false }
             await model.refresh()
             let extents = DebugFixture.canvas.extents ?? CanvasRect(origin: .origin, size: CanvasSize(width: .feet(10), height: .feet(10)))
             await model.open(made.id, startingView: .region(extents))
@@ -157,19 +165,20 @@ enum DebugLaunch {
         return false
     }
 
-    /// Saves a session's ink as a new canvas, with its thumbnail. Returns its id.
-    private static func save(_ session: InkSession, named name: String, in library: CanvasLibrary) -> UUID? {
+    /// Saves a session's ink as a new canvas, with its thumbnail. Returns its id. Off the main thread.
+    nonisolated private static func save(_ session: InkSession, named name: String, in library: CanvasLibrary) -> UUID? {
         var session = session
         guard let made = try? library.create(name: name), let store = try? library.openInk(made.id) else { return nil }
         try? store.append(session.takeEvents())
         try? store.flush()
-        CanvasPreviews.write(for: made.id, ink: store.session.ink)
+        CanvasPreviews.write(for: made.id, ink: store.session.ink, version: store.savedVersion)
+        store.closeFiles()
         return made.id
     }
 
-    /// A few made-up canvases for the list capture: the fixture, and pieces of it under other names.
-    private static func seedList(in library: CanvasLibrary) {
-        let full = DebugFixture.session
+    /// A few made-up canvases for the list capture: the fixture, and pieces of it under other names. Off the main
+    /// thread.
+    nonisolated private static func seedList(_ full: InkSession, in library: CanvasLibrary) {
         let names = ["Site visit notes (example)", "Panel 12 redline (example)", "Feedwater bypass sketch (example)"]
         for (i, name) in names.enumerated() {
             var part = InkSession()

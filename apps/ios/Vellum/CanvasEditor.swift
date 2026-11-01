@@ -190,13 +190,22 @@ final class CanvasEditor {
         guard !events.isEmpty, let saver else { return }
         savesInFlight += 1
         saver.save(events) { [weak self] state in
-            self?.didSave(state)
+            Task { @MainActor in self?.didSave(state) }
         }
         // Only say "Saving…" if the write is still going after a moment; most take well under a millisecond.
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard let self, self.savesInFlight > 0, self.saveState == .savedOnThisDuo else { return }
             self.saveState = .saving
+        }
+    }
+
+    /// The saver's state changed on its own: a failed write or flush retried and written, or failing again.
+    func saveStateDidChange(_ state: SaveState) {
+        if !state.isSaved {
+            saveState = state
+        } else if savesInFlight == 0 {
+            saveState = .savedOnThisDuo
         }
     }
 

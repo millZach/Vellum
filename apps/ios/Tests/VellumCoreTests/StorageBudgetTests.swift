@@ -87,51 +87,81 @@ final class StorageBudgetTests: XCTestCase {
         record("compaction-10000-stroke-canvas", milliseconds: took * 1e3)
     }
 
+    /// A canvas library holding a copy of the built canvas, for driving the app's saver on it.
+    private func libraryWithBuiltCanvas() throws -> (CanvasLibrary, UUID) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("vellum-budget-lib-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let library = CanvasLibrary(root: root)
+        let id = try library.create(name: "Budget (example)").id
+        let source = try Self.builtCanvas().folder
+        for name in [InkStore.snapshotName, InkStore.logName] {
+            let target = library.folder(for: id).appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: target)
+            try FileManager.default.copyItem(at: source.appendingPathComponent(name), to: target)
+        }
+        return (library, id)
+    }
+
+    /// Runs async work to the end from a synchronous test on the main thread, without doing it on the main thread.
+    private func run<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) throws -> T {
+        let done = expectation(description: "done")
+        nonisolated(unsafe) var result: Result<T, Error>?
+        Task.detached {
+            do { result = .success(try await work()) } catch { result = .failure(error) }
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 120)
+        return try XCTUnwrap(result).get()
+    }
+
     // MARK: Flushing
 
-    /// A minute of continuous drawing, a stroke every half second, on a virtual clock: the log is flushed once every
-    /// `FlushSchedule.interval`, however many strokes are drawn.
+    /// A minute of continuous drawing through the app's saver, a stroke every half second, on a virtual clock: the log
+    /// is flushed once every `FlushSchedule.interval`, however many strokes are drawn.
     func testAMinuteOfDrawingFlushesOnceEveryInterval() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vellum-flush-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let store = try InkStore(folder: folder)
-        var session = InkSession()
-        var schedule = FlushSchedule()
-        var flushAt: Double?
-        var flushSeconds: [Double] = []
+        let library = CanvasLibrary(root: FileManager.default.temporaryDirectory
+            .appendingPathComponent("vellum-flush-\(UUID().uuidString)"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: library.root) }
+        let id = try library.create().id
+        let clock = VirtualClock()
+        let savers = CanvasSavers(library: library, clock: clock)
+        let opened = try run { try await savers.open(id) }
+        var session = opened.1
+        let saver = opened.2
         let before = FileWork.current
-        var now = 0.0
+        var flushSeconds: [Double] = []
         var i = 0
+        var now = 0.0
         while now < 60 {
-            if let due = flushAt, due <= now {
-                let start = Date()
-                try store.flush()
-                flushSeconds.append(Date().timeIntervalSince(start))
-                schedule.didFlush()
-                flushAt = nil
-            }
+            let start = Date()
+            let fsyncsBefore = FileWork.current.fsyncs
+            clock.advance(by: 0.5)
+            try run { await saver.appendsIdle() }
+            if FileWork.current.fsyncs > fsyncsBefore { flushSeconds.append(Date().timeIntervalSince(start)) }
             session.draw(Self.handwriting(i), tool: .pen, colour: .blue, width: .inches(0.75))
-            try store.append(session.takeEvents())
-            if schedule.didAppend() { flushAt = now + FlushSchedule.interval }
-            XCTAssertFalse(store.needsCompaction, "a minute of drawing does not outgrow the snapshot")
+            saver.save(session.takeEvents())
+            try run { await saver.appendsIdle() }
             now += 0.5
             i += 1
         }
         let work = FileWork.current - before
+        XCTAssertEqual(work.onMainThread, 0)
+        XCTAssertEqual(try InkStore(folder: library.folder(for: id)).session.ink.count, 120)
         assertWithinBudget("fsyncs-per-minute-drawing", work.fsyncs)
         record("batch-flush", milliseconds: flushSeconds.reduce(0, +) / Double(max(flushSeconds.count, 1)) * 1e3)
     }
 
     // MARK: The Pencil's thread
 
-    /// Committing a stroke costs the calling thread (the main thread, in the app) a session change and a queue
-    /// hand-off; the write happens on the saving queue. No file work runs on the calling thread.
+    /// Committing a stroke through the app's saver costs the calling thread (the main thread, in the app) a session
+    /// change and a queue hand-off; the write happens on the saver's queue. No file work runs on the calling thread.
     func testCommittingAStrokeDoesNoFileWorkOnTheCallingThread() throws {
         XCTAssertTrue(Thread.isMainThread, "tests run on the main thread, as the Pencil's touches do")
-        nonisolated(unsafe) let store = try InkStore(folder: try copyOfBuiltCanvas())
-        let queue = DispatchQueue(label: "saving")
-        var session = store.session
+        let (library, id) = try libraryWithBuiltCanvas()
+        let savers = CanvasSavers(library: library, clock: VirtualClock())
+        let opened = try run { try await savers.open(id) }
+        var session = opened.1
+        let saver = opened.2
         let points = Self.handwriting(7)
         var callerSeconds = 0.0, slowest = 0.0
         let commits = 500
@@ -141,18 +171,20 @@ final class StorageBudgetTests: XCTestCase {
             for p in points.dropFirst() { stroke.add(p) }
             let start = Date()
             session.commit(stroke)
-            let events = session.takeEvents()
-            queue.async { try? store.append(events) }
+            saver.save(session.takeEvents())
             let took = Date().timeIntervalSince(start)
             callerSeconds += took
             slowest = max(slowest, took)
         }
-        queue.sync {}
+        try run { await saver.appendsIdle() }
         let work = FileWork.current - before
-        XCTAssertEqual(store.session.ink.count, Self.strokes + commits)
-        XCTAssertGreaterThanOrEqual(work.operations, commits, "the queue did the writes")
+        XCTAssertGreaterThanOrEqual(work.operations, commits, "the saver's queue did the writes")
         assertWithinBudget("main-thread-file-operations-per-stroke", work.onMainThread / commits)
         XCTAssertEqual(work.onMainThread, 0)
+        let closed = expectation(description: "closed")
+        savers.close(saver) { _ in closed.fulfill() }
+        wait(for: [closed], timeout: 60)
+        XCTAssertEqual(try InkStore(folder: library.folder(for: id)).session.ink.count, Self.strokes + commits)
         record("append-hand-off-calling-thread", microseconds: callerSeconds / Double(commits) * 1e6)
         print(String(format: "PERF storage append-hand-off-calling-thread slowest=%.1f µs", slowest * 1e6))
     }

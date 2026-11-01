@@ -19,6 +19,42 @@ enum DurableFile {
         var isOutOfSpace: Bool { code == ENOSPC || code == EDQUOT }
     }
 
+    /// Failures the tests inject into the file calls, to prove a failure at any step loses nothing. Never set in the
+    /// app.
+    enum Fault: Sendable {
+        enum Operation: Sendable { case open, write, fsync, flushFolder, rename, truncate }
+
+        /// The call fails with this error and does nothing.
+        case error(Int32)
+        /// A write puts down this many bytes, then fails with this error: a torn record.
+        case shortWrite(Int, Int32)
+
+        private static let lock = NSLock()
+        nonisolated(unsafe) private static var handler: (@Sendable (Operation, String) -> Fault?)?
+
+        /// Sets (or clears, with nil) what decides each call's fault.
+        static func inject(_ decide: (@Sendable (Operation, String) -> Fault?)?) {
+            lock.lock()
+            handler = decide
+            lock.unlock()
+        }
+
+        static func injected(_ operation: Operation, _ path: String) -> Fault? {
+            lock.lock()
+            let decide = handler
+            lock.unlock()
+            return decide?(operation, path)
+        }
+
+        /// The error to fail a call with, when one is injected.
+        static func check(_ operation: Operation, _ path: String) -> Int32? {
+            switch injected(operation, path) {
+            case .error(let code)?, .shortWrite(_, let code)?: code
+            case nil: nil
+            }
+        }
+    }
+
     /// Replaces a file's contents in one step: writes a temporary file beside it, flushes it to storage, renames it over
     /// the old one and flushes the folder, so the rename itself survives a power loss.
     static func writeAtomically(_ bytes: [UInt8], to url: URL) throws {
@@ -33,26 +69,41 @@ enum DurableFile {
             throw error
         }
         close(fd)
-        FileWork.note()
-        guard rename(temporary.path, url.path) == 0 else {
-            let code = errno
+        do {
+            try move(temporary, to: url)
+        } catch {
             unlink(temporary.path)
-            throw Failure(operation: "rename", path: url.path, code: code)
+            throw error
         }
         try flushFolder(url.deletingLastPathComponent())
     }
 
+    /// Renames a file over another in one step: afterwards the name holds either the old file or the new one.
+    static func move(_ from: URL, to url: URL) throws {
+        if let code = Fault.check(.rename, url.path) { throw Failure(operation: "rename", path: url.path, code: code) }
+        FileWork.note()
+        guard rename(from.path, url.path) == 0 else { throw Failure(operation: "rename", path: url.path, code: errno) }
+    }
+
     static func open(_ url: URL, flags: Int32) throws -> Int32 {
+        if let code = Fault.check(.open, url.path) { throw Failure(operation: "open", path: url.path, code: code) }
         let fd = url.path.withCString { systemOpen($0, flags | O_CLOEXEC, 0o644) }
         guard fd >= 0 else { throw Failure(operation: "open", path: url.path, code: errno) }
         return fd
     }
 
     static func write(_ bytes: [UInt8], to fd: Int32, path: String) throws {
+        var limit = bytes.count
+        var injected: Int32?
+        switch Fault.injected(.write, path) {
+        case .error(let code)?: throw Failure(operation: "write", path: path, code: code)
+        case .shortWrite(let count, let code)?: (limit, injected) = (min(count, bytes.count), code)
+        case nil: break
+        }
         try bytes.withUnsafeBytes { buffer in
             var offset = 0
-            while offset < buffer.count {
-                let written = systemWrite(fd, buffer.baseAddress! + offset, buffer.count - offset)
+            while offset < limit {
+                let written = systemWrite(fd, buffer.baseAddress! + offset, limit - offset)
                 if written < 0 {
                     if errno == EINTR { continue }
                     throw Failure(operation: "write", path: path, code: errno)
@@ -60,12 +111,14 @@ enum DurableFile {
                 offset += written
             }
         }
+        if let injected { throw Failure(operation: "write", path: path, code: injected) }
     }
 
-    /// Flushes a file to storage. `full` asks for `F_FULLFSYNC` on Apple platforms, which reaches the flash itself
-    /// rather than the drive's cache and costs milliseconds: kept for the rare writes that replace a file (a snapshot,
-    /// a canvas's name). The ink log's batched flush is a plain `fsync`.
+    /// Flushes a file to storage. `full` (the default) asks for `F_FULLFSYNC` on Apple platforms, which reaches the
+    /// flash itself rather than the drive's cache: a plain `fsync` there does not promise the bytes survive a power
+    /// cut. Every flush Vellum makes is full, the ink log's batched one included (ADR-0014).
     static func flush(_ fd: Int32, path: String, full: Bool = true) throws {
+        if let code = Fault.check(.fsync, path) { throw Failure(operation: "fsync", path: path, code: code) }
         FileWork.note(fsync: true)
         #if canImport(Darwin)
         if full, fcntl(fd, F_FULLFSYNC) == 0 { return }
@@ -74,6 +127,7 @@ enum DurableFile {
     }
 
     static func flushFolder(_ url: URL) throws {
+        if let code = Fault.check(.flushFolder, url.path) { throw Failure(operation: "fsync", path: url.path, code: code) }
         let fd = url.path.withCString { systemOpen($0, O_RDONLY | O_CLOEXEC, 0) }
         guard fd >= 0 else { throw Failure(operation: "open", path: url.path, code: errno) }
         defer { close(fd) }
@@ -88,6 +142,7 @@ enum DurableFile {
     }
 
     static func truncate(_ fd: Int32, to length: Int, path: String) throws {
+        if let code = Fault.check(.truncate, path) { throw Failure(operation: "truncate", path: path, code: code) }
         FileWork.note()
         guard ftruncate(fd, off_t(length)) == 0 else { throw Failure(operation: "truncate", path: path, code: errno) }
     }
@@ -150,8 +205,13 @@ public enum FileWork {
         return counts
     }
 
+    /// Set by the app in debug builds: storage file work on the main thread then stops the app at once, so a change
+    /// that puts it there is caught the first time it runs. Release builds count it and carry on.
+    nonisolated(unsafe) public static var trapsOnMainThread = false
+
     static func note(fsync: Bool = false, bytesWritten: Int = 0) {
         let main = Thread.isMainThread
+        if main, trapsOnMainThread { assertionFailure("Storage file work on the main thread") }
         lock.lock()
         counts.operations += 1
         if main { counts.onMainThread += 1 }

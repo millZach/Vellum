@@ -28,6 +28,10 @@ _Avoid_: pen colour, highlight
 The record on the Duo of every change to a canvas's ink since its last snapshot (a stroke drawn, strokes erased, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
 _Avoid_: journal, history file, autosave
 
+**Canvas saver**:
+The one owner of a canvas's files while anything is being written to them (`CanvasSaver`). Opening, closing, reopening and deleting the canvas all go through it, and it outlives the canvas screen until every change it was handed is on the Duo (ADR-0014).
+_Avoid_: writer, persistence manager, autosaver
+
 **Canvas folder**:
 The folder on the Duo that holds one canvas: its name and canvas units (`canvas.json`), its ink snapshot and its ink log, and nothing else, so #12 can mirror it to Dropbox as it is.
 _Avoid_: document, package, bundle

@@ -5,8 +5,8 @@ public enum SaveState: Hashable, Sendable {
     case savedOnThisDuo
     /// A change is still being written. The status bar only shows this when writing takes long enough to notice.
     case saving
-    /// Writing failed; the changes are kept in memory and written with the next change. `outOfSpace` says why when
-    /// it is the Duo being full.
+    /// Writing or flushing failed; the canvas saver keeps the changes in memory and keeps trying, even after the canvas
+    /// is closed, until they are written. `outOfSpace` says why when it is the Duo being full.
     case notSaved(outOfSpace: Bool)
 
     public var title: String {

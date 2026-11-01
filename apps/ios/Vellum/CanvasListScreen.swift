@@ -72,6 +72,13 @@ struct CanvasListScreen: View {
                 .buttonStyle(.plain)
                 .disabled(model.library == nil)
             }
+            if let unsaved = model.unsavedMessage {
+                Label(unsaved, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Chrome.unsaved)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("canvases.unsaved")
+            }
             if model.hasLoaded && model.summaries.isEmpty {
                 ContentUnavailableView("No canvases yet", systemImage: "square.and.pencil",
                                        description: Text("Make one with New canvas. Everything you draw is saved on this Duo as you draw it."))

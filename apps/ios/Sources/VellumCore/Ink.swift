@@ -525,6 +525,7 @@ public struct InkSession: Hashable, Sendable {
             sweepHasEntry = false
             historyPoints += Self.heldPoints(edit, inUndo: false) - Self.heldPoints(edit, inUndo: true)
             redoStack.append(edit)
+            trimHistory()
             switch edit {
             case .draw(let stroke):
                 ink.remove([stroke.id])
@@ -538,6 +539,7 @@ public struct InkSession: Hashable, Sendable {
             sweepHasEntry = false
             historyPoints += Self.heldPoints(edit, inUndo: true) - Self.heldPoints(edit, inUndo: false)
             undoStack.append(edit)
+            trimHistory()
             switch edit {
             case .draw(let stroke):
                 ink.restore([stroke])
@@ -563,17 +565,26 @@ public struct InkSession: Hashable, Sendable {
         redoStack.removeAll()
     }
 
-    /// Drops the oldest undo steps while there are more than `undoLimit`, or while the history holds more than
-    /// `historyPointBudget` points of ink, always keeping the newest step.
+    /// Keeps the history within `undoLimit` undo steps and `historyPointBudget` points, counting the redo steps as
+    /// well as the undo steps. Over the budget, the redo steps furthest from the ink go first, then the oldest undo
+    /// steps. The newest step is always kept (the one just undone, or the one just done), however big. Replaying the
+    /// same events trims the same steps, so a reopened canvas has exactly the history it was saved with.
     private mutating func trimHistory() {
-        var drop = 0
         var held = historyPoints
+        var dropRedo = 0
+        while held > Self.historyPointBudget, redoStack.count - dropRedo > 1 {
+            held -= Self.heldPoints(redoStack[dropRedo], inUndo: false)
+            dropRedo += 1
+        }
+        let keepUndo = redoStack.count - dropRedo > 0 ? 0 : 1
+        var drop = 0
         while undoStack.count - drop > Self.undoLimit
-                || (held > Self.historyPointBudget && undoStack.count - drop > 1) {
+                || (held > Self.historyPointBudget && undoStack.count - drop > keepUndo) {
             held -= Self.heldPoints(undoStack[drop], inUndo: true)
             drop += 1
         }
-        guard drop > 0 else { return }
+        guard drop > 0 || dropRedo > 0 else { return }
+        redoStack.removeFirst(dropRedo)
         undoStack.removeFirst(drop)
         historyPoints = held
     }

@@ -4,7 +4,9 @@ import UIKit
 import VellumCore
 
 /// The Canvases tab: every canvas on the Duo, the one selected in the list, and the one open on the canvas screen.
-/// File work runs off the main thread; the list reads only canvas.json files and cached previews, never ink.
+/// No file work runs on the main thread: finding the library, listing it, opening, closing and deleting all run off
+/// it, and every canvas's files belong to its one saver (`CanvasSavers`), so reopening or deleting a canvas waits for
+/// what is still being written to it.
 @MainActor
 @Observable
 final class CanvasesModel {
@@ -22,19 +24,37 @@ final class CanvasesModel {
     private(set) var hasLaunched = false
     /// A problem to show, in plain words.
     var problem: String?
+    /// Canvases whose changes are not yet all written to the Duo, and why: shown on the list until they are, because
+    /// their saver keeps the changes and keeps trying.
+    private(set) var unsaved: [UUID: SaveState] = [:]
 
-    let library: CanvasLibrary?
+    /// Found off the main thread at launch; nil until then, or when the Duo has no folder for Vellum.
+    private(set) var library: CanvasLibrary?
+    @ObservationIgnored private(set) var savers: CanvasSavers?
     /// Where the open canvas is remembered, so the app reopens it after it is closed or killed.
     private static let lastOpenKey = "lastOpenCanvas"
 
-    init(library: CanvasLibrary? = try? CanvasLibrary.onThisDevice()) {
-        self.library = library
-        if library == nil { problem = "Vellum could not find its folder on this Duo." }
-    }
+    init() {}
 
     var lastOpened: UUID? {
         get { UserDefaults.standard.string(forKey: Self.lastOpenKey).flatMap(UUID.init(uuidString:)) }
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: Self.lastOpenKey) }
+    }
+
+    /// Finds (and makes, the first time) the canvases' folder, off the main thread.
+    func prepare() async {
+        guard library == nil else { return }
+        guard let library = await Task.detached(priority: .userInitiated, operation: { try? CanvasLibrary.onThisDevice() }).value else {
+            problem = "Vellum could not find its folder on this Duo."
+            return
+        }
+        self.library = library
+        let thumbnails = PreviewThumbnails(didWrite: { [weak self] id in
+            Task { @MainActor in self?.thumbnailDidChange(id) }
+        })
+        savers = CanvasSavers(library: library, thumbnails: thumbnails, report: { [weak self] id, state in
+            Task { @MainActor in self?.saveStateDidChange(id, state) }
+        })
     }
 
     /// Reads the list off the main thread.
@@ -56,6 +76,7 @@ final class CanvasesModel {
 
     /// On launch: reopen the canvas that was open when the app was last closed or killed, else show the list.
     func launch() async {
+        await prepare()
         await refresh()
         if let last = lastOpened, summaries.contains(where: { $0.id == last }) {
             await open(last)
@@ -79,15 +100,18 @@ final class CanvasesModel {
     }
 
     /// Opens a canvas on the canvas screen: by default zoomed to everything on it, or at the origin when it is empty.
+    /// A canvas still being written since it was closed opens with everything handed to it, from the same saver.
     func open(_ id: UUID, startingView: CanvasEditor.StartingView? = nil) async {
-        guard let library, opening == nil else { return }
+        guard let savers, opening == nil else { return }
         opening = id
         defer { opening = nil }
         do {
-            let (manifest, session, saver) = try await CanvasSaver.open(id, in: library)
+            let (manifest, session, saver) = try await savers.open(id)
             let canvas = VellumCore.Canvas(name: manifest.name, units: manifest.canvasUnits)
-            openEditor = CanvasEditor(canvas: canvas, session: session, saver: saver,
+            let editor = CanvasEditor(canvas: canvas, session: session, saver: saver,
                                       startingView: startingView ?? (session.ink.isEmpty ? .origin : .everything))
+            if let state = unsaved[id] { editor.saveStateDidChange(state) }
+            openEditor = editor
             selection = id
             lastOpened = id
         } catch {
@@ -95,13 +119,16 @@ final class CanvasesModel {
         }
     }
 
-    /// Back to the list. The canvas's changes are already written; this flushes them and redraws its thumbnail.
+    /// Back to the list. The canvas's saver writes and flushes what it was handed and redraws the thumbnail; if the
+    /// Duo is full it keeps the changes and keeps trying, and the list says so.
     func closeCanvas() {
         guard let editor = openEditor else { return }
         openEditor = nil
         lastOpened = nil
-        editor.saver?.flushNow { [weak self] in
-            Task { @MainActor in await self?.refresh() }
+        if let saver = editor.saver, let savers {
+            savers.close(saver) { [weak self] _ in
+                Task { @MainActor in await self?.refresh() }
+            }
         }
         Task { await refresh() }
     }
@@ -116,13 +143,12 @@ final class CanvasesModel {
         }
     }
 
+    /// Deletes a canvas once everything still being written to it has finished.
     func delete(_ id: UUID) async {
-        guard let library else { return }
+        guard let savers else { return }
         do {
-            try await Task.detached {
-                try library.delete(id)
-                CanvasPreviews.remove(for: id)
-            }.value
+            try await savers.delete(id)
+            unsaved[id] = nil
             if lastOpened == id { lastOpened = nil }
             if selection == id { selection = nil }
             await refresh()
@@ -131,16 +157,47 @@ final class CanvasesModel {
         }
     }
 
-    /// The app is leaving the screen: flush the open canvas to storage while iOS still lets it run.
-    func appWillLeaveScreen() {
-        guard let saver = openEditor?.saver else { return }
-        let task = BackgroundTask.begin()
-        saver.flushNow { task.end() }
+    /// What the list says about canvases whose changes are not all written yet, in plain words; nil when every
+    /// change is on the Duo.
+    var unsavedMessage: String? {
+        let waiting = unsaved.filter { $0.key != openEditor?.canvasID }
+        guard !waiting.isEmpty else { return nil }
+        let names = waiting.keys.compactMap { id in summaries.first { $0.id == id }?.name }.sorted()
+        let which = names.isEmpty ? "A canvas" : names.map { "“\($0)”" }.joined(separator: ", ")
+        let full = waiting.values.contains(.notSaved(outOfSpace: true))
+        return full
+            ? "\(which) is not fully saved: this Duo is full. Free up some space; Vellum keeps the ink and keeps trying."
+            : "\(which) is not fully saved yet. Vellum keeps the ink and keeps trying."
     }
 
-    /// The app is being terminated: flush and wait.
+    private func saveStateDidChange(_ id: UUID, _ state: SaveState) {
+        if state.isSaved { unsaved[id] = nil } else { unsaved[id] = state }
+        if let editor = openEditor, editor.canvasID == id { editor.saveStateDidChange(state) }
+    }
+
+    private func thumbnailDidChange(_ id: UUID) {
+        previews[id] = nil
+        Task {
+            let info = await Task.detached { CanvasPreviews.info(for: id) }.value
+            previews[id] = info
+            previewRevision += 1
+        }
+    }
+
+    /// The app is leaving the screen: flush every canvas still being written to storage while iOS still lets it run.
+    func appWillLeaveScreen() {
+        guard let savers else { return }
+        let task = BackgroundTask.begin()
+        savers.flushAll { task.end() }
+    }
+
+    /// The app is being terminated: flush every canvas, waiting a moment for it. The flushing runs on the savers'
+    /// queues; the main thread only waits, since after this there is no later.
     func appWillTerminate() {
-        openEditor?.saver?.flushAndWait()
+        guard let savers else { return }
+        let finished = DispatchSemaphore(value: 0)
+        savers.flushAll { finished.signal() }
+        _ = finished.wait(timeout: .now() + 3)
     }
 }
 

@@ -1,0 +1,10 @@
+benchmark strokes=10000 view=951x669 maximumFramesPerSecond=60 promotionOptIn=true
+scenario=pan frames=239 strokes=10000 work_ms median=1.62 p95=2.90 max=5.14 over_8.3ms=0 interval_ms median=16.67 p95=16.67 max=16.67 long_frames=0 display_interval_ms=16.67
+  settled_ms=17.27
+scenario=pinch frames=239 strokes=10000 work_ms median=5.05 p95=7.71 max=11.61 over_8.3ms=7 interval_ms median=16.67 p95=16.67 max=16.67 long_frames=0 display_interval_ms=16.67
+  settled_ms=4166.76
+scenario=draw frames=239 strokes=10001 work_ms median=1.66 p95=3.11 max=4.00 over_8.3ms=0 interval_ms median=16.67 p95=16.67 max=16.67 long_frames=0 display_interval_ms=16.67
+  settled_ms=16.68
+scenario=erase frames=239 strokes=8138 work_ms median=7.69 p95=13.55 max=24.35 over_8.3ms=102 interval_ms median=16.67 p95=16.67 max=40.38 long_frames=5 display_interval_ms=16.67
+  settled_ms=3483.38
+done

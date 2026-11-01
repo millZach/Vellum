@@ -61,15 +61,19 @@ jobs:
       - name: Check a local Secrets.xcconfig sets the Dropbox key and the command line overrides it
         working-directory: apps/ios
         run: |
-          key() { xcodebuild -project Vellum.xcodeproj -scheme Vellum -configuration "$1" -showBuildSettings "${@:2}" 2>/dev/null |
-            awk '$1 == "DROPBOX_APP_KEY" { print $3 }'; }
-          test "$(key Debug)" = not-set-up
+          # expect WANT CONFIGURATION [OVERRIDE...]: the app target's DROPBOX_APP_KEY in that configuration is WANT.
+          expect() {
+            got=$(xcodebuild -project Vellum.xcodeproj -target Vellum -configuration "$2" -showBuildSettings "${@:3}" |
+              awk '!found && $1 == "DROPBOX_APP_KEY" { print $3; found = 1 }')
+            echo "$2 ${*:3}: DROPBOX_APP_KEY = $got"
+            test "$got" = "$1"
+          }
+          expect not-set-up Debug
           trap 'rm -f Secrets.xcconfig' EXIT
           echo 'DROPBOX_APP_KEY = localkey0000000' > Secrets.xcconfig
-          test "$(key Debug)" = localkey0000000
-          test "$(key Release)" = localkey0000000
-          test "$(key Release DROPBOX_APP_KEY=commandline0000)" = commandline0000
-          echo "Secrets.xcconfig sets DROPBOX_APP_KEY in Debug and Release; the command line overrides it"
+          expect localkey0000000 Debug
+          expect localkey0000000 Release
+          expect commandline0000 Release DROPBOX_APP_KEY=commandline0000
       # The TestFlight workflow numbers its builds with this script; printing one here proves its format on macOS.
       - name: Print a TestFlight build number
         run: |

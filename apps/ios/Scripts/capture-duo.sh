@@ -133,6 +133,13 @@ for appearance in light dark; do
   capture canvas-finger-stroke --ui-tab canvases --ui-reset --ui-new-canvas --ui-finger-stroke --ui-draw-with-finger
 done
 
+# Settings from the canvas (#28): the gear at the end of the top bar opens the same Settings sheet as the Drawings tab's
+# gear. The Debug-only `--ui-canvas-settings` opens the canvas with the sheet up.
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  capture canvas-settings --ui-tab canvases --ui-reset --ui-new-canvas --ui-canvas-settings
+done
+
 # Frame timing on the 10,000-stroke canvas (#21): the benchmark pans, pinches, draws and erases through the canvas
 # view's input paths and writes benchmark.txt and benchmark.json to the app's Documents folder. Simulator numbers are
 # indicative. benchmark <suffix>: runs the installed app's benchmark and keeps benchmark<suffix>.txt and .json.

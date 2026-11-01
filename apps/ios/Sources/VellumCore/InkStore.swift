@@ -5,7 +5,7 @@ import Darwin
 #endif
 import Foundation
 
-/// A canvas's ink on the Duo (ADR-0013): a snapshot of the ink and its undo history, and an append-only log of every
+/// A canvas's ink on the Duo (ADR-0014): a snapshot of the ink and its undo history, and an append-only log of every
 /// change since.
 ///
 /// Each change is appended to the log with a plain `write` as it happens. That puts it in the kernel's file cache at

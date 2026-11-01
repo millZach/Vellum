@@ -25,7 +25,7 @@ What a colour of ink means to an agent: red is something to add, green is someth
 _Avoid_: pen colour, highlight
 
 **Ink log**:
-The record on the Duo of every change to a canvas's ink since its last snapshot (a stroke drawn, strokes erased, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0013).
+The record on the Duo of every change to a canvas's ink since its last snapshot (a stroke drawn, strokes erased, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
 _Avoid_: journal, history file, autosave
 
 **Canvas folder**:

@@ -38,7 +38,7 @@ public struct CanvasSummary: Identifiable, Hashable, Sendable {
 }
 
 /// Every canvas on the Duo: one folder per canvas under `root`, named by the canvas's id so renaming never moves it.
-/// Each folder holds `canvas.json` (name and canvas units), `ink.snapshot` and `ink.log` (ADR-0013), and nothing else,
+/// Each folder holds `canvas.json` (name and canvas units), `ink.snapshot` and `ink.log` (ADR-0014), and nothing else,
 /// so #12 can mirror the folders to `Dropbox/Vellum` as they are.
 ///
 /// Making and deleting a canvas are atomic: a new canvas is built in a hidden folder and renamed into place, and a

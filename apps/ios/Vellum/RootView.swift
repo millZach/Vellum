@@ -3,7 +3,8 @@ import UIKit
 import VellumCore
 
 /// The iOS tab bar with Canvases, Drawings, Jobs and Meetings. Canvases holds the list of canvases and, over it, the
-/// canvas screen for the one open; the other tabs are empty until their tickets build them.
+/// canvas screen for the one open; Drawings shows Zach's Dropbox (#10); the other tabs are empty until their tickets
+/// build them.
 struct RootView: View {
     @State private var selection: AppTab = RootView.launchTab
     /// The canvases and the open canvas live here, above the tabs, so switching tabs keeps the canvas open.
@@ -16,6 +17,8 @@ struct RootView: View {
                 Tab(tab.descriptor.title, systemImage: tab.descriptor.systemImage, value: tab) {
                     if tab == .canvases {
                         CanvasesTab(model: canvases)
+                    } else if tab == .drawings {
+                        DrawingsScreen()
                     } else {
                         PlaceholderScreen(tab: tab)
                     }

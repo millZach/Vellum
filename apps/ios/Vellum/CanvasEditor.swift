@@ -4,7 +4,7 @@ import VellumCore
 
 /// One canvas open on the canvas screen: what is on it, what part of it is on screen, and the tool in hand. Every
 /// change to the ink is handed to its `CanvasSaver` as it is made and written on the Duo off the main thread
-/// (ADR-0013); the status bar says "Saved on this Duo" once it is.
+/// (ADR-0014); the status bar says "Saved on this Duo" once it is.
 @MainActor
 @Observable
 final class CanvasEditor {

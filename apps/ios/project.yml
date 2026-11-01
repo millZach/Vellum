@@ -9,6 +9,12 @@ options:
     # highest target the app can be proved on in the simulator.
     iOS: "27.1"
   createIntermediateGroups: true
+# Config/Vellum.xcconfig holds the DROPBOX_APP_KEY placeholder and pulls in the gitignored Secrets.xcconfig when it
+# exists, so a local build can carry a real key (ADR-0013, docs/dropbox.md). The setting must not also appear under
+# settings below: a setting in the project file overrides the xcconfig.
+configFiles:
+  Debug: Config/Vellum.xcconfig
+  Release: Config/Vellum.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -34,6 +40,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
         GENERATE_INFOPLIST_FILE: YES
+        # Merged with the generated keys: the Dropbox app key and its db-<key> callback scheme.
+        INFOPLIST_FILE: Vellum/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Vellum
         INFOPLIST_KEY_LSRequiresIPhoneOS: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES

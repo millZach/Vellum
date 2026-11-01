@@ -224,7 +224,7 @@ public struct Ink: Hashable, Sendable {
     func index(of id: StrokeID) -> Int? { strokes.firstIndex { $0.id == id } }
 }
 
-/// One change to a canvas's ink, as it is written to the Duo (ADR-0013): a stroke drawn, strokes erased, an undo or a
+/// One change to a canvas's ink, as it is written to the Duo (ADR-0014): a stroke drawn, strokes erased, an undo or a
 /// redo. Replaying a canvas's events in order through `InkSession.apply` rebuilds its ink and its undo history exactly.
 public enum InkEvent: Hashable, Sendable {
     /// A stroke drawn, added on top of the ink.
@@ -239,7 +239,7 @@ public enum InkEvent: Hashable, Sendable {
 /// Drawing and erasing ink with undo and redo on a canvas. Every change it makes is also kept as an `InkEvent` until
 /// `takeEvents` hands it to be saved, so what is written to the Duo is exactly what was done.
 ///
-/// The undo history keeps the last `undoLimit` steps. It is saved with the ink (ADR-0013), so undo and redo survive a
+/// The undo history keeps the last `undoLimit` steps. It is saved with the ink (ADR-0014), so undo and redo survive a
 /// relaunch.
 public struct InkSession: Hashable, Sendable {
     /// How many undo steps are kept. Older steps are dropped, oldest first.
@@ -295,7 +295,7 @@ public struct InkSession: Hashable, Sendable {
     }
 
     /// Adds a stroke with a real-world width. A stroke with no points leaves nothing and returns nil. Its points are
-    /// kept on the ink grid (1/65,536 inch, ADR-0013), so the ink in memory is exactly the ink saved.
+    /// kept on the ink grid (1/65,536 inch, ADR-0014), so the ink in memory is exactly the ink saved.
     @discardableResult
     public mutating func draw(_ points: [CanvasPoint], tool: InkTool, colour: MarkupColour, width: Length) -> InkStroke? {
         guard !points.isEmpty else { return nil }

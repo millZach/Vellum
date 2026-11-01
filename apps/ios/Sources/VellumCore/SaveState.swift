@@ -1,4 +1,4 @@
-/// Whether a canvas's changes are saved on the Duo (ADR-0003, ADR-0013), as the status bar says it. Syncing to Dropbox
+/// Whether a canvas's changes are saved on the Duo (ADR-0003, ADR-0014), as the status bar says it. Syncing to Dropbox
 /// is #12; until it is built nothing here claims a canvas is anywhere but on this Duo.
 public enum SaveState: Hashable, Sendable {
     /// Every change is written to the Duo's storage.

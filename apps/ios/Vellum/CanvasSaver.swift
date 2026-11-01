@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 import VellumCore
 
-/// Saves one open canvas on the Duo, entirely off the main thread (ADR-0013). The canvas screen hands it each change
+/// Saves one open canvas on the Duo, entirely off the main thread (ADR-0014). The canvas screen hands it each change
 /// as the Pencil lifts, which costs the main thread a queue hand-off; on its own serial queue the saver appends the
 /// change to the canvas's ink log with a plain write, flushes the log to storage every few seconds while Zach draws,
 /// compacts when the Pencil is up, and redraws the canvas's thumbnail for the Canvases list.

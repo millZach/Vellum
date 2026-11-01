@@ -1,4 +1,4 @@
-/// A small picture of a canvas's ink for the Canvases list (ADR-0013): every stroke fitted into a thumbnail and
+/// A small picture of a canvas's ink for the Canvases list (ADR-0014): every stroke fitted into a thumbnail and
 /// thinned to the points a thumbnail can show, so drawing it is cheap. The app makes one in the background after the
 /// ink changes and caches the picture; the list never decodes a canvas to show it.
 public struct InkThumbnail: Hashable, Sendable {

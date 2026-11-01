@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import VellumCore
 
-/// Saving ink on the Duo (ADR-0013): the log and snapshot, a crash at any byte, undo across a relaunch, compaction.
+/// Saving ink on the Duo (ADR-0014): the log and snapshot, a crash at any byte, undo across a relaunch, compaction.
 /// Every stroke here is made up for the test.
 final class InkStoreTests: XCTestCase {
     private var folder: URL!

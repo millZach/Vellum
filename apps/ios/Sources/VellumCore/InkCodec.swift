@@ -1,4 +1,4 @@
-/// The bytes of Vellum's ink files (ADR-0013): little-endian integers, points as varint steps on the ink grid (exact,
+/// The bytes of Vellum's ink files (ADR-0014): little-endian integers, points as varint steps on the ink grid (exact,
 /// so a stroke reopens at exactly the real-world position it was drawn at), and records each framed by their length
 /// and a CRC-32, so a record cut short by a crash is recognised and dropped.
 enum InkCodec {
@@ -361,7 +361,7 @@ enum CRC32 {
 }
 
 extension CanvasPoint {
-    /// The ink grid: a stroke's points are kept to the nearest 1/65,536 inch (ADR-0013), about 0.4 micrometres and a
+    /// The ink grid: a stroke's points are kept to the nearest 1/65,536 inch (ADR-0014), about 0.4 micrometres and a
     /// hundredth of a point at the canvas's closest zoom. A grid point is exactly representable as a `Double` and as an
     /// integer, so ink saves and reopens without drift and its points are stored as small integer steps.
     public static let gridUnitsPerInch = 65_536.0

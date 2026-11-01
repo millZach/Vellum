@@ -6,7 +6,7 @@ import Darwin
 import Foundation
 
 /// Writing files so a crash, a kill or a dead battery leaves either the old contents or the new, never half of each
-/// (ADR-0013). Plain POSIX calls, so it behaves the same on the Duo and on Linux, where the tests run.
+/// (ADR-0014). Plain POSIX calls, so it behaves the same on the Duo and on Linux, where the tests run.
 enum DurableFile {
     struct Failure: Error, CustomStringConvertible {
         let operation: String

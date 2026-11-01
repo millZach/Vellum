@@ -1,6 +1,7 @@
 import AuthenticationServices
 import Foundation
 import Observation
+import SwiftUI
 import VellumCore
 
 /// What the Drawings tab and the Settings sheet show about Dropbox, and the actions they offer. The decisions live in

@@ -47,13 +47,18 @@ struct DropboxFoldersView: View {
                     if let problem = dropbox.problem {
                         Text(problem.message).foregroundStyle(.red)
                     }
+                    if let notice = dropbox.notice {
+                        Text(notice)
+                    }
                 } actions: {
                     Button("Connect Dropbox") {
                         Task { await dropbox.signIn(with: webAuthenticationSession) }
                     }
                     .buttonStyle(.borderedProminent)
                 }
-            case .working:
+            case .signingIn:
+                ProgressView("Signing in to Dropbox…")
+            case .loadingFolders:
                 ProgressView("Reaching your Dropbox…")
             case .signedIn(let folders):
                 List {
@@ -98,17 +103,29 @@ struct DropboxSettingsSheet: View {
                         Text("Dropbox isn't set up in this build.")
                     case .signedOut:
                         Text("Not connected.")
-                    case .working, .signedIn:
+                        if let notice = dropbox.notice {
+                            Text(notice).foregroundStyle(.secondary)
+                        }
+                    case .signingIn:
+                        Text("Signing in…")
+                    case .loadingFolders, .signedIn:
                         Text("Connected. Vellum can read and write your whole Dropbox.")
-                        Button("Sign Out of Dropbox", role: .destructive) { confirmsSignOut = true }
-                            .confirmationDialog("Sign out of Dropbox?", isPresented: $confirmsSignOut,
-                                                titleVisibility: .visible) {
-                                Button("Sign Out", role: .destructive) {
-                                    Task { await dropbox.signOut() }
+                        if let problem = dropbox.problem {
+                            Text(problem.message).foregroundStyle(.red)
+                        }
+                        if dropbox.isSigningOut {
+                            ProgressView("Signing out…")
+                        } else {
+                            Button("Sign Out of Dropbox", role: .destructive) { confirmsSignOut = true }
+                                .confirmationDialog("Sign out of Dropbox?", isPresented: $confirmsSignOut,
+                                                    titleVisibility: .visible) {
+                                    Button("Sign Out", role: .destructive) {
+                                        Task { await dropbox.signOut() }
+                                    }
+                                } message: {
+                                    Text("Vellum forgets its Dropbox sign-in on this Duo and asks Dropbox to end it.")
                                 }
-                            } message: {
-                                Text("Vellum forgets its Dropbox sign-in on this Duo and asks Dropbox to end it.")
-                            }
+                        }
                     }
                 }
             }

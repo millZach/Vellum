@@ -49,13 +49,27 @@ jobs:
           xcrun simctl list devices available | grep -i duo || echo "No iPhone Duo simulator on this image"
       - name: Generate the project and build the unsigned simulator app
         run: sh apps/ios/Scripts/build-simulator.sh
-      # PR builds have no Dropbox app key (ADR-0013): the app carries project.yml's placeholder and says so.
+      # PR builds have no Dropbox app key (ADR-0013): the app carries Config/Vellum.xcconfig's placeholder and says so.
       - name: Check the build carries the Dropbox placeholder, not a key
         run: |
           plist=apps/ios/.build-native/Build/Products/Debug-iphonesimulator/Vellum.app/Info.plist
           test "$(/usr/libexec/PlistBuddy -c 'Print :DropboxAppKey' "$plist")" = not-set-up
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$plist")" = db-not-set-up
           echo "DropboxAppKey = not-set-up, callback scheme db-not-set-up"
+      # A local build takes its key from the gitignored Secrets.xcconfig, and a command-line key (testflight.sh) beats
+      # it. Both keys here are made up.
+      - name: Check a local Secrets.xcconfig sets the Dropbox key and the command line overrides it
+        working-directory: apps/ios
+        run: |
+          key() { xcodebuild -project Vellum.xcodeproj -scheme Vellum -configuration "$1" -showBuildSettings "${@:2}" 2>/dev/null |
+            awk '$1 == "DROPBOX_APP_KEY" { print $3 }'; }
+          test "$(key Debug)" = not-set-up
+          trap 'rm -f Secrets.xcconfig' EXIT
+          echo 'DROPBOX_APP_KEY = localkey0000000' > Secrets.xcconfig
+          test "$(key Debug)" = localkey0000000
+          test "$(key Release)" = localkey0000000
+          test "$(key Release DROPBOX_APP_KEY=commandline0000)" = commandline0000
+          echo "Secrets.xcconfig sets DROPBOX_APP_KEY in Debug and Release; the command line overrides it"
       # The TestFlight workflow numbers its builds with this script; printing one here proves its format on macOS.
       - name: Print a TestFlight build number
         run: |

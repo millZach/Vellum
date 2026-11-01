@@ -63,3 +63,23 @@ public protocol DropboxTokenStore: Sendable {
     func save(_ tokens: DropboxTokens) throws
     func delete() throws
 }
+
+/// Tokens kept in memory only, gone when the app quits: the tests' store and the simulator captures' store.
+public final class DropboxMemoryTokenStore: DropboxTokenStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var tokens: DropboxTokens?
+    /// When set, `delete()` throws this, as a Keychain that won't let go would.
+    private let deleteFailure: (any Error)?
+
+    public init(_ tokens: DropboxTokens? = nil, deleteFailure: (any Error)? = nil) {
+        self.tokens = tokens
+        self.deleteFailure = deleteFailure
+    }
+
+    public func load() throws -> DropboxTokens? { lock.withLock { tokens } }
+    public func save(_ tokens: DropboxTokens) throws { lock.withLock { self.tokens = tokens } }
+    public func delete() throws {
+        if let deleteFailure { throw deleteFailure }
+        lock.withLock { tokens = nil }
+    }
+}

@@ -86,13 +86,4 @@ struct CaptureDropboxTransport: DropboxTransport {
         return DropboxHTTPResponse(status: 200, body: Data(body.utf8))
     }
 }
-
-final class MemoryTokenStore: DropboxTokenStore, @unchecked Sendable {
-    private let lock = NSLock()
-    private var tokens: DropboxTokens?
-    init(_ tokens: DropboxTokens? = nil) { self.tokens = tokens }
-    func load() throws -> DropboxTokens? { lock.withLock { tokens } }
-    func save(_ tokens: DropboxTokens) throws { lock.withLock { self.tokens = tokens } }
-    func delete() throws { lock.withLock { tokens = nil } }
-}
 #endif

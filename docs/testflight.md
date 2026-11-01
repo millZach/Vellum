@@ -22,8 +22,7 @@ Repository secrets on `millZach/Vellum` (Settings > Secrets and variables > Acti
 
 - `APPLE_TEAM_ID`: passed to `xcodebuild` as `DEVELOPMENT_TEAM` when archiving and to the export options, which are written on the runner and deleted.
 - `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_ID` and `APP_STORE_CONNECT_KEY` (the `.p8` contents): an App Store Connect API key with the Admin role, which automatic signing needs to use Apple's cloud-managed distribution certificate. The key is written to the runner's temporary folder and removed at the end of the run, pass or fail.
-
-- `DROPBOX_APP_KEY`: the Dropbox app's key, passed to `xcodebuild` as the `DROPBOX_APP_KEY` build setting, which puts it in the app's Info.plist and its `db-<key>` callback scheme (ADR-0013). `Scripts/testflight.sh` refuses to archive without a key shaped like one and checks the archived Info.plist carries it, without printing it. Every other build has the placeholder `not-set-up` and says Dropbox isn't set up. The Dropbox app itself (full Dropbox access, public clients allowed for PKCE, the redirect URI `db-<key>://2/token`) is set up in Dropbox's app console; no Dropbox app secret is used or kept anywhere.
+- `DROPBOX_APP_KEY`: the Dropbox app's key, passed to `xcodebuild` as the `DROPBOX_APP_KEY` build setting, which puts it in the app's Info.plist and its `db-<key>` callback scheme (ADR-0013). `Scripts/testflight.sh` refuses to archive without a key shaped like one and checks the archived Info.plist carries it, without printing it. Every other build has the placeholder `not-set-up` and says Dropbox isn't set up. `apps/ios/Scripts/setup-dropbox.sh` sets up the Dropbox app and this secret; `docs/dropbox.md` says how a local build gets a key. No Dropbox app secret is used or kept anywhere.
 
 No certificate or provisioning profile is kept anywhere.
 
@@ -33,6 +32,7 @@ A processed build reaches the Duo only through a TestFlight testing group. Set u
 
 1. In App Store Connect, open the app (named "Vellum Canvas"), then TestFlight > Internal Testing, and add an internal group with Zach in it as a tester.
 2. Turn on automatic distribution for the group, so every new processed build is given to it without approving each one.
-3. On the Duo, install TestFlight from the App Store, signed in with Zach's Apple account, and accept the invitation.
+3. On the Duo, install TestFlight from the App Store, signed in with Zach's Apple account.
+4. Accept the TestFlight invitation email. Adding Zach to the group sends it to his Apple account's email address, and until he opens it and accepts, no build appears in TestFlight on the Duo, however many have processed. This is what kept the first build off the Duo on 2026-11-01.
 
 After that each build shows in TestFlight on the Duo and installs with one tap, or by itself if automatic updates are on for Vellum in TestFlight.

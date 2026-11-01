@@ -9,16 +9,18 @@ options:
     # highest target the app can be proved on in the simulator.
     iOS: "27.1"
   createIntermediateGroups: true
+# Config/Vellum.xcconfig holds the DROPBOX_APP_KEY placeholder and pulls in the gitignored Secrets.xcconfig when it
+# exists, so a local build can carry a real key (ADR-0013, docs/dropbox.md). The setting must not also appear under
+# settings below: a setting in the project file overrides the xcconfig.
+configFiles:
+  Debug: Config/Vellum.xcconfig
+  Release: Config/Vellum.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
     # The build number for TestFlight comes from the workflow run (Scripts/testflight.sh); this one is for local builds.
     CURRENT_PROJECT_VERSION: "1"
-    # The Dropbox app key reaches the app only as this build setting (ADR-0013): Scripts/testflight.sh passes the
-    # DROPBOX_APP_KEY repository secret, and every other build keeps this placeholder and says Dropbox isn't set up.
-    # A local build can pass a key on the command line: xcodebuild ... DROPBOX_APP_KEY=<key>.
-    DROPBOX_APP_KEY: not-set-up
 packages:
   VellumCore:
     path: .

@@ -163,7 +163,7 @@ final class DropboxTokensTests: XCTestCase {
     func testEveryErrorIsPlainWords() {
         let all: [DropboxError] = [.notSetUp, .notSignedIn, .offline, .cancelled, .accessDenied, .redirectRefused,
                                    .signInDidNotFinish, .signInExpired, .dropboxUnavailable, .unexpectedReply,
-                                   .couldNotKeepSignIn]
+                                   .couldNotKeepSignIn, .couldNotRemoveSignIn]
         for error in all {
             XCTAssertFalse(error.message.isEmpty)
             XCTAssertNil(error.message.range(of: #"\d{3}|_"#, options: .regularExpression), error.message)
@@ -175,14 +175,7 @@ final class DropboxTokensTests: XCTestCase {
 
 // MARK: - The session against a scripted Dropbox
 
-private final class MemoryStore: DropboxTokenStore, @unchecked Sendable {
-    private let lock = NSLock()
-    private var tokens: DropboxTokens?
-    init(_ tokens: DropboxTokens? = nil) { self.tokens = tokens }
-    func load() throws -> DropboxTokens? { lock.withLock { tokens } }
-    func save(_ tokens: DropboxTokens) throws { lock.withLock { self.tokens = tokens } }
-    func delete() throws { lock.withLock { tokens = nil } }
-}
+private typealias MemoryStore = DropboxMemoryTokenStore
 
 /// Answers each request with the next scripted reply and records what was sent.
 private final class ScriptedDropbox: DropboxTransport, @unchecked Sendable {
@@ -218,7 +211,7 @@ private let topLevel = #"""
 private let secondPage = #"{"entries":[{".tag":"folder","name":"Vellum","path_display":"/Vellum","id":"id:4"}],"cursor":"c2","has_more":false}"#
 
 final class DropboxSessionTests: XCTestCase {
-    private func session(_ store: MemoryStore, _ dropbox: ScriptedDropbox) -> DropboxSession {
+    private func session(_ store: MemoryStore, _ dropbox: any DropboxTransport) -> DropboxSession {
         DropboxSession(appKey: key, transport: dropbox, store: store, now: { now })
     }
 
@@ -287,16 +280,262 @@ final class DropboxSessionTests: XCTestCase {
     func testSigningOutRevokesAndForgets() async throws {
         let store = MemoryStore(fresh)
         let dropbox = ScriptedDropbox([.http(200, "null")])
-        await session(store, dropbox).signOut()
+        let outcome = try await session(store, dropbox).signOut()
+        XCTAssertEqual(outcome, .revoked)
+        XCTAssertNil(outcome.message)
         XCTAssertNil(try store.load())
         XCTAssertEqual(dropbox.requests.map(\.url.absoluteString), ["https://api.dropboxapi.com/2/auth/token/revoke"])
         XCTAssertEqual(dropbox.requests.first?.headers["Authorization"], "Bearer access1")
     }
 
-    func testSigningOutOfflineStillForgets() async throws {
-        let store = MemoryStore(fresh)
-        await session(store, ScriptedDropbox([.fail(.offline)])).signOut()
+    func testSigningOutWithALapsedTokenRenewsItFirst() async throws {
+        let store = MemoryStore(stale)
+        let dropbox = ScriptedDropbox([.http(200, renewed), .http(200, "null")])
+        let outcome = try await session(store, dropbox).signOut()
+        XCTAssertEqual(outcome, .revoked)
+        XCTAssertEqual(dropbox.requests.map(\.url.lastPathComponent), ["token", "revoke"])
+        XCTAssertEqual(dropbox.requests[1].headers["Authorization"], "Bearer access2")
         XCTAssertNil(try store.load())
+    }
+
+    func testSigningOutRenewsOnceWhenDropboxSaysTheTokenExpired() async throws {
+        let store = MemoryStore(fresh)
+        let dropbox = ScriptedDropbox([.http(401, #"{"error_summary":"expired_access_token/"}"#), .http(200, renewed),
+                                       .http(200, "null")])
+        let outcome = try await session(store, dropbox).signOut()
+        XCTAssertEqual(outcome, .revoked)
+        XCTAssertEqual(dropbox.requests.map(\.url.lastPathComponent), ["revoke", "token", "revoke"])
+        XCTAssertEqual(dropbox.requests[2].headers["Authorization"], "Bearer access2")
+    }
+
+    func testARefusedRevokeStillForgetsAndSaysSo() async throws {
+        let store = MemoryStore(fresh)
+        let outcome = try await session(store, ScriptedDropbox([.http(400, "bad")])).signOut()
+        XCTAssertEqual(outcome, .notRevoked(.unexpectedReply))
+        XCTAssertNotNil(outcome.message)
+        XCTAssertNil(try store.load())
+    }
+
+    func testARefusedRenewalMeansDropboxAlreadyEndedIt() async throws {
+        let store = MemoryStore(stale)
+        let dropbox = ScriptedDropbox([.http(400, #"{"error":"invalid_grant","error_description":"revoked"}"#)])
+        let outcome = try await session(store, dropbox).signOut()
+        XCTAssertEqual(outcome, .revoked)
+        XCTAssertNil(try store.load())
+    }
+
+    func testSigningOutOfflineStillForgetsAndSaysDropboxWasntTold() async throws {
+        let store = MemoryStore(fresh)
+        let outcome = try await session(store, ScriptedDropbox([.fail(.offline)])).signOut()
+        XCTAssertEqual(outcome, .notRevoked(.offline))
+        XCTAssertTrue(outcome.message?.contains("offline") == true)
+        XCTAssertNil(try store.load())
+    }
+
+    func testAKeychainThatWontDeleteIsReported() async {
+        struct Stuck: Error {}
+        let store = MemoryStore(fresh, deleteFailure: Stuck())
+        await assertThrows(.couldNotRemoveSignIn) {
+            _ = try await self.session(store, ScriptedDropbox([.http(200, "null")])).signOut()
+        }
+        XCTAssertEqual(try store.load(), fresh)
+    }
+
+    // MARK: Signing out wins every race
+
+    func testARefreshInFlightCannotUndoSigningOut() async throws {
+        let store = MemoryStore(stale)
+        let dropbox = SuspendingDropbox(expecting: 3)
+        let session = session(store, dropbox)
+        let load = Task { try await session.topLevelFolders() }
+        try await dropbox.waitForRequests(1)                       // the folder load's refresh, held
+        let signOut = Task { try await session.signOut() }
+        try await dropbox.waitForRequests(2)                       // sign-out renews too
+        dropbox.answer(1, .http(200, renewed))
+        try await dropbox.waitForRequests(3)
+        dropbox.answer(2, .http(200, "null"))                      // revoked
+        let outcome = try await signOut.value
+        XCTAssertEqual(outcome, .revoked)
+        XCTAssertNil(try store.load())
+        dropbox.answer(0, .http(200, renewed))                     // the late refresh comes back
+        await assertThrows(.notSignedIn) { _ = try await load.value }
+        XCTAssertNil(try store.load())
+        XCTAssertEqual(dropbox.requests.count, 3, "the stale load went no further")
+    }
+
+    func testASignInFinishingLateCannotUndoSigningOut() async throws {
+        let store = MemoryStore()
+        let dropbox = SuspendingDropbox(expecting: 1)
+        let session = session(store, dropbox)
+        let attempt = session.beginSignIn()
+        let callback = URL(string: "db-abcdefgh1234567://2/token?code=c&state=\(attempt.state)")!
+        let signIn = Task { try await session.finishSignIn(attempt, callback: callback) }
+        try await dropbox.waitForRequests(1)
+        _ = try await session.signOut()
+        dropbox.answer(0, .http(200, #"{"access_token":"a","expires_in":14400,"refresh_token":"r"}"#))
+        await assertThrows(.notSignedIn) { try await signIn.value }
+        XCTAssertNil(try store.load())
+    }
+
+    func testAFolderLoadFinishingLateReturnsNothing() async throws {
+        let store = MemoryStore(fresh)
+        let dropbox = SuspendingDropbox(expecting: 2)
+        let session = session(store, dropbox)
+        let load = Task { try await session.topLevelFolders() }
+        try await dropbox.waitForRequests(1)
+        let signOut = Task { try await session.signOut() }
+        try await dropbox.waitForRequests(2)
+        dropbox.answer(1, .http(200, "null"))
+        _ = try await signOut.value
+        dropbox.answer(0, .http(200, secondPage))
+        await assertThrows(.notSignedIn) { _ = try await load.value }
+        XCTAssertNil(try store.load())
+    }
+
+    func testARefreshStartedDuringSigningOutCannotUndoIt() async throws {
+        let store = MemoryStore(fresh)
+        let dropbox = SuspendingDropbox(expecting: 2)
+        let session = session(store, dropbox)
+        let signOut = Task { try await session.signOut() }
+        try await dropbox.waitForRequests(1)                       // the revoke, held
+        let load = Task { try await session.topLevelFolders() }
+        try await dropbox.waitForRequests(2)                       // a load starts while Dropbox is being told
+        dropbox.answer(0, .http(200, "null"))
+        _ = try await signOut.value
+        dropbox.answer(1, .http(401, #"{"error_summary":"expired_access_token/"}"#))
+        await assertThrows(.notSignedIn) { _ = try await load.value }
+        XCTAssertNil(try store.load())
+    }
+
+    private func assertThrows(_ expected: DropboxError, file: StaticString = #filePath, line: UInt = #line,
+                              _ body: @escaping () async throws -> Void) async {
+        do {
+            try await body()
+            XCTFail("expected \(expected)", file: file, line: line)
+        } catch {
+            XCTAssertEqual(error as? DropboxError, expected, file: file, line: line)
+        }
+    }
+}
+
+/// Holds each of the first `expected` requests until the test answers it, so a test can sign out while a call is in
+/// flight. Any request after those is refused at once, so a stale call that goes further fails the test, not hangs it.
+private final class SuspendingDropbox: DropboxTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private let expected: Int
+    private var held: [(request: DropboxHTTPRequest, reply: CheckedContinuation<DropboxHTTPResponse, any Error>?)] = []
+
+    init(expecting expected: Int) { self.expected = expected }
+
+    func send(_ request: DropboxHTTPRequest) async throws -> DropboxHTTPResponse {
+        try await withCheckedThrowingContinuation { reply in
+            let refuse = lock.withLock {
+                let extra = held.count >= expected
+                held.append((request, extra ? nil : reply))
+                return extra
+            }
+            if refuse { reply.resume(throwing: DropboxError.unexpectedReply) }
+        }
+    }
+
+    var requests: [DropboxHTTPRequest] { lock.withLock { held.map(\.request) } }
+
+    /// Waits, up to five seconds, until `count` requests have arrived.
+    func waitForRequests(_ count: Int) async throws {
+        for _ in 0..<5000 {
+            if lock.withLock({ held.count }) >= count { return }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail("only \(lock.withLock { held.count }) of \(count) requests arrived")
+        throw CancellationError()
+    }
+
+    func answer(_ index: Int, _ reply: ScriptedDropbox.Reply) {
+        guard let continuation = lock.withLock({ held[index].reply }) else { return XCTFail("request \(index) was refused") }
+        switch reply {
+        case let .http(status, body): continuation.resume(returning: DropboxHTTPResponse(status: status, body: Data(body.utf8)))
+        case let .fail(error): continuation.resume(throwing: error)
+        }
+    }
+}
+
+// MARK: - The screen's state
+
+@MainActor
+final class DropboxConnectionTests: XCTestCase {
+    private func connection(_ store: MemoryStore, _ dropbox: any DropboxTransport) -> DropboxConnection {
+        DropboxConnection(session: DropboxSession(appKey: key, transport: dropbox, store: store, now: { now }),
+                          signedIn: (try? store.load()) != nil)
+    }
+
+    func testNotSignedInBeforeSignInFinishes() async throws {
+        let store = MemoryStore()
+        let dropbox = SuspendingDropbox(expecting: 2)
+        let connection = connection(store, dropbox)
+        let signIn = Task {
+            await connection.signIn { page, _ in
+                let state = URLComponents(url: page, resolvingAgainstBaseURL: false)?.queryItems?
+                    .first { $0.name == "state" }?.value ?? ""
+                return URL(string: "db-abcdefgh1234567://2/token?code=c&state=\(state)")!
+            }
+        }
+        try await dropbox.waitForRequests(1)                       // the code is being traded
+        XCTAssertEqual(connection.phase, .signingIn)
+        XCTAssertFalse(connection.isSignedIn)
+        dropbox.answer(0, .http(200, #"{"access_token":"a","expires_in":14400,"refresh_token":"r"}"#))
+        try await dropbox.waitForRequests(2)                       // now the folders
+        XCTAssertEqual(connection.phase, .loadingFolders)
+        XCTAssertTrue(connection.isSignedIn)
+        dropbox.answer(1, .http(200, secondPage))
+        await signIn.value
+        XCTAssertEqual(connection.phase, .signedIn([DropboxFolder(id: "id:4", name: "Vellum", path: "/Vellum")]))
+    }
+
+    func testClosingTheSignInPageSaysCancelled() async {
+        let connection = connection(MemoryStore(), ScriptedDropbox([]))
+        await connection.signIn { _, _ in throw DropboxError.cancelled }
+        XCTAssertEqual(connection.phase, .signedOut)
+        XCTAssertEqual(connection.problem, .cancelled)
+    }
+
+    func testAFolderLoadFinishingLateCannotBringBackTheSignedInScreen() async throws {
+        let store = MemoryStore(fresh)
+        let dropbox = SuspendingDropbox(expecting: 2)
+        let connection = connection(store, dropbox)
+        let load = Task { await connection.refresh() }
+        try await dropbox.waitForRequests(1)
+        let signOut = Task { await connection.signOut() }
+        try await dropbox.waitForRequests(2)
+        XCTAssertTrue(connection.isSigningOut)
+        dropbox.answer(1, .http(200, "null"))
+        await signOut.value
+        XCTAssertEqual(connection.phase, .signedOut)
+        dropbox.answer(0, .http(200, secondPage))
+        await load.value
+        XCTAssertEqual(connection.phase, .signedOut)
+        XCTAssertNil(connection.problem)
+        XCTAssertNil(try store.load())
+    }
+
+    func testSigningOutOfflineSaysDropboxWasntTold() async {
+        let store = MemoryStore(fresh)
+        let connection = connection(store, ScriptedDropbox([.http(200, secondPage), .fail(.offline)]))
+        await connection.refresh()
+        await connection.signOut()
+        XCTAssertEqual(connection.phase, .signedOut)
+        XCTAssertEqual(connection.notice, DropboxSignOutOutcome.notRevoked(.offline).message)
+        XCTAssertNil(try store.load())
+    }
+
+    func testAKeychainThatWontDeleteKeepsTheSignedInScreenAndSaysSo() async {
+        struct Stuck: Error {}
+        let store = MemoryStore(fresh, deleteFailure: Stuck())
+        let connection = connection(store, ScriptedDropbox([.http(200, secondPage), .http(200, "null")]))
+        await connection.refresh()
+        await connection.signOut()
+        XCTAssertEqual(connection.phase, .signedIn([DropboxFolder(id: "id:4", name: "Vellum", path: "/Vellum")]))
+        XCTAssertEqual(connection.problem, .couldNotRemoveSignIn)
+        XCTAssertNil(connection.notice)
     }
 
     private func assertThrows(_ expected: DropboxError, file: StaticString = #filePath, line: UInt = #line,

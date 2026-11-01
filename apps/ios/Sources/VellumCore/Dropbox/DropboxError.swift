@@ -22,6 +22,8 @@ public enum DropboxError: Error, Equatable, Sendable {
     case unexpectedReply
     /// The Keychain would not keep the tokens.
     case couldNotKeepSignIn
+    /// The Keychain would not delete the tokens, so Vellum is still signed in on the Duo.
+    case couldNotRemoveSignIn
 
     /// One or two sentences for the screen.
     public var message: String {
@@ -48,6 +50,8 @@ public enum DropboxError: Error, Equatable, Sendable {
             "Dropbox sent a reply Vellum couldn't read. Try again."
         case .couldNotKeepSignIn:
             "Vellum couldn't keep your Dropbox sign-in on the Duo. Try connecting again."
+        case .couldNotRemoveSignIn:
+            "Vellum couldn't remove the Dropbox sign-in from this Duo, so it is still signed in. Restart Vellum and sign out again."
         }
     }
 }

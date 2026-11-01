@@ -83,6 +83,17 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     public var inkTool: InkTool? { descriptor.inkTool }
     public var prompt: String { descriptor.prompt }
 
+    /// The status bar's prompt with Draw with finger on (#24): the pen and highlighter say a finger draws too. The
+    /// other tools' prompts don't name what touches the glass, so they are unchanged.
+    public func prompt(fingerDraws: Bool) -> String {
+        guard fingerDraws else { return prompt }
+        switch self {
+        case .pen: return "Draw with Pencil or finger"
+        case .highlighter: return "Highlight: Pencil or finger"
+        default: return prompt
+        }
+    }
+
     public var isAvailable: Bool { comingIn == nil }
 
     /// The accessibility hint: what the tool does, or that it is not built yet.

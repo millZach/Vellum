@@ -74,7 +74,22 @@ final class CanvasToolTests: XCTestCase {
 final class CanvasToolPromptTests: XCTestCase {
     func testTheWorkingToolsPromptsFitTheStatusBar() {
         for tool in CanvasTool.allCases where tool.isAvailable {
-            XCTAssertLessThanOrEqual(tool.prompt.count, 28, tool.prompt)
+            for fingerDraws in [false, true] {
+                let prompt = tool.prompt(fingerDraws: fingerDraws)
+                XCTAssertLessThanOrEqual(prompt.count, 28, prompt)
+            }
+        }
+    }
+
+    /// Draw with finger (#24): with the switch on, the pen and highlighter don't tell Zach to use the Pencil only.
+    func testWithDrawWithFingerOnThePromptsNameTheFinger() {
+        XCTAssertEqual(CanvasTool.pen.prompt(fingerDraws: false), "Draw with the Pencil")
+        XCTAssertEqual(CanvasTool.highlighter.prompt(fingerDraws: false), "Highlight with the Pencil")
+        for tool in [CanvasTool.pen, .highlighter] {
+            XCTAssertTrue(tool.prompt(fingerDraws: true).contains("finger"), tool.prompt(fingerDraws: true))
+        }
+        for tool in CanvasTool.allCases where tool != .pen && tool != .highlighter {
+            XCTAssertEqual(tool.prompt(fingerDraws: true), tool.prompt)
         }
     }
 }

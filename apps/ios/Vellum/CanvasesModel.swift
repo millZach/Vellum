@@ -78,7 +78,8 @@ final class CanvasesModel {
         }
     }
 
-    func open(_ id: UUID, startingView: CanvasEditor.StartingView = .everything) async {
+    /// Opens a canvas on the canvas screen: by default zoomed to everything on it, or at the origin when it is empty.
+    func open(_ id: UUID, startingView: CanvasEditor.StartingView? = nil) async {
         guard let library, opening == nil else { return }
         opening = id
         defer { opening = nil }
@@ -86,7 +87,7 @@ final class CanvasesModel {
             let (manifest, session, saver) = try await CanvasSaver.open(id, in: library)
             let canvas = VellumCore.Canvas(name: manifest.name, units: manifest.canvasUnits)
             openEditor = CanvasEditor(canvas: canvas, session: session, saver: saver,
-                                      startingView: session.ink.isEmpty ? .origin : startingView)
+                                      startingView: startingView ?? (session.ink.isEmpty ? .origin : .everything))
             selection = id
             lastOpened = id
         } catch {

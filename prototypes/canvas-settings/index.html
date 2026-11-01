@@ -1,0 +1,163 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway. Where should Settings (Draw with finger, Dropbox) open from on the canvas screen?
+  Four variants on the drafting-rail canvas screen as built, switchable with ?variant=A|B|C|D and the bar at the bottom:
+  A gear in the top bar · B gear at the foot of the tool rail · C the appearance menu grows a Draw with finger switch
+  and "All settings…" · D as today: only the Drawings tab's gear. Nothing is saved.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Vellum: where Settings opens (prototype)</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { --ink:#1d1d1f; --mute:#6b6b70; --line:#d9d4c9; --paper:#f3efe6; --panel:rgba(252,250,246,.95); --accent:#2f5d8a; --red:#d6342c; --green:#1f9d55; --blue:#2563eb; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:#1b1b1d; overflow:hidden; font:13px/1.3 -apple-system,system-ui,"SF Pro Text",Segoe UI,sans-serif; color:var(--ink); }
+  #wrap { position:absolute; inset:0 0 44px 0; display:flex; align-items:center; justify-content:center; }
+  #stage { position:absolute; width:951px; height:669px; transform-origin:0 0; background:var(--paper); overflow:hidden; border-radius:14px;
+           background-image:linear-gradient(rgba(120,110,90,.10) 1px,transparent 1px),linear-gradient(90deg,rgba(120,110,90,.10) 1px,transparent 1px); background-size:24px 24px; }
+  button { font:inherit; color:inherit; border:0; background:none; cursor:pointer; }
+  .panel { position:absolute; background:var(--panel); border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.08); }
+  .ic { display:inline-flex; align-items:center; justify-content:center; width:34px; height:32px; border-radius:8px; font-size:17px; }
+  .tool { width:42px; height:38px; border-radius:9px; font-size:18px; display:flex; align-items:center; justify-content:center; }
+  .on { background:#e6edf5; color:var(--accent); }
+  .new { outline:2.5px solid #f59e0b; outline-offset:1px; animation:pulse 1.6s ease-in-out 3; }
+  @keyframes pulse { 50% { outline-color:transparent; } }
+  .chip { width:20px; height:20px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--line); }
+  .ghost { border:1px solid var(--line); border-radius:9px; padding:6px 11px; background:#fff; }
+  .primary { background:var(--accent); color:#fff; border-radius:9px; padding:7px 12px; font-weight:600; }
+  .menu { position:absolute; background:#fff; border-radius:12px; box-shadow:0 8px 30px rgba(0,0,0,.22); min-width:230px; padding:5px 0; z-index:5; }
+  .menu .row { display:flex; align-items:center; gap:10px; padding:9px 14px; width:100%; text-align:left; font-size:14px; }
+  .menu .row:hover { background:#f2f2f4; }
+  .menu hr { border:0; border-top:1px solid #e5e5ea; margin:4px 0; }
+  .menu .sub { font-size:11.5px; color:var(--mute); padding:0 14px 6px 40px; line-height:1.35; }
+  .sw { margin-left:auto; width:44px; height:26px; border-radius:13px; background:#d1d1d6; position:relative; transition:background .15s; flex:none; }
+  .sw::after { content:""; position:absolute; top:2px; left:2px; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); transition:left .15s; }
+  .sw.onsw { background:#34c759; } .sw.onsw::after { left:20px; }
+  #scrim { position:absolute; inset:0; background:rgba(0,0,0,.25); display:none; z-index:8; }
+  #sheet { position:absolute; left:50%; top:40px; width:520px; transform:translateX(-50%); background:#f2f2f7; border-radius:14px; display:none; z-index:9; box-shadow:0 10px 40px rgba(0,0,0,.3); }
+  #sheet h2 { margin:0; font-size:16px; text-align:center; padding:14px; position:relative; }
+  #sheet h2 button { position:absolute; right:14px; top:12px; color:var(--accent); font-weight:600; font-size:15px; }
+  .grp { margin:0 16px 4px; font-size:12px; color:var(--mute); text-transform:uppercase; padding:10px 4px 6px; }
+  .card { margin:0 16px; background:#fff; border-radius:10px; }
+  .card .r { display:flex; align-items:center; padding:11px 14px; font-size:15px; border-bottom:1px solid #eee; }
+  .card .r:last-child { border-bottom:0; }
+  .foot { margin:6px 20px 0; font-size:12px; color:var(--mute); line-height:1.4; }
+  #bar { position:fixed; left:50%; bottom:6px; transform:translateX(-50%); display:flex; gap:8px; align-items:center; background:#000; color:#fff; padding:5px 10px; border-radius:20px; font-size:13px; white-space:nowrap; max-width:96vw; }
+  #bar button { color:#fff; font-size:15px; width:30px; height:28px; border-radius:14px; background:#333; }
+  #bar .st { color:#aaa; overflow:hidden; text-overflow:ellipsis; }
+  #drawings { position:absolute; left:0; top:0; right:92px; bottom:0; background:#f2f2f7; display:none; }
+</style>
+</head>
+<body>
+<div id="wrap"><div id="stage">
+  <svg id="ink" width="951" height="669" style="position:absolute;inset:0">
+    <path d="M250 300 C 320 240, 380 360, 450 300 S 580 250, 640 310" stroke="#3a3a3a" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+    <path d="M300 420 h170 v80 h-170 z" stroke="#d6342c" stroke-width="2.2" fill="none"/>
+    <text x="305" y="400" font-size="15" fill="#2563eb" font-family="Bradley Hand, cursive">check valve V-12</text>
+  </svg>
+  <div id="drawings"></div>
+  <div id="chrome"></div>
+  <div id="scrim"></div>
+  <div id="sheet"></div>
+</div></div>
+<div id="bar"><button id="prev" aria-label="Previous variant">◀</button><b id="vlabel"></b><button id="next" aria-label="Next variant">▶</button><span class="st" id="vstate"></span></div>
+<script>
+const VARIANTS = {
+  A: 'Gear in the top bar',
+  B: 'Gear at the foot of the tool rail',
+  C: 'Switch inside the appearance menu',
+  D: 'As today: Drawings tab only',
+};
+const p = new URLSearchParams(location.search);
+const S = { variant: VARIANTS[p.get('variant')] ? p.get('variant') : 'A', finger: false, appearance: 'System', menu: false, sheet: false, tab: 'canvases', last: 'Opened' };
+const keys = Object.keys(VARIANTS);
+const $ = id => document.getElementById(id);
+
+function prompt() { return S.finger ? 'Draw with Pencil or finger' : 'Draw with the Pencil'; }
+
+function chrome() {
+  const v = S.variant;
+  const gearTop = v === 'A' ? `<button class="ic new" data-act="sheet" title="Settings" aria-label="Settings">⚙︎</button>` : '';
+  const gearRail = v === 'B' ? `<div style="height:1px;width:32px;background:var(--line);margin:6px 0"></div><button class="tool new" data-act="sheet" title="Settings" aria-label="Settings">⚙︎</button>` : '';
+  const appearanceIcon = { System:'◐', Light:'☀︎', Dark:'☾' }[S.appearance];
+  let h = `
+  <div class="panel" style="left:8px;top:8px;bottom:8px;width:54px;border-radius:14px;display:flex;flex-direction:column;align-items:center;padding:6px 0;gap:2px">
+    <button class="tool on" title="Pen">✎</button><button class="tool" title="Highlighter">▍</button><button class="tool" title="Eraser">⌫</button><button class="tool" title="Line and shape">╱</button>
+    <div style="height:1px;width:32px;background:var(--line);margin:4px 0"></div>
+    <button class="tool" title="Lasso">◌</button><button class="tool" title="Text box">T</button>
+    <div style="height:1px;width:32px;background:var(--line);margin:4px 0"></div>
+    <button class="tool" title="Measure">↔</button><button class="tool" title="Dimension">⟷</button><button class="tool" title="Frame">▭</button><button class="tool" title="Window">⬚</button>
+    <div style="flex:1"></div>
+    <div style="display:flex;flex-direction:column;gap:9px;align-items:center;margin-bottom:4px">
+      <span class="chip" style="background:#3a3a3a;box-shadow:0 0 0 2px var(--ink)"></span><span class="chip" style="background:var(--red)"></span><span class="chip" style="background:var(--green)"></span><span class="chip" style="background:var(--blue)"></span></div>
+    ${gearRail}
+  </div>
+  <div class="panel" style="left:70px;top:8px;height:40px;border-radius:12px;display:flex;align-items:center;gap:8px;padding:0 10px">
+    <button class="ic" title="Canvases">‹</button><b>Boiler 4 walkdown</b><span class="ghost" style="padding:3px 8px">ft-in ▾</span>
+    <button class="ic ${v==='C'?'new':''}" data-act="menu" title="Appearance" aria-label="Appearance">${appearanceIcon}</button>
+    <button class="ic" title="Undo">↶</button><button class="ic" title="Redo">↷</button>${gearTop}
+  </div>
+  <div style="position:absolute;right:92px;top:8px;display:flex;gap:8px">
+    <button class="ghost">＋ Add sheet</button><button class="ghost">● Record</button><button class="primary">➤ Send</button></div>
+  <div class="panel" style="left:70px;right:92px;bottom:8px;height:34px;border-radius:11px;display:flex;align-items:center;gap:14px;padding:0 12px;font-size:12px;color:#444">
+    <span style="min-width:120px">12′-4″, 3′-1″</span><span>├──┤ 5′</span><span style="flex:1;color:#777" id="prompt">${prompt()}</span><span style="color:#777">0 sheets · 0 frames</span><span style="color:#2f7a4f">Saved</span></div>
+  <div class="panel" style="right:8px;top:50%;transform:translateY(-50%);width:72px;border-radius:22px;display:flex;flex-direction:column;gap:4px;padding:8px 4px">
+    ${[['canvases','▦','Canvases'],['drawings','▤','Drawings'],['jobs','✉︎','Jobs'],['meetings','◉','Meetings']].map(([t,i,l]) =>
+      `<button data-act="tab" data-t="${t}" class="${S.tab===t?'on':''} ${v==='D'&&t==='drawings'?'new':''}" style="display:flex;flex-direction:column;align-items:center;padding:7px 0;border-radius:14px;font-size:10.5px;color:#555"><span style="font-size:18px">${i}</span>${l}</button>`).join('')}
+  </div>`;
+  if (S.menu) {
+    const row = (a) => `<button class="row" data-act="appearance" data-a="${a}">${{System:'◐',Light:'☀︎',Dark:'☾'}[a]} ${a}<span style="margin-left:auto">${S.appearance===a?'✓':''}</span></button>`;
+    h += `<div class="menu" style="left:240px;top:52px">${row('System')}${row('Light')}${row('Dark')}`;
+    if (v === 'C') h += `<hr><button class="row" data-act="finger">☝︎ Draw with finger<span class="sw ${S.finger?'onsw':''}"></span></button>
+      <div class="sub">${S.finger ? 'One finger draws. Two fingers pan and pinch.' : 'Only the Pencil draws. Fingers pan and pinch.'}</div>
+      <hr><button class="row" data-act="sheet">⚙︎ All settings…</button>`;
+    h += `</div>`;
+  }
+  $('chrome').innerHTML = h;
+  $('drawings').style.display = S.tab === 'drawings' ? 'block' : 'none';
+  $('drawings').innerHTML = `<div style="display:flex;align-items:center;padding:16px 20px"><b style="font-size:26px">Drawings</b><button class="ic" data-act="sheet" style="margin-left:auto;color:var(--accent);font-size:20px" aria-label="Settings">⚙︎</button></div>
+    <div class="card" style="margin:0 20px">${['Plant 3','Boiler 4','Clients','Archive'].map(f => `<div class="r">📁&nbsp; ${f}</div>`).join('')}</div>`;
+  $('ink').style.display = S.tab === 'canvases' ? 'block' : 'none';
+  sheet();
+  $('vlabel').textContent = `${S.variant}: ${VARIANTS[S.variant]}`;
+  $('vstate').textContent = `Draw with finger: ${S.finger ? 'on' : 'off'} · Appearance: ${S.appearance} · ${S.last}`;
+}
+
+function sheet() {
+  $('scrim').style.display = $('sheet').style.display = S.sheet ? 'block' : 'none';
+  if (!S.sheet) return;
+  $('sheet').innerHTML = `<h2>Settings<button data-act="close">Done</button></h2>
+    <div class="grp">Drawing</div>
+    <div class="card"><button class="r" data-act="finger" style="width:100%;text-align:left">Draw with finger<span class="sw ${S.finger?'onsw':''}"></span></button></div>
+    <div class="foot">${S.finger ? 'One finger draws, erases or uses the selected tool. Two fingers pan and pinch. The Apple Pencil always draws.' : 'Only the Apple Pencil draws. Fingers pan and pinch.'}</div>
+    <div class="grp">Dropbox</div>
+    <div class="card"><div class="r">Connected as Zach</div><div class="r" style="color:var(--red)">Sign Out</div></div><div style="height:18px"></div>`;
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) { if (S.menu && !e.target.closest('.menu')) { S.menu = false; chrome(); } return; }
+  const a = b.dataset.act;
+  if (a === 'menu') S.menu = !S.menu;
+  if (a === 'appearance') { S.appearance = b.dataset.a; S.menu = false; S.last = `Appearance set to ${S.appearance}`; }
+  if (a === 'finger') { S.finger = !S.finger; S.last = `Switch turned ${S.finger ? 'on' : 'off'}`; }
+  if (a === 'sheet') { S.sheet = true; S.menu = false; S.last = 'Settings opened'; }
+  if (a === 'close') { S.sheet = false; S.last = 'Settings closed'; }
+  if (a === 'tab') { S.tab = b.dataset.t === 'drawings' ? 'drawings' : 'canvases'; S.last = `${b.dataset.t} tab`; }
+  chrome();
+});
+$('scrim').onclick = () => { S.sheet = false; chrome(); };
+
+function setVariant(v) { S.variant = v; S.menu = false; S.sheet = false; S.tab = 'canvases'; S.last = 'Variant shown'; const u = new URL(location); u.searchParams.set('variant', v); history.replaceState(null, '', u); chrome(); }
+$('prev').onclick = () => setVariant(keys[(keys.indexOf(S.variant) + keys.length - 1) % keys.length]);
+$('next').onclick = () => setVariant(keys[(keys.indexOf(S.variant) + 1) % keys.length]);
+addEventListener('keydown', e => { if (e.key === 'ArrowLeft') $('prev').click(); if (e.key === 'ArrowRight') $('next').click(); });
+
+function fit() { const w = innerWidth, h = innerHeight - 44, s = Math.min(w / 951, h / 669, 1.6); const st = $('stage');
+  st.style.transform = `scale(${s})`; st.style.left = `${(w - 951 * s) / 2}px`; st.style.top = `${(h - 669 * s) / 2}px`; }
+$('wrap').style.display = 'block'; addEventListener('resize', fit); fit(); chrome();
+</script>
+</body>
+</html>

@@ -83,9 +83,9 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// What the tool expects next, for the status bar.
     public var prompt: String {
         switch self {
-        case .pen: "Draw with the Pencil. Fingers pan and pinch"
+        case .pen: "Draw with the Pencil"
         case .highlighter: "Highlight with the Pencil"
-        case .eraser: "Touch ink with the Pencil to erase whole strokes"
+        case .eraser: "Touch ink to erase a stroke"
         case .lineAndShape: "Draw a straight line"
         case .lasso: "Circle ink or text to select it"
         case .textBox: "Tap where the text box goes"

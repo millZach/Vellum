@@ -56,3 +56,13 @@ final class CanvasToolTests: XCTestCase {
 private extension CanvasTool {
     static var lassoTicket: Int? { CanvasTool.lasso.comingIn }
 }
+
+/// The status bar leaves the prompt about 170 points between the scale bar and the sheet count; a prompt longer than
+/// about 28 characters is cut off there.
+final class CanvasToolPromptTests: XCTestCase {
+    func testTheWorkingToolsPromptsFitTheStatusBar() {
+        for tool in CanvasTool.allCases where tool.isAvailable {
+            XCTAssertLessThanOrEqual(tool.prompt.count, 28, tool.prompt)
+        }
+    }
+}

@@ -1,14 +1,20 @@
 #!/bin/sh
 # Archives the Vellum app, signs it and uploads it to App Store Connect for TestFlight, then waits until App Store
 # Connect has processed the build. Run by .github/workflows/testflight.yml on a macOS runner.
-# Needs KEY_ID, ISSUER_ID and TEAM_ID in the environment, the App Store Connect key (.p8) at KEY_PATH, and a
-# BUILD_NUMBER that rises with every upload. The team reaches the build only as a build setting here; no committed
-# file names it.
+# Needs KEY_ID, ISSUER_ID, TEAM_ID and DROPBOX_APP_KEY in the environment, the App Store Connect key (.p8) at
+# KEY_PATH, and a BUILD_NUMBER that rises with every upload. The team reaches the build only as a build setting here; no committed
+# file names it, and the Dropbox app key reaches the app the same way (ADR-0013).
 # Signing is Xcode's automatic signing with Apple's cloud-managed distribution certificate, so no certificate or
 # profile is kept anywhere; the key needs the Admin role for that.
 set -eu
 cd "$(dirname "$0")/.."
-: "${KEY_ID:?}" "${ISSUER_ID:?}" "${TEAM_ID:?}" "${KEY_PATH:?}" "${BUILD_NUMBER:?}"
+: "${KEY_ID:?}" "${ISSUER_ID:?}" "${TEAM_ID:?}" "${KEY_PATH:?}" "${BUILD_NUMBER:?}" "${DROPBOX_APP_KEY:?}"
+# A TestFlight build always reaches Dropbox: refuse a key not shaped like a Dropbox app key rather than ship a build
+# that says Dropbox isn't set up. The key is never printed.
+if ! printf '%s' "$DROPBOX_APP_KEY" | grep -Eq '^[a-z0-9]{10,24}$'; then
+  echo "DROPBOX_APP_KEY is not shaped like a Dropbox app key (10 to 24 lowercase letters and digits)" >&2
+  exit 1
+fi
 out=.build-native
 archive="$out/Vellum.xcarchive"
 
@@ -23,6 +29,7 @@ sh Scripts/generate-project.sh
 xcodebuild -project Vellum.xcodeproj -scheme Vellum -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$archive" \
   DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGNING_ALLOWED=NO CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+  DROPBOX_APP_KEY="$DROPBOX_APP_KEY" \
   archive
 
 plist="$archive/Products/Applications/Vellum.app/Info.plist"
@@ -30,6 +37,14 @@ for key in CFBundleIdentifier CFBundleShortVersionString CFBundleVersion CFBundl
   ITSAppUsesNonExemptEncryption; do
   printf '%s = %s\n' "$key" "$(/usr/libexec/PlistBuddy -c "Print :$key" "$plist")"
 done
+# The app's Dropbox key and callback scheme came from the secret, checked without printing them.
+if [ "$(/usr/libexec/PlistBuddy -c 'Print :DropboxAppKey' "$plist")" = "$DROPBOX_APP_KEY" ] &&
+   [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$plist")" = "db-$DROPBOX_APP_KEY" ]; then
+  echo "DropboxAppKey and its db- callback scheme match the DROPBOX_APP_KEY secret"
+else
+  echo "The archived Info.plist does not carry the DROPBOX_APP_KEY secret" >&2
+  exit 1
+fi
 
 # destination "upload" sends the signed build straight to App Store Connect; nothing is kept on the runner.
 cat > "$out/ExportOptions.plist" <<PLIST

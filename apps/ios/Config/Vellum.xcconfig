@@ -1,0 +1,14 @@
+// Build settings for every Vellum build, Debug and Release (project.yml names this file).
+//
+// The Dropbox app key reaches the app only as the DROPBOX_APP_KEY build setting (ADR-0013). Every build starts with
+// this placeholder and says Dropbox isn't set up. Scripts/testflight.sh overrides it on the xcodebuild command line with
+// the DROPBOX_APP_KEY repository secret. A local build on a Mac sets it in apps/ios/Secrets.xcconfig, which .gitignore
+// lists, so the key never enters this public repository:
+//
+//     DROPBOX_APP_KEY = <the app key from the Dropbox app console>
+//
+// docs/dropbox.md says where the key comes from.
+DROPBOX_APP_KEY = not-set-up
+
+// Optional: absent in CI and on any checkout without a local key.
+#include? "../Secrets.xcconfig"

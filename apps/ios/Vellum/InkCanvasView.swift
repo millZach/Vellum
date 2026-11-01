@@ -86,6 +86,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         liveLayer.frame = bounds
         editor.viewDidResize(width: Double(bounds.width), height: Double(bounds.height))
         setNeedsDisplay()
+        #if DEBUG
+        DebugBenchmark.attach(self, editor: editor)
+        #endif
     }
 
     // MARK: Drawing
@@ -170,29 +173,18 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         touch.type == .pencil || (Self.fingerDraws && touch.type == .direct)
     }
 
-    private func canvasPoint(_ touch: UITouch) -> CanvasPoint {
-        let p = touch.preciseLocation(in: self)
-        return editor.viewport.canvasPoint(for: ScreenPoint(x: Double(p.x), y: Double(p.y)))
+    private func canvasPoint(_ p: CGPoint) -> CanvasPoint {
+        editor.viewport.canvasPoint(for: ScreenPoint(x: Double(p.x), y: Double(p.y)))
     }
 
+    private func location(_ touch: UITouch) -> CGPoint { touch.preciseLocation(in: self) }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard liveTouch == nil, let touch = touches.first(where: draws) else {
+        guard liveTouch == nil, let touch = touches.first(where: draws), beginInput(at: location(touch)) else {
             super.touchesBegan(touches, with: event)
             return
         }
-        let point = canvasPoint(touch)
-        editor.penPosition = point
-        if editor.tool == .eraser {
-            liveTouch = touch
-            erasing = true
-            editor.beginEraserSweep()
-            editor.erase(at: point)
-        } else if let stroke = editor.beginStroke(at: point) {
-            liveTouch = touch
-            liveStroke = stroke
-            styleLiveLayer(for: stroke)
-            updateLiveLayer(predicted: [])
-        }
+        liveTouch = touch
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -200,11 +192,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             super.touchesMoved(touches, with: event)
             return
         }
-        consume(event?.coalescedTouches(for: touch) ?? [touch], ending: false)
-        if !erasing {
-            let predicted = (event?.predictedTouches(for: touch) ?? []).map(canvasPoint)
-            updateLiveLayer(predicted: predicted)
-        }
+        moveInput(samples: (event?.coalescedTouches(for: touch) ?? [touch]).map(location),
+                  predicted: (event?.predictedTouches(for: touch) ?? []).map(location))
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -213,8 +202,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             return
         }
         // The final batch can hold several samples since the last move: all of them are the stroke's tail.
-        consume(event?.coalescedTouches(for: touch) ?? [touch], ending: true)
-        finishStroke(keep: true)
+        endInput(samples: (event?.coalescedTouches(for: touch) ?? [touch]).map(location), keep: true)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -225,13 +213,45 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         // A Pencil stroke the system interrupts is still Zach's ink: keep what was drawn, tail included. Only a finger
         // stroke on the simulator, cancelled because it turned into a two-finger pan, is dropped.
         let keep = touch.type == .pencil
-        if keep { consume(event?.coalescedTouches(for: touch) ?? [touch], ending: true) }
+        endInput(samples: keep ? (event?.coalescedTouches(for: touch) ?? [touch]).map(location) : [], keep: keep)
+    }
+
+    /// The Pencil touched down at a screen point: starts a stroke or an eraser sweep. False when the tool in hand
+    /// does neither.
+    func beginInput(at location: CGPoint) -> Bool {
+        let point = canvasPoint(location)
+        editor.penPosition = point
+        if editor.tool == .eraser {
+            erasing = true
+            editor.beginEraserSweep()
+            editor.erase(at: point)
+            return true
+        } else if let stroke = editor.beginStroke(at: point) {
+            liveStroke = stroke
+            styleLiveLayer(for: stroke)
+            updateLiveLayer(predicted: [])
+            return true
+        }
+        return false
+    }
+
+    /// The Pencil moved: its coalesced samples since the last move, and where it is predicted to go.
+    func moveInput(samples: [CGPoint], predicted: [CGPoint]) {
+        consume(samples, ending: false)
+        if !erasing {
+            updateLiveLayer(predicted: predicted.map(canvasPoint))
+        }
+    }
+
+    /// The Pencil lifted (or was interrupted): its last samples, and whether to keep the stroke.
+    func endInput(samples: [CGPoint], keep: Bool) {
+        if !samples.isEmpty { consume(samples, ending: true) }
         finishStroke(keep: keep)
     }
 
     /// Feeds every one of the Pencil's samples to the eraser or the stroke. Samples closer than half a screen point
     /// are thinned, except the last one when the Pencil lifts, so the stroke ends where the Pencil left the glass.
-    private func consume(_ samples: [UITouch], ending: Bool) {
+    private func consume(_ samples: [CGPoint], ending: Bool) {
         let spacing = editor.viewport.canvasLength(ofScreen: 0.5)
         for (i, sample) in samples.enumerated() {
             let point = canvasPoint(sample)
@@ -287,7 +307,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             lastPanTranslation = .zero
         case .changed:
             let t = pan.translation(in: self)
-            editor.viewport.pan(dx: Double(t.x - lastPanTranslation.x), dy: Double(t.y - lastPanTranslation.y))
+            panBy(dx: t.x - lastPanTranslation.x, dy: t.y - lastPanTranslation.y)
             lastPanTranslation = t
         default:
             break
@@ -299,13 +319,27 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         case .began:
             lastPinchScale = 1
         case .changed:
-            let at = pinch.location(in: self)
-            editor.viewport.zoom(by: Double(pinch.scale / lastPinchScale), about: ScreenPoint(x: Double(at.x), y: Double(at.y)))
+            zoomBy(pinch.scale / lastPinchScale, about: pinch.location(in: self))
             lastPinchScale = pinch.scale
         default:
             break
         }
     }
+
+    /// Moves the canvas with the fingers, by a distance in screen points.
+    func panBy(dx: CGFloat, dy: CGFloat) {
+        editor.viewport.pan(dx: Double(dx), dy: Double(dy))
+    }
+
+    /// Zooms by a factor about a screen point, as a pinch does.
+    func zoomBy(_ factor: CGFloat, about at: CGPoint) {
+        editor.viewport.zoom(by: Double(factor), about: ScreenPoint(x: Double(at.x), y: Double(at.y)))
+    }
+
+    #if DEBUG
+    /// Tile renders still in flight, for the Debug benchmark; this renderer draws synchronously.
+    var pendingRenderCount: Int { 0 }
+    #endif
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {

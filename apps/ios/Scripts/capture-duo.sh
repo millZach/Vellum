@@ -57,10 +57,32 @@ for appearance in light dark; do
   capture canvas-empty --ui-tab canvases
   capture canvas-everything --ui-tab canvases --ui-fixture
   capture canvas-closeup --ui-tab canvases --ui-fixture --ui-zoom closeup
+  # The made-up 10,000-stroke canvas (#21), zoomed to everything, given longer for its first render.
+  saved_wait=${WAIT:-6}; WAIT=${LARGE_WAIT:-12}
+  capture canvas-large --ui-tab canvases --ui-fixture-large
+  WAIT=$saved_wait
   for tab in drawings jobs meetings; do
     capture "$tab" --ui-tab "$tab"
   done
 done
+
+# Frame timing on the 10,000-stroke canvas (#21): the Debug-only benchmark pans, pinches, draws and erases through the
+# canvas view's input paths and writes benchmark.txt to the app's Documents folder. Simulator numbers are indicative.
+xcrun simctl ui "$udid" appearance light
+xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+rm -f "$data/Documents/benchmark.txt" "$data/Documents/benchmark.json"
+xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-fixture-large --ui-benchmark >/dev/null
+waited=0
+while [ "$waited" -lt 180 ] && ! grep -q '^done' "$data/Documents/benchmark.txt" 2>/dev/null; do
+  sleep 5; waited=$((waited + 5))
+done
+cp "$data/Documents/benchmark.txt" "$out/benchmark.txt" 2>/dev/null || echo "The benchmark wrote no results" > "$out/benchmark.txt"
+cp "$data/Documents/benchmark.json" "$out/benchmark.json" 2>/dev/null || true
+echo "Benchmark (simulator, indicative only):"
+cat "$out/benchmark.txt"
+xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
 
 # The Home Screen, to show the installed app icon. Vellum has to be on the first page: if SpringBoard put it on a later
 # page, it swaps places with the first page's first app in SpringBoard's saved layout while the simulator is shut down.

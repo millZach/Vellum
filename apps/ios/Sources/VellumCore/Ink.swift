@@ -272,10 +272,10 @@ public struct InkSession: Sendable {
     public mutating func beginEraserSweep() { sweepHasEntry = false }
 
     /// Erases every stroke within `tolerance` of a point, whole, as part of the current sweep. Returns the strokes
-    /// erased.
+    /// erased. An `index` kept in step with this ink finds them without looking at every stroke.
     @discardableResult
-    public mutating func erase(at point: CanvasPoint, tolerance: Length) -> [InkStroke] {
-        let hit = ink.strokes(hitAt: point, tolerance: tolerance)
+    public mutating func erase(at point: CanvasPoint, tolerance: Length, index: InkIndex? = nil) -> [InkStroke] {
+        let hit = index?.strokes(hitAt: point, tolerance: tolerance) ?? ink.strokes(hitAt: point, tolerance: tolerance)
         var removed: [(index: Int, stroke: InkStroke)] = []
         for stroke in hit {
             guard let index = ink.index(of: stroke.id) else { continue }

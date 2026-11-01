@@ -31,9 +31,13 @@ struct RootView: View {
     }
 
     /// A new, empty canvas. Debug builds accept `--ui-fixture` to open the made-up fixture canvas instead, and
-    /// `--ui-zoom closeup` to open it close up on its valve rather than on everything.
+    /// `--ui-zoom closeup` to open it close up on its valve rather than on everything; `--ui-fixture-large` opens the
+    /// made-up 10,000-stroke canvas for measuring the renderer.
     private static func launchEditor() -> CanvasEditor {
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-fixture-large") {
+            return CanvasEditor(canvas: DebugFixture.largeCanvas, startingView: .everything)
+        }
         if ProcessInfo.processInfo.arguments.contains("--ui-fixture") {
             let closeUp = launchArgument("--ui-zoom") == "closeup"
             return CanvasEditor(canvas: DebugFixture.canvas,

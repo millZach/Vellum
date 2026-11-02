@@ -86,8 +86,9 @@ jobs:
   duo-captures:
     name: Duo simulator captures
     runs-on: xcode-27
-    # The #7 captures (snap, lasso, moved selection, text, in light and dark) pushed the job past 30 minutes.
-    timeout-minutes: 45
+    # The #7 captures (snap, lasso, moved selection, text, in light and dark) pushed the job past 30 minutes, and
+    # the #8 captures (measure, dimension, loupe, frame, window) take it to 34-46 minutes depending on the runner.
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:

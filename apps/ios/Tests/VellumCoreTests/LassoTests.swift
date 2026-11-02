@@ -37,6 +37,14 @@ final class LassoTests: XCTestCase {
         XCTAssertEqual(Lasso.insideShare, 0.5)
     }
 
+    /// A two-point line (a snapped line, or a pipe) is judged by how much of its length is inside, not by its ends.
+    func testASparseStrokeIsJudgedAlongItsLength() throws {
+        let lasso = try XCTUnwrap(Lasso(squareLoop()))
+        XCTAssertFalse(lasso.selects(stroke(1, from: (-20, 5), to: (8, 5), points: 2)), "one end inside, a quarter of it")
+        XCTAssertTrue(lasso.selects(stroke(2, from: (2, 5), to: (13, 5), points: 2)), "most of it inside")
+        XCTAssertTrue(lasso.selects(stroke(3, from: (2, 2), to: (8, 2), points: 2)))
+    }
+
     func testATextBoxIsSelectedWhenItsCentreIsInside() throws {
         let lasso = try XCTUnwrap(Lasso(squareLoop()))
         let inside = TextBox(id: TextBoxID(1), origin: p(6, 4), size: CanvasSize(width: .inches(6), height: .inches(2)),

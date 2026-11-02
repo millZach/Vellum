@@ -136,8 +136,8 @@ final class SelectionOverlay {
     }
 }
 
-/// The selection's menu: how many things are selected, Duplicate and Delete. Dark in both modes, as the prototype's
-/// pop-up is.
+/// The selection's menu: how many things are selected, Duplicate and Delete. Dark, as the prototype's pop-up is, and a
+/// lighter grey on the dark canvas so it stands off it.
 @MainActor
 final class SelectionMenu: UIView {
     private let countLabel = UILabel()
@@ -152,7 +152,9 @@ final class SelectionMenu: UIView {
         duplicateAction = duplicate
         deleteAction = delete
         super.init(frame: .zero)
-        backgroundColor = UIColor(hex: 0x1D1D1F)
+        backgroundColor = UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(hex: 0x3A3B40) : UIColor(hex: 0x1D1D1F)
+        }
         layer.cornerRadius = 10
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.18

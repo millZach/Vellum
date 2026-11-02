@@ -60,11 +60,11 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
                        help: "Draw a line, a rectangle or a circle; it straightens when you lift or hold still")
         case .lasso:
             Descriptor(title: "Lasso", systemImage: "lasso", group: .selectionAndText, comingIn: nil, inkTool: nil,
-                       prompt: "Circle ink or text to select",
+                       prompt: "Loop ink or text to select",
                        help: "Draw a loop around ink or text to select it, then move, resize, duplicate or delete it")
         case .textBox:
             Descriptor(title: "Text box", systemImage: "character.textbox", group: .selectionAndText, comingIn: nil,
-                       inkTool: nil, prompt: "Tap where the text box goes",
+                       inkTool: nil, prompt: "Tap to place a text box",
                        help: "Tap to place a text box or edit one, then type, or write with the Pencil and it becomes text")
         case .measure:
             Descriptor(title: "Measure", systemImage: "ruler", group: .lengthsAndRegions, comingIn: 8, inkTool: nil,
@@ -103,7 +103,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     public var isAvailable: Bool { comingIn == nil }
 
     /// The status bar's prompt for the lasso while something is selected.
-    public static let selectionPrompt = "Drag to move the selection"
+    public static let selectionPrompt = "Drag the selection to move"
 
     /// The status bar's prompt, given whether the lasso has a selection: with one, it says to drag it.
     public func prompt(fingerDraws: Bool, hasSelection: Bool) -> String {

@@ -123,7 +123,7 @@
     {
       "metric": "lasso_points_inspected",
       "kind": "count",
-      "value": 23956,
+      "value": 794528,
       "before": 794528,
       "unit": "points",
       "tolerance": 0,

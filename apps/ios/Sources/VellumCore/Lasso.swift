@@ -1,9 +1,10 @@
 /// A loop drawn with the lasso, and what it selects (#7).
 ///
-/// The rule: a stroke is selected when at least half of its points lie inside the loop (`insideShare`), so a stroke
-/// the loop mostly encloses is taken even if its tail pokes out, and one it only clips is left. A long stroke is
-/// judged on at most `pointsTested` of its points, evenly spaced, so a selection costs the same however finely the
-/// strokes were drawn. A text box is selected when its centre is inside the loop.
+/// The rule: a stroke is selected when at least half of it lies inside the loop (`insideShare`), so a stroke the loop
+/// mostly encloses is taken even if its tail pokes out, and one it only clips is left. It is judged on `pointsTested`
+/// points: a stroke with fewer points than that (a snapped line has two) is sampled evenly along its length, and one
+/// with more on that many of its own points, evenly spaced, so a selection costs the same however finely the strokes
+/// were drawn. A text box is selected when its centre is inside the loop.
 ///
 /// Only strokes whose bounds meet the loop's bounds are looked at, found through the `InkIndex`, never the whole
 /// canvas. The loop is kept to at most `maximumVertices` corners, and its edges are sorted into horizontal bands, so
@@ -87,6 +88,9 @@ public struct Lasso: Sendable {
     func selects(_ stroke: InkStroke, work: inout InkIndex.Work) -> Bool {
         let points = stroke.points
         guard !points.isEmpty else { return false }
+        if points.count > 1, points.count < Self.pointsTested {
+            return selectsAlongLength(points, work: &work)
+        }
         let step = max(1, (points.count + Self.pointsTested - 1) / Self.pointsTested)
         var tested = 0, inside = 0
         var i = 0
@@ -97,6 +101,32 @@ public struct Lasso: Sendable {
         }
         work.pointsInspected += tested
         return Double(inside) >= Self.insideShare * Double(tested)
+    }
+
+    /// A sparse stroke judged on `pointsTested` points spaced evenly along its length, so a long straight segment
+    /// counts by how much of it is inside, not by its two ends.
+    private func selectsAlongLength(_ points: [CanvasPoint], work: inout InkIndex.Work) -> Bool {
+        var lengths = [0.0]
+        lengths.reserveCapacity(points.count)
+        for i in 1..<points.count {
+            let dx = points[i].x.inches - points[i - 1].x.inches, dy = points[i].y.inches - points[i - 1].y.inches
+            lengths.append(lengths[i - 1] + (dx * dx + dy * dy).squareRoot())
+        }
+        let total = lengths[lengths.count - 1]
+        guard total > 0 else { return contains(points[0]) }
+        var inside = 0, segment = 1
+        for k in 0..<Self.pointsTested {
+            let at = total * (Double(k) + 0.5) / Double(Self.pointsTested)
+            while segment < points.count - 1, lengths[segment] < at { segment += 1 }
+            let span = lengths[segment] - lengths[segment - 1]
+            let t = span > 0 ? (at - lengths[segment - 1]) / span : 0
+            let a = points[segment - 1], b = points[segment]
+            if contains(a.x.inches + (b.x.inches - a.x.inches) * t, a.y.inches + (b.y.inches - a.y.inches) * t) {
+                inside += 1
+            }
+        }
+        work.pointsInspected += Self.pointsTested
+        return Double(inside) >= Self.insideShare * Double(Self.pointsTested)
     }
 
     /// What the loop selects among the ink in an index and a canvas's text boxes.

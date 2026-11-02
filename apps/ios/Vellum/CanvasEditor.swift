@@ -61,8 +61,10 @@ final class CanvasEditor {
     init(canvas: VellumCore.Canvas = VellumCore.Canvas(), session: InkSession? = nil, index: InkIndex? = nil,
          saver: CanvasSaver? = nil, startingView: StartingView = .origin) {
         var canvas = canvas
-        let session = session ?? InkSession(ink: canvas.ink)
+        let session = session ?? InkSession(ink: canvas.ink, sheets: canvas.sheets)
         canvas.ink = Ink()
+        // The session owns the sheets (#11); the canvas keeps a copy for measuring and zoom to everything.
+        canvas.sheets = session.sheets
         self.canvas = canvas
         self.session = session
         inkIndex = index ?? InkIndex(session.ink)
@@ -99,12 +101,13 @@ final class CanvasEditor {
     }
 
     /// The tool in hand. Putting the lasso down lets go of its selection; any tool change starts the next one afresh.
+    /// A sheet waiting to be placed keeps waiting whatever the tool.
     var tool: CanvasTool {
         get { pen.tool }
         set {
             pen.tool = newValue
             if newValue != .lasso { select(.empty) }
-            toolStep = .start
+            toolStep = placingSheet == nil ? .start : .placeSheet
         }
     }
 
@@ -298,6 +301,102 @@ final class CanvasEditor {
         syncInk()
     }
 
+    // MARK: Sheets (#11)
+
+    /// A sheet confirmed in Add sheet, waiting for a tap where it goes: the sheet (its origin still to come), the PDF
+    /// it shows, downloaded, and the name it is kept under in the canvas folder.
+    struct PendingSheet {
+        var sheet: Sheet
+        var pdf: URL
+        var keptName: String
+    }
+
+    /// The sheets on the canvas, in the order placed, the last on top.
+    var sheets: [Sheet] { session.sheets }
+    func sheet(_ id: SheetID) -> Sheet? { session.sheet(id) }
+    /// The sheet waiting to be placed, while it waits (#11).
+    private(set) var placingSheet: PendingSheet?
+    /// Told when a sheet starts or stops waiting to be placed.
+    @ObservationIgnored var onPlacingChange: (@MainActor () -> Void)?
+    /// Told what each change did to the sheets, so the canvas view draws them.
+    @ObservationIgnored var onSheetsChange: (@MainActor (InkChange) -> Void)?
+    /// What went wrong placing a sheet, in plain words, until it is read.
+    var sheetProblem: String?
+    /// PDFs of sheets on a canvas with no saver (previews, the test canvas, the benchmark), by kept name.
+    @ObservationIgnored private var unsavedPDFs: [String: URL] = [:]
+
+    /// Where a sheet's PDF is on the Duo: in the canvas folder, or for a canvas with no saver, where it was put.
+    func pdfURL(for sheet: Sheet) -> URL? {
+        guard let name = sheet.page?.file else { return nil }
+        if let saver { return saver.sheetPDF(named: name) }
+        return unsavedPDFs[name]
+    }
+
+    /// What a sheet covers on the canvas, for the confirm step and the outline: `144'-0" × 96'-0"` in the canvas
+    /// units, or for an NTS sheet its paper at printed size.
+    func covers(_ sheet: Sheet) -> String {
+        if sheet.isNotToScale { return "\(sheet.paper.name) at printed size" }
+        let size = sheet.bounds.size
+        return "\(canvas.units.format(size.width)) × \(canvas.units.format(size.height))"
+    }
+
+    /// Starts placing a confirmed sheet: the view zooms out to show where it could go beside everything else, and a
+    /// true-size outline waits, centred in the view, for a tap (#11, "tap to place").
+    func beginPlacing(_ pending: PendingSheet) {
+        select(.empty)
+        placingSheet = pending
+        toolStep = .placeSheet
+        let size = pending.sheet.bounds.size
+        let centre = viewport.centre
+        let room = CanvasRect(origin: CanvasPoint(x: centre.x - size.width * 0.8, y: centre.y - size.height * 0.8),
+                              size: CanvasSize(width: size.width * 1.6, height: size.height * 1.6))
+        viewport.fit(CanvasRect.union([room] + [extents].compactMap { $0 }) ?? room, insets: Self.chromeInsets,
+                     fill: 0.92)
+        onPlacingChange?()
+    }
+
+    /// The sheet waiting to be placed, centred on a canvas point, as it would go there.
+    func sheetToPlace(centredAt point: CanvasPoint) -> Sheet? {
+        guard var sheet = placingSheet?.sheet else { return nil }
+        let size = sheet.bounds.size
+        sheet.origin = CanvasPoint(x: point.x - size.width / 2, y: point.y - size.height / 2).onInkGrid
+        return sheet
+    }
+
+    /// Places the waiting sheet centred on a canvas point, as one undo step. Its PDF is kept in the canvas folder,
+    /// flushed to storage, before the sheet is placed (`CanvasSaver.keepSheetPDF`), so a placed sheet never names a
+    /// PDF the Duo could lose. When the PDF can't be kept, nothing is placed and the sheet waits for another tap.
+    func placeSheet(centredAt point: CanvasPoint) async -> Sheet? {
+        guard let pending = placingSheet, let sheet = sheetToPlace(centredAt: point) else { return nil }
+        if let saver {
+            do {
+                try await saver.keepSheetPDF(from: pending.pdf, named: pending.keptName)
+            } catch {
+                sheetProblem = "The PDF couldn't be kept on this Duo, so the sheet wasn't placed. "
+                    + ((error as? any StorageFailure)?.isOutOfSpace == true ? "This Duo is full." : "Try again.")
+                return nil
+            }
+        } else {
+            unsavedPDFs[pending.keptName] = pending.pdf
+        }
+        // The tap may have been cancelled while the PDF was being kept.
+        guard placingSheet != nil else { return nil }
+        placingSheet = nil
+        toolStep = .start
+        onPlacingChange?()
+        let placed = session.addSheet(sheet)
+        syncInk()
+        return placed
+    }
+
+    /// Stops placing the waiting sheet; nothing is placed.
+    func cancelPlacing() {
+        guard placingSheet != nil else { return }
+        placingSheet = nil
+        if toolStep == .placeSheet { toolStep = .start }
+        onPlacingChange?()
+    }
+
     // MARK: Measures, dimensions, frames and windows (#8)
 
     /// The dimensions on the canvas, in the order placed.
@@ -390,6 +489,10 @@ final class CanvasEditor {
         if change.touchesAnnotations {
             onAnnotationsChange?(change)
             if frameCount != session.frames.count { frameCount = session.frames.count }
+        }
+        if change.touchesSheets {
+            canvas.sheets = session.sheets
+            onSheetsChange?(change)
         }
         if let after = session.selectionAfterLastChange {
             select(after)

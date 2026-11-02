@@ -1,5 +1,5 @@
 #!/bin/sh
-# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, snap, lasso and text boxes, measure, dimension, frame and window, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
+# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, snap, lasso and text boxes, measure, dimension, frame and window, placing sheets, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
 # app. The fold is moved by Scripts/duo/posture.m, a simulator-side tool that calls SpringBoard's display tool service,
 # the way Sotto captured its Duo layouts (Sotto tag prototype/iphone-duo-layout).
 # usage: capture-duo.sh [output folder]   (default .build-captures)
@@ -104,8 +104,40 @@ benchmark() {
 }
 
 # PART splits the work between CI jobs (the captures job outgrew its 45 minutes with #8): "captures" runs every capture
-# and the Debug benchmark, "release-benchmark" only the optimised build's benchmark; unset, it runs both.
+# and the Debug benchmark, "sheets" only the sheet captures (#11, their own job so the captures job stays under its
+# hour), "release-benchmark" only the optimised build's benchmark; unset, it runs them all.
 part=${PART:-all}
+
+# Placing sheets (#11), in light and dark, on the made-up Dropbox (`--ui-dropbox sheets`) and made-up PDFs
+# (Vellum/DebugSheets.swift, VellumCore MadeUpSheets): Add sheet's Dropbox browser with the PDFs, the IFC set's page
+# grid, the confirm step for the 1/4" plan, the AS NOTED sheet's confirm step with its scale areas outlined, and the
+# scan asking for a scale; then on a new canvas, driven through the canvas view's own input paths, the true-size
+# outline following the Pencil before the tap, the 1/4" plan placed with its 24'-0" dimension measured, the AS NOTED
+# sheet placed with its scale areas and Detail 2's 2'-0" measured inside one, the NTS loop diagram measured 4" NTS,
+# and the scan placed beside the plan: in dark mode the plan inverts and the scan dims. The console prints each
+# measure beside its printed dimension.
+sheet_captures() {
+  for appearance in light dark; do
+    xcrun simctl ui "$udid" appearance "$appearance"
+    saved_wait=${WAIT:-6}; WAIT=${SHEET_WAIT:-10}
+    for step in browser grid confirm asnoted scan; do
+      capture "add-sheet-$step" --ui-tab canvases --ui-reset --ui-new-canvas --ui-dropbox sheets --ui-add-sheet "$step"
+    done
+    for what in outline quarter asnoted nts scan; do
+      capture "sheet-$what" --ui-tab canvases --ui-reset --ui-new-canvas --ui-sheets "$what"
+      tail -4 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
+    done
+    WAIT=$saved_wait
+  done
+  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+  echo "The last canvas folder, with its sheets folder:"
+  ls -lR "$data/Library/Application Support/Canvases" | sed "s|$data|<app data>|" | head -30
+}
+
+if [ "$part" = sheets ]; then
+  sheet_captures
+  exit 0
+fi
 
 if [ "$part" != release-benchmark ]; then
 for appearance in light dark; do
@@ -209,6 +241,8 @@ xcrun simctl ui "$udid" appearance dark
 capture appearance-light-then-system --ui-tab canvases --ui-reset --ui-new-canvas --ui-appearance-steps light,system
 
 benchmark ""
+
+if [ "$part" = all ]; then sheet_captures; fi
 
 # The Home Screen, to show the installed app icon. Vellum has to be on the first page: if SpringBoard put it on a later
 # page, it swaps places with the first page's first app in SpringBoard's saved layout while the simulator is shut down.

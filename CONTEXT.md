@@ -41,7 +41,7 @@ What a colour of ink means to an agent: red is something to add, green is someth
 _Avoid_: pen colour, highlight
 
 **Ink log**:
-The record on the Duo of every change to a canvas's ink, text boxes, dimensions and frames since its last snapshot (a stroke drawn, strokes erased, a selection moved, resized, duplicated or deleted, a text box placed or edited, a dimension or frame placed, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
+The record on the Duo of every change to a canvas's ink, text boxes, dimensions, frames and sheets since its last snapshot (a stroke drawn, strokes erased, a selection moved, resized, duplicated or deleted, a text box placed or edited, a dimension, frame or sheet placed, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
 _Avoid_: journal, history file, autosave
 
 **Canvas saver**:
@@ -49,7 +49,7 @@ The one owner of a canvas's files while anything is being written to them (`Canv
 _Avoid_: writer, persistence manager, autosaver
 
 **Canvas folder**:
-The folder on the Duo that holds one canvas: its name and canvas units (`canvas.json`), its ink snapshot and its ink log (which hold its text boxes, dimensions and frames too), and nothing else, so #12 can mirror it to Dropbox as it is.
+The folder on the Duo that holds one canvas: its name and canvas units (`canvas.json`), its ink snapshot and its ink log (which hold its text boxes, dimensions, frames and sheets too), and a `sheets` folder with the PDFs its sheets show, one per PDF, and nothing else, so #12 can mirror it to Dropbox as it is.
 _Avoid_: document, package, bundle
 
 **Text box**:
@@ -57,11 +57,19 @@ Typed text placed on the canvas, with a position and a size, its letters a real-
 _Avoid_: label, note
 
 **Sheet**:
-A PDF page placed on the canvas at its drawing scale, so that its contents sit at real-world size and line up with anything else drawn at the same place.
+A PDF page placed on the canvas at its drawing scale, so that its contents sit at real-world size and line up with anything else drawn at the same place. It is placed from Add sheet: a PDF picked in Dropbox, a page picked from its page grid, its scale confirmed, then a tap where it goes. A canvas holds any number, the last placed on top.
 _Avoid_: PDF (the file), page, underlay
 
+**Sheet number**:
+The number a sheet's title block gives it, such as M-101, read off the PDF page's text; the page grid and a placed sheet's label show it.
+_Avoid_: drawing number (a drawing's number is the index's), page number
+
+**Scale area**:
+A region of a sheet drawn at a scale of its own, such as a detail marked `SCALE: 1 1/2" = 1'-0"` on an AS NOTED sheet. The sheet is placed at its main scale; inside a scale area, Measure and Dimension read the area's scale, or printed inches marked NTS in an NTS area. Vellum finds them from the scales written under the details and outlines them on the sheet.
+_Avoid_: viewport, detail sheet, crop
+
 **Drawing scale**:
-The ratio between a sheet's printed size and the real world, such as 1/4" = 1'-0". It is what turns a printed length into a real one.
+The ratio between a sheet's printed size and the real world, such as 1/4" = 1'-0". It is what turns a printed length into a real one. A sheet has one main drawing scale, which sets its size on the canvas, and its scale areas can have others.
 _Avoid_: zoom, ratio
 
 **Printed length**:

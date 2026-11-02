@@ -16,3 +16,7 @@ The app key reaches the app only as the `DROPBOX_APP_KEY` build setting. `.githu
 ## Consequences
 
 Each later Dropbox call (download a PDF, upload a canvas, content-hash checks) is written into `DropboxSession` with its own tests. Dropbox's upload sessions for large files and its rate-limit backoff are Vellum's to write when they are needed.
+
+## Amendment (#11): PDFs in listings, and one download endpoint
+
+Add sheet browses Dropbox with the same listing calls (`files/list_folder` and `/continue`), which now keep each folder's PDFs beside its folders, with their size, content hash and revision; a listing kept before #11 has no PDFs and is listed afresh once. The one new endpoint is `files/download` on `content.dropboxapi.com`, its argument (the file's revision, `rev:…`, so the bytes are exactly the ones listed) in the `Dropbox-API-Arg` header, renewed on a 401 as every call is. A reply of another size than the listing's is refused, so a download cut short is never kept. The download is held in memory once and written to Caches (`SheetPDFs`); Dropbox's content hash names the file on the Duo but is not checked against the bytes, since the revision already pins them.

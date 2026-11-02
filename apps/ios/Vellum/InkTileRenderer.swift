@@ -47,6 +47,17 @@ final class InkTileRenderer {
     var displayScale: CGFloat = 3 {
         didSet { if displayScale != oldValue { redrawEverything() } }
     }
+    /// In dark mode, where sheets show light paper (dimmed ones, #11): ink starting there keeps its light-mode colour
+    /// so sketch ink stays dark over the paper (`MarkupColour.rgb(dark:overLightPaper:)`, ADR-0011).
+    var lightPaper: [CanvasRect] = [] {
+        didSet { if lightPaper != oldValue { redrawEverything() } }
+    }
+
+    /// Whether a stroke starting at a point is drawn over light paper in dark mode.
+    nonisolated static func isOverLightPaper(_ point: CanvasPoint?, in rects: [CanvasRect]) -> Bool {
+        guard let point, !rects.isEmpty else { return false }
+        return rects.contains { $0.contains(point) }
+    }
 
     /// Ink is never drawn thinner than this many screen points, so zoomed-out ink never vanishes.
     nonisolated static let minimumWidth = 1.0
@@ -224,7 +235,8 @@ final class InkTileRenderer {
         let box = level.tiling.box(of: tile.key)
         let job = TileJob(pixels: Int((InkTiling.tileSize * displayScale).rounded()), displayScale: displayScale,
                           levelScale: level.tiling.scale, originX: box.minX, originY: box.minY, base: base,
-                          strokes: strokes, dark: isDark, paths: paths, cancelled: tile.payload.cancelled)
+                          strokes: strokes, dark: isDark, lightPaper: isDark ? lightPaper : [], paths: paths,
+                          cancelled: tile.payload.cancelled)
         let jobEpoch = tile.epoch
         inFlight += 1
         // The book's tile and level are main-thread objects; the drawing thread only carries them back.
@@ -258,6 +270,7 @@ final class InkTileRenderer {
         let base: CGImage?
         let strokes: [InkStroke]
         let dark: Bool
+        let lightPaper: [CanvasRect]
         let paths: StrokePathCache<CGPath>
         let cancelled: Flag
     }
@@ -292,7 +305,8 @@ final class InkTileRenderer {
             context.saveGState()
             context.translateBy(x: origin.x.inches - job.originX, y: origin.y.inches - job.originY)
             context.setAlpha(stroke.tool.opacity)
-            context.setStrokeColor(colour(stroke.colour, dark: job.dark))
+            let overLight = job.dark && isOverLightPaper(stroke.points.first, in: job.lightPaper)
+            context.setStrokeColor(colour(stroke.colour, dark: job.dark && !overLight))
             context.setLineWidth(max(stroke.width.inches, thinnest))
             context.addPath(path)
             context.strokePath()

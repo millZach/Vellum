@@ -45,6 +45,8 @@ final class AnnotationOverlay {
     enum Item: Hashable {
         case dimension(DimensionID)
         case frame(FrameID)
+        /// A sheet's label and its scale areas' outlines (#11).
+        case sheet(SheetID)
     }
 
     /// What the tool in hand is showing (screen points are worked out from these at each update).
@@ -63,6 +65,8 @@ final class AnnotationOverlay {
         var frameDrag: (CanvasRect, Frame)?
         /// A window being dragged or chosen.
         var window: CanvasRect?
+        /// A sheet waiting to be placed, where it would go now, with what it will cover (#11).
+        var placingSheet: (sheet: Sheet, covers: String)?
     }
 
     var tool = ToolState() {
@@ -82,6 +86,8 @@ final class AnnotationOverlay {
     private let firstDot = CAShapeLayer()
     private let marker = CAShapeLayer()
     private let markerPill = Pill()
+    private let ghostSheet = CAShapeLayer()
+    private let ghostSheetPill = Pill()
 
     init(editor: CanvasEditor) {
         self.editor = editor
@@ -90,14 +96,16 @@ final class AnnotationOverlay {
             container.anchorPoint = .zero
             container.position = .zero
         }
-        for shape in [measureLine, bandLine, ghostDrag, ghostFrame, windowShape, firstDot, marker] {
+        for shape in [measureLine, bandLine, ghostDrag, ghostFrame, windowShape, firstDot, marker, ghostSheet] {
             shape.actions = noAnimations
             shape.fillColor = nil
             shape.lineWidth = 1.2
             toolLayer.addSublayer(shape)
         }
         toolLayer.addSublayer(pullingLayer)
-        for pill in [measurePill, bandPill, ghostLabel, markerPill] { toolLayer.addSublayer(pill.layer) }
+        for pill in [measurePill, bandPill, ghostLabel, markerPill, ghostSheetPill] { toolLayer.addSublayer(pill.layer) }
+        ghostSheet.lineDashPattern = [10, 6]
+        ghostSheet.lineWidth = 2
         measureLine.lineDashPattern = [6, 4]
         bandLine.lineDashPattern = [6, 4]
         ghostDrag.lineDashPattern = [5, 4]
@@ -125,7 +133,7 @@ final class AnnotationOverlay {
     /// was drawn at.
     func show(_ viewport: Viewport) {
         self.viewport = viewport
-        if items.isEmpty && editor.dimensions.isEmpty && editor.frames.isEmpty {
+        if items.isEmpty && editor.dimensions.isEmpty && editor.frames.isEmpty && editor.sheets.isEmpty {
             // Nothing kept: a pan or a pinch touches no layer here. The first dimension or frame draws afresh.
             base = nil
         } else if let base {
@@ -155,6 +163,15 @@ final class AnnotationOverlay {
         }
     }
 
+    /// Follows a change to the sheets: an undone sheet's label and areas go, a placed one's are drawn.
+    func sheetsChanged(_ change: InkChange) {
+        guard base != nil, !items.isEmpty else { return rebuildAll() }
+        withoutAnimation {
+            for id in change.removedSheets { items.removeValue(forKey: .sheet(id))?.removeFromSuperlayer() }
+            for sheet in change.addedSheets where editor.sheet(sheet.id) != nil { build(sheet) }
+        }
+    }
+
     /// The canvas units changed: every dimension reads again.
     func unitsChanged() { rebuildAll() }
 
@@ -172,6 +189,7 @@ final class AnnotationOverlay {
             items.removeAll()
             for frame in editor.frames { build(frame) }
             for dimension in editor.dimensions { build(dimension) }
+            for sheet in editor.sheets { build(sheet) }
             keptLayer.transform = CATransform3DIdentity
         }
         if let dragging { placeDragged(dragging.selection) }
@@ -199,10 +217,14 @@ final class AnnotationOverlay {
         layer.position = .zero
         layer.bounds = keptLayer.bounds
         items[item] = layer
-        if case .frame = item {
+        switch item {
+        case .frame:
             // Frames go under dimensions.
             keptLayer.insertSublayer(layer, at: 0)
-        } else {
+        case .sheet:
+            // Sheets' labels and areas go under frames.
+            keptLayer.insertSublayer(layer, at: 0)
+        case .dimension:
             keptLayer.addSublayer(layer)
         }
         return layer
@@ -218,6 +240,45 @@ final class AnnotationOverlay {
         guard let base else { return }
         let layer = itemLayer(.frame(frame.id))
         Self.draw(frame, on: base, into: layer, dark: isDark, ghost: false)
+    }
+
+    private func build(_ sheet: Sheet) {
+        guard let base else { return }
+        let layer = itemLayer(.sheet(sheet.id))
+        Self.draw(sheet, on: base, into: layer, dark: isDark)
+    }
+
+    // MARK: Drawing a sheet's label and scale areas (#11)
+
+    /// A sheet's label under its bottom-left corner, as a frame's is, and each scale area dashed in purple with its
+    /// name and scale in its top-left corner, as the prototype at `prototype/place-sheets` (question 2, C) draws them.
+    static func draw(_ sheet: Sheet, on viewport: Viewport, into layer: CALayer, dark: Bool) {
+        let rect = screenRect(sheet.bounds, viewport)
+        let label = Pill()
+        label.set(sheet.label, size: 11, colour: Palette.sheetText(dark: dark),
+                  fill: Palette.ground(dark: dark).withAlphaComponent(0.8), weight: .semibold, padding: 2, radius: 2)
+        label.layer.anchorPoint = .zero
+        label.layer.position = CGPoint(x: rect.minX + 2, y: rect.maxY + 3)
+        layer.addSublayer(label.layer)
+        for area in sheet.areas {
+            let box = screenRect(sheet.canvasRect(of: area.rect), viewport)
+            let shape = CAShapeLayer()
+            shape.actions = noAnimations
+            shape.path = CGPath(rect: box, transform: nil)
+            shape.strokeColor = Palette.scaleArea(dark: dark).cgColor
+            shape.fillColor = Palette.scaleArea(dark: dark).withAlphaComponent(0.06).cgColor
+            shape.lineWidth = 1.6
+            shape.lineDashPattern = [6, 4]
+            layer.addSublayer(shape)
+            // The area's name only where there is room for it.
+            guard box.width > 60, box.height > 18 else { continue }
+            let pill = Pill()
+            pill.set(area.label, size: 10, colour: .white, fill: Palette.scaleArea(dark: dark), weight: .semibold,
+                     padding: 4, radius: 0)
+            pill.layer.anchorPoint = .zero
+            pill.layer.position = CGPoint(x: box.minX, y: box.minY)
+            layer.addSublayer(pill.layer)
+        }
     }
 
     // MARK: Drawing a dimension and a frame
@@ -335,7 +396,7 @@ final class AnnotationOverlay {
 
     private var toolIsEmpty: Bool {
         tool.measure == nil && tool.firstPoint == nil && tool.tip == nil && tool.pulling == nil
-            && tool.frameDrag == nil && tool.window == nil
+            && tool.frameDrag == nil && tool.window == nil && tool.placingSheet == nil
     }
 
     /// Places what the tool in hand is showing for the view now.
@@ -415,6 +476,23 @@ final class AnnotationOverlay {
 
             windowShape.path = tool.window.map { CGPath(rect: Self.screenRect($0, viewport), transform: nil) }
 
+            // A sheet waiting to be placed: its true-size outline, dashed in the accent, and what it is and covers.
+            if let placing = tool.placingSheet {
+                let rect = Self.screenRect(placing.sheet.bounds, viewport)
+                ghostSheet.path = CGPath(rect: rect, transform: nil)
+                ghostSheet.strokeColor = Palette.selection(dark: isDark).cgColor
+                ghostSheet.fillColor = Palette.selection(dark: isDark).withAlphaComponent(0.10).cgColor
+                ghostSheetPill.set("\(placing.sheet.page?.title ?? "Sheet") · \(placing.sheet.scale) · \(placing.covers)",
+                                   size: 12, colour: .white, fill: Palette.selection(dark: isDark), weight: .semibold)
+                ghostSheetPill.layer.anchorPoint = CGPoint(x: 0.5, y: 1)
+                ghostSheetPill.layer.position = CGPoint(x: rect.midX, y: max(ghostSheetPill.layer.bounds.height + 4,
+                                                                             rect.minY - 6))
+                ghostSheetPill.layer.isHidden = false
+            } else {
+                ghostSheet.path = nil
+                ghostSheetPill.layer.isHidden = true
+            }
+
             // Where the tip snaps: a square on an end, corner or centre, with its name up and to the right; cross
             // hairs on blank canvas.
             if let tip = tool.tip {
@@ -478,6 +556,7 @@ final class AnnotationOverlay {
     var debugLabels: [String] {
         editor.dimensions.map { "dimension \($0.orientation.rawValue) \(editor.label(for: $0))" }
             + editor.frames.map { "frame \($0.label)" }
+            + editor.sheets.map { "sheet \($0.label), areas \($0.areas.map(\.label))" }
     }
     #endif
 }
@@ -533,6 +612,10 @@ extension Palette {
     /// A frame's dashed edge, and its label.
     static func frame(dark: Bool) -> UIColor { dark ? UIColor(hex: 0xB892EA) : UIColor(hex: 0x7A4FB3) }
     static func frameText(dark: Bool) -> UIColor { dark ? UIColor(hex: 0xB892EA) : UIColor(hex: 0x5B3191) }
+    /// A placed sheet's label (#11): the chrome's secondary text.
+    static func sheetText(dark: Bool) -> UIColor { dark ? UIColor(hex: 0xA9A9AE) : UIColor(hex: 0x4A4A4F) }
+    /// A scale area's dashed outline and its label's box (#11): the prototype's purple.
+    static func scaleArea(dark: Bool) -> UIColor { dark ? UIColor(hex: 0xC4A2F0) : UIColor(hex: 0x6B3FA8) }
     /// Where a tap snaps: teal.
     static func snap(dark: Bool) -> UIColor { dark ? UIColor(hex: 0x2DD4BF) : UIColor(hex: 0x0F766E) }
     static func snapText(dark: Bool) -> UIColor { dark ? UIColor(hex: 0x0B1F1D) : .white }

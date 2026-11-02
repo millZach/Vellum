@@ -29,3 +29,9 @@ Every tool on the rail now works, as Zach picked them from the prototype at the 
 - The status bar's prompt follows each step: "Tap the second point", "Drag or tap to place line", "Zoom to it or make a frame".
 - As with every tool, the Pencil uses them and fingers pan and pinch; with Draw with finger on, one finger uses them too.
 - The top bar gives the canvas name layout priority, so it shows in full whenever it fits beside the actions.
+
+## Amendment (#11): Add sheet, and who dims a sheet
+
+Add sheet at the right of the top bar now works, as Zach picked it from the prototype at the tag `prototype/place-sheets`: it opens Dropbox's folders down to the PDFs; a PDF of several pages opens as a grid of thumbnails, each captioned with its sheet number and the scale read; a confirm step names the scale read and what the sheet will cover, with Cancel, Change scale and Place sheet, or asks for a scale; and the sheet then waits as a true-size outline for a tap where it goes, with a pill under the top bar saying so and offering Cancel. The status bar says "Tap where the sheet goes" meanwhile, whatever the tool, and its sheet count counts placed sheets.
+
+**Vellum decides which sheets dim (question 4, A).** There is no switch. When a page is confirmed, Vellum renders it once, 96 pixels on its long side, off the main thread, and dims it in dark mode when it has no text (a scan), more than 3% of its pixels clearly coloured (coloured fills), more than 25% darker than mid grey (large dark fills), or a median brightness under 225 of 255 (paper that is not white: a scan or a photocopy) (`SheetTone`, in `VellumCore`). The answer is kept with the sheet. Any other page is drawn inverted: light lines on a paper a shade lighter than the dark ground. Sketch ink starting over a dimmed sheet keeps its dark colour (`SheetDisplay.paperIsLight`, `MarkupColour.rgb(dark:overLightPaper:)`).

@@ -48,6 +48,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     var isDark = false {
         didSet {
             guard isDark != oldValue else { return }
+            sheetRenderer.isDark = isDark
+            renderer.lightPaper = sheetRenderer.lightPaper
             renderer.isDark = isDark
             textOverlay.isDark = isDark
             annotationOverlay.isDark = isDark
@@ -61,7 +63,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     var tool: CanvasTool = .pen {
         didSet {
             guard tool != oldValue else { return }
-            textTap.isEnabled = tool == .textBox
+            textTap.isEnabled = tool == .textBox && editor.placingSheet == nil
             scribble?.isActive = tool == .textBox
             if oldValue == .textBox { textOverlay.finishEditing() }
             // A measure, a dimension half placed, a window: each belongs to its tool and goes when it is put down.
@@ -87,6 +89,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         didSet {
             guard fingerDraws != oldValue else { return }
             pan.minimumNumberOfTouches = fingerDraws ? 2 : 1
+            placeTap.isEnabled = editor.placingSheet != nil && !fingerDraws
             accessibilityHint = FingerDrawingSetting.accessibilityHint(fingerDraws: fingerDraws)
             fingersOnGlass = 0
         }
@@ -101,6 +104,14 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private var heldEraserPoints: [CanvasPoint] = []
 
     private let renderer: InkTileRenderer
+    /// Placed sheets, under the ink (#11).
+    private let sheetRenderer: SheetRenderer
+    // Placing a sheet (#11): the screen point the waiting sheet's outline is centred on, whether the Pencil (or a
+    // finger drawing) is down moving it, whether it moved since the last display frame, and a finger's tap.
+    private var placingTip: CGPoint?
+    private var placingDown = false
+    private var placingMoved = false
+    private let placeTap = UITapGestureRecognizer()
     private let minorGrid = CAShapeLayer()
     private let majorGrid = CAShapeLayer()
     /// The stroke being drawn: one layer per chunk, with the group's opacity so a highlighter's chunks don't darken
@@ -202,6 +213,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     init(editor: CanvasEditor) {
         self.editor = editor
         renderer = InkTileRenderer(index: { [unowned editor] in editor.inkIndex })
+        sheetRenderer = SheetRenderer(pdfURL: { [unowned editor] sheet in editor.pdfURL(for: sheet) })
         textOverlay = TextBoxOverlay(editor: editor)
         annotationOverlay = AnnotationOverlay(editor: editor)
         super.init(frame: .zero)
@@ -213,6 +225,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             grid.fillColor = nil
             layer.addSublayer(grid)
         }
+        layer.addSublayer(sheetRenderer.layer)
         layer.addSublayer(renderer.layer)
         layer.addSublayer(renderer.pendingInkLayer)
         annotationOverlay.install(in: self)
@@ -233,6 +246,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             self?.annotationOverlay.annotationsChanged(change)
             self?.updateSelectionOverlay()
         }
+        editor.onSheetsChange = { [weak self] change in self?.sheetsDidChange(change) }
+        editor.onPlacingChange = { [weak self] in self?.placingDidChange() }
+        sheetRenderer.setSheets(editor.sheets)
         editor.willChangeHistory = { [weak self] in
             self?.textOverlay.finishEditing()
             // Undo part way through a dimension or measure starts it again, as the prototype does.
@@ -263,6 +279,13 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         textTap.isEnabled = false
         textTap.delegate = self
         addGestureRecognizer(textTap)
+
+        // A finger's tap places a sheet waiting to be placed (#11); the Pencil's goes through the touches below.
+        placeTap.addTarget(self, action: #selector(handlePlaceTap(_:)))
+        placeTap.allowedTouchTypes = directTouches
+        placeTap.isEnabled = false
+        placeTap.delegate = self
+        addGestureRecognizer(placeTap)
         let scribble = CanvasScribble(overlay: textOverlay, host: self) { [weak self] point in self?.placeText(at: point) }
         addInteraction(UIIndirectScribbleInteraction(delegate: scribble))
         self.scribble = scribble
@@ -279,13 +302,14 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         super.layoutSubviews()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for sublayer in [minorGrid, majorGrid, renderer.layer, renderer.pendingInkLayer] {
+        for sublayer in [minorGrid, majorGrid, sheetRenderer.layer, renderer.layer, renderer.pendingInkLayer] {
             sublayer.frame = bounds
         }
         CATransaction.commit()
         annotationOverlay.resize(to: bounds)
         Pill.displayScale = traitCollection.displayScale
         renderer.displayScale = traitCollection.displayScale
+        sheetRenderer.displayScale = traitCollection.displayScale
         editor.viewDidResize(width: Double(bounds.width), height: Double(bounds.height))
         shownViewport = nil
         viewportDidChange()
@@ -296,6 +320,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         DebugFingerStroke.attach(self)
         DebugSelection.attach(self, editor: editor)
         DebugMeasureFrame.attach(self, editor: editor)
+        DebugSheets.attach(self, editor: editor)
         #endif
     }
 
@@ -307,6 +332,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         let viewport = editor.viewport
         guard viewport != shownViewport, bounds.width > 0 else { return }
         shownViewport = viewport
+        sheetRenderer.show(viewport)
         renderer.show(viewport)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -321,6 +347,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         annotationOverlay.show(viewport)
         if let chosenWindow { windowMenu.place(under: screenRect(chosenWindow), in: bounds) }
         if case .point? = regionInput { regionTipMoved = true }
+        if editor.placingSheet != nil { updatePlacingOutline() }
         updateSelectionOverlay()
     }
 
@@ -530,6 +557,14 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func beginInput(at location: CGPoint, holdingEraser: Bool) -> Bool {
+        if editor.placingSheet != nil {
+            // A sheet waits to be placed (#11): the Pencil moves its outline, and lifting places it.
+            placingDown = true
+            placingTip = location
+            placingMoved = true
+            startDisplayLink()
+            return true
+        }
         let point = canvasPoint(location)
         lastSample = location
         if editor.tool == .lasso {
@@ -605,6 +640,13 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     /// The Pencil moved: its coalesced samples since the last move, and where it is predicted to go.
     func moveInput(samples: [CGPoint], predicted: [CGPoint]) {
+        if placingDown {
+            if let last = samples.last {
+                placingTip = last
+                placingMoved = true
+            }
+            return
+        }
         if lassoing || drag != nil {
             lassoMoved(samples)
             return
@@ -630,6 +672,13 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     /// The Pencil lifted (or was interrupted): its last samples, and whether to keep the stroke.
     func endInput(samples: [CGPoint], keep: Bool) {
+        if placingDown {
+            placingDown = false
+            if let last = samples.last { placingTip = last }
+            if keep, let tip = placingTip { placeSheet(at: tip) } else { updatePlacingOutline() }
+            finishStroke(keep: false)
+            return
+        }
         if regionInput != nil {
             regionMoved(samples)
             finishRegionInput(keep: keep)
@@ -752,6 +801,10 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         // A measure's or dimension's point, a dimension's line, a frame or a window: followed once a frame, never
         // per sample.
         if regionTipMoved { regionTick() }
+        if placingMoved {
+            placingMoved = false
+            updatePlacingOutline()
+        }
         publishPenPosition()
     }
 
@@ -835,7 +888,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     #if DEBUG || BENCHMARK
     /// Tile drawings still in flight, for the Debug benchmark.
-    var pendingRenderCount: Int { renderer.pendingCount }
+    var pendingRenderCount: Int { renderer.pendingCount + sheetRenderer.pendingCount }
+    /// Sheet tiles asked for and kept, for the benchmark's log.
+    var debugSheetTiles: (drawn: Int, kept: Int) { (sheetRenderer.tilesDrawn, sheetRenderer.debugCachedTiles) }
     #endif
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
@@ -1276,7 +1331,8 @@ extension InkCanvasUIView {
         regionTool = state.measure == nil ? nil : .measure
         chosenWindow = nil
         windowMenu.isHidden = true
-        if editor.toolStep != .start { editor.toolStep = .start }
+        let step: CanvasTool.Step = editor.placingSheet == nil ? .start : .placeSheet
+        if editor.toolStep != step { editor.toolStep = step }
     }
 
     private func zoomToWindow() {
@@ -1327,4 +1383,59 @@ extension InkCanvasUIView {
     /// The labels shown on the canvas, for the captures' console.
     var debugAnnotationLabels: [String] { annotationOverlay.debugLabels }
     #endif
+}
+
+// MARK: - Sheets (#11)
+
+extension InkCanvasUIView {
+    /// The sheets changed: placed, or taken away or put back by undo and redo.
+    fileprivate func sheetsDidChange(_ change: InkChange) {
+        sheetRenderer.setSheets(editor.sheets)
+        renderer.lightPaper = sheetRenderer.lightPaper
+        annotationOverlay.sheetsChanged(change)
+    }
+
+    /// A sheet started or stopped waiting to be placed: its outline shows in the middle of the view until the Pencil
+    /// or a finger moves it, and a finger's tap places it.
+    fileprivate func placingDidChange() {
+        let placing = editor.placingSheet != nil
+        placingTip = nil
+        placingDown = false
+        placeTap.isEnabled = placing && !fingerDraws
+        textTap.isEnabled = tool == .textBox && !placing
+        if placing { resetLengthsAndRegions(keepingMeasure: false) }
+        shownViewport = nil
+        viewportDidChange()
+        updatePlacingOutline()
+        accessibilityHint = placing ? CanvasTool.placeSheetHint
+            : FingerDrawingSetting.accessibilityHint(fingerDraws: fingerDraws)
+    }
+
+    /// Shows the waiting sheet's true-size outline centred where the Pencil or finger last was, or the middle of the
+    /// view; nothing when no sheet waits.
+    fileprivate func updatePlacingOutline() {
+        guard editor.placingSheet != nil else {
+            if annotationOverlay.tool.placingSheet != nil { annotationOverlay.tool.placingSheet = nil }
+            return
+        }
+        let tip = placingTip ?? CGPoint(x: bounds.midX, y: bounds.midY)
+        guard let sheet = editor.sheetToPlace(centredAt: canvasPoint(tip)) else { return }
+        annotationOverlay.tool.placingSheet = (sheet, editor.covers(sheet))
+    }
+
+    @objc fileprivate func handlePlaceTap(_ tap: UITapGestureRecognizer) {
+        guard tap.state == .ended, editor.placingSheet != nil else { return }
+        placeSheet(at: tap.location(in: self))
+    }
+
+    /// Places the waiting sheet centred on a screen point, once its PDF is kept on the Duo.
+    func placeSheet(at tip: CGPoint) {
+        placingTip = tip
+        updatePlacingOutline()
+        let point = canvasPoint(tip)
+        Task { @MainActor [weak self] in
+            guard let self, let placed = await self.editor.placeSheet(centredAt: point) else { return }
+            UIAccessibility.post(notification: .announcement, argument: "Placed \(placed.label)")
+        }
+    }
 }

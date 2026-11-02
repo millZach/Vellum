@@ -58,3 +58,18 @@ Strokes are numbered in the order drawn and never renumbered, and every change k
 - If a write fails because the Duo is full, the log is trimmed back to before the attempt. The changes stay in memory with the canvas saver, which writes them with the next change or on its retry timer, whichever comes first, even after the canvas is closed. Meanwhile the status bar says "Not saved: this Duo is full".
 - Sheets and frames are not saved yet, because nothing places them. The ticket that places sheets adds them as their own log events.
 - Measured on Forge's Linux box (release build, ext4 on SSD): 10,000 strokes of 120 points append in 6 µs each (write only), a batched flush takes about 4 ms, and the canvas reopens in 32 ms. Compacting it takes about 400 ms on the maintenance queue, and appends carry on throughout.
+
+## Amendment (#7): moves, resizes, duplicates, deletes and text boxes
+
+The lasso moves, resizes, duplicates and deletes a selection of strokes and text boxes, and text boxes are placed and edited; each is one undo step, saved as its own event in the same log. The ink files are now version 2, with five more kinds of event (codes are never reused: 1 to 4 are version 1's):
+
+- **A move or a resize** (5) records the selection's ids and the transform, never the moved strokes' points: the stroke ids as a varint count, the first id and each later id as its step from the one before (a byte a stroke for strokes drawn one after another), the same for text box ids, then the scale and the offset in inches as three 64-bit floats. Resizing is uniform from a corner, so handwriting and circles keep their shape; a stroke's width and a text box's letters scale with it. Replay works the moved points out again, on the ink grid, with the same arithmetic the canvas used, so they reopen exactly. Moving 1,000 strokes appends 1,036 bytes, however many points they have; rewriting them would append about 582 KB.
+- **A duplicate** (6) records the same, plus the first new stroke id and text box id; replay numbers the copies in order from there.
+- **A delete** (7) records the ids. The eraser keeps its own event.
+- **A text box placed** (8) and **edited** (9) record the whole box: its id, its top-left corner, width, height and letter height in inches as 64-bit floats, its markup colour, and its text as UTF-8. Emptying a text box deletes it.
+
+Strokes keep their ids when they move, so the undo history keeps what the canvas no longer shows: a move's step holds its strokes and text boxes as they were (and redoing it works the moved ones out again from them), a duplicate's step holds the copies, a delete's step holds what it took. A move's old points are held by the history alone, and count toward `InkSession.historyPointBudget` like erased strokes do. In the snapshot, an undo step names a stroke by its id only when that very stroke, points and all, is on the canvas; a moved stroke's earlier self is written whole.
+
+A snapshot of a canvas that has never had a text box is written exactly as version 1 wrote it, byte for byte, so a canvas of ink alone costs what it did. A canvas with text boxes adds them after the undo history, with the next text box id. A version 1 snapshot reads as one with no text boxes, and a version 1 log replays as before; new events appended to a version 1 log replay too, since every event says what kind it is, and the next compaction writes version 2 files. The canvas folder still holds only `canvas.json`, `ink.snapshot` and `ink.log`.
+
+A text box being typed in is saved when the typing ends: a tap away from it, another tool, undo or redo, closing the canvas, or the app leaving the screen. A crash while typing loses the text being typed, as a crash loses the stroke still being drawn.

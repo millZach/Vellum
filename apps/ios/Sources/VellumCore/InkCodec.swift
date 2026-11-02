@@ -39,8 +39,10 @@ enum InkCodec {
 
     // MARK: Events
 
+    /// Each kind of event's code. Codes are never reused: 1 to 4 are version 1's, 5 to 9 came with #7.
     private enum EventTag: UInt8 {
         case draw = 1, erase = 2, undo = 3, redo = 4
+        case transform = 5, duplicate = 6, delete = 7, addText = 8, editText = 9
     }
 
     static func encode(_ event: InkEvent) -> [UInt8] {
@@ -58,6 +60,25 @@ enum InkCodec {
             w.u8(EventTag.undo.rawValue)
         case .redo:
             w.u8(EventTag.redo.rawValue)
+        case .transform(let selection, let transform):
+            w.u8(EventTag.transform.rawValue)
+            w.selection(selection)
+            w.transform(transform)
+        case .duplicate(let selection, let transform, let firstStroke, let firstText):
+            w.u8(EventTag.duplicate.rawValue)
+            w.selection(selection)
+            w.transform(transform)
+            w.varint(UInt64(max(firstStroke.value, 0)))
+            w.varint(UInt64(max(firstText.value, 0)))
+        case .delete(let selection):
+            w.u8(EventTag.delete.rawValue)
+            w.selection(selection)
+        case .addText(let box):
+            w.u8(EventTag.addText.rawValue)
+            w.textBox(box)
+        case .editText(let box):
+            w.u8(EventTag.editText.rawValue)
+            w.textBox(box)
         }
         return w.bytes
     }
@@ -80,6 +101,20 @@ enum InkCodec {
             event = .undo
         case .redo:
             event = .redo
+        case .transform:
+            event = .transform(try r.selection(), try r.transform())
+        case .duplicate:
+            let selection = try r.selection()
+            let transform = try r.transform()
+            let firstStroke = StrokeID(Int(clamping: try r.varint()))
+            let firstText = TextBoxID(Int(clamping: try r.varint()))
+            event = .duplicate(selection, transform, firstStroke: firstStroke, firstText: firstText)
+        case .delete:
+            event = .delete(try r.selection())
+        case .addText:
+            event = .addText(try r.textBox())
+        case .editText:
+            event = .editText(try r.textBox())
         }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after an event") }
         return event
@@ -87,7 +122,9 @@ enum InkCodec {
 
     // MARK: Snapshots
 
-    /// A session's ink and undo history, the payload of a snapshot.
+    /// A session's ink, text boxes and undo history, the payload of a snapshot: the next stroke id, the strokes, the
+    /// undo and redo steps, then, in version 2 and only on a canvas that has ever had a text box, the next text box id
+    /// and the text boxes. A canvas of ink alone is written exactly as version 1 wrote it, byte for byte.
     static func encode(_ session: InkSession) -> [UInt8] {
         var w = ByteWriter()
         w.i64(Int64(session.nextID))
@@ -97,10 +134,16 @@ enum InkCodec {
             w.u32(UInt32(stack.count))
             for edit in stack { w.edit(edit, on: session.ink) }
         }
+        if session.nextTextID > 1 || !session.texts.isEmpty {
+            w.varint(UInt64(max(session.nextTextID, 1)))
+            w.u32(UInt32(session.texts.count))
+            for box in session.texts { w.textBox(box) }
+        }
         return w.bytes
     }
 
-    static func decodeSession(_ payload: ArraySlice<UInt8>) throws -> InkSession {
+    /// A snapshot's payload, in the version its header gives.
+    static func decodeSession(_ payload: ArraySlice<UInt8>, version: UInt16 = InkStore.version) throws -> InkSession {
         var r = ByteReader(payload)
         let nextID = Int(try r.i64())
         let strokeCount = try r.count(each: 14)
@@ -116,8 +159,17 @@ enum InkCodec {
             for _ in 0..<count { stack.append(try r.edit(on: ink)) }
             stacks.append(stack)
         }
+        var nextTextID = 1
+        var texts: [TextBox] = []
+        if version >= 2, !r.isAtEnd {
+            nextTextID = Int(clamping: try r.varint())
+            let textCount = try r.count(each: 43)
+            texts.reserveCapacity(textCount)
+            for _ in 0..<textCount { texts.append(try r.textBox()) }
+        }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after a snapshot") }
-        return InkSession(ink: ink, undoStack: stacks[0], redoStack: stacks[1], nextID: nextID)
+        return InkSession(ink: ink, texts: texts, undoStack: stacks[0], redoStack: stacks[1], nextID: nextID,
+                          nextTextID: nextTextID)
     }
 }
 
@@ -181,8 +233,9 @@ struct ByteWriter {
         }
     }
 
-    /// An undo or redo step. A stroke the step names that is on the canvas is written as its id, since the snapshot
-    /// already holds it; only strokes the history alone holds (erased, or undone) are written whole.
+    /// An undo or redo step. A stroke the step names that is on the canvas exactly as the step holds it is written as
+    /// its id, since the snapshot already holds it; strokes the history alone holds (erased, undone, or as they were
+    /// before a move) are written whole. Text boxes are always written whole.
     mutating func edit(_ edit: InkSession.Edit, on ink: Ink) {
         switch edit {
         case .draw(let stroke):
@@ -190,13 +243,82 @@ struct ByteWriter {
             historyStroke(stroke, on: ink)
         case .erase(let strokes):
             u8(EditTag.erase.rawValue)
-            u32(UInt32(strokes.count))
-            for item in strokes { historyStroke(item, on: ink) }
+            historyStrokes(strokes, on: ink)
+        case .transform(let strokes, let boxes, let transform):
+            u8(EditTag.transform.rawValue)
+            historyStrokes(strokes, on: ink)
+            textBoxes(boxes)
+            self.transform(transform)
+        case .duplicate(let strokes, let boxes, let sources):
+            u8(EditTag.duplicate.rawValue)
+            historyStrokes(strokes, on: ink)
+            textBoxes(boxes)
+            selection(sources)
+        case .delete(let strokes, let boxes):
+            u8(EditTag.delete.rawValue)
+            historyStrokes(strokes, on: ink)
+            textBoxes(boxes)
+        case .addText(let box):
+            u8(EditTag.addText.rawValue)
+            textBox(box)
+        case .editText(let before, let after):
+            u8(EditTag.editText.rawValue)
+            textBox(before)
+            textBox(after)
         }
     }
 
+    private mutating func historyStrokes(_ strokes: [InkStroke], on ink: Ink) {
+        u32(UInt32(strokes.count))
+        for item in strokes { historyStroke(item, on: ink) }
+    }
+
+    private mutating func textBoxes(_ boxes: [TextBox]) {
+        u32(UInt32(boxes.count))
+        for box in boxes { textBox(box) }
+    }
+
+    /// A selection: its stroke ids, then its text box ids, each as a varint count, the first id, and every later id
+    /// as its step from the one before. A selection is in ascending order, so a run of strokes drawn one after
+    /// another takes a byte an id.
+    mutating func selection(_ selection: CanvasSelection) {
+        ids(selection.strokes.map(\.value))
+        ids(selection.texts.map(\.value))
+    }
+
+    private mutating func ids(_ values: [Int]) {
+        varint(UInt64(values.count))
+        var last = 0
+        for value in values {
+            varint(UInt64(max(value - last, 0)))
+            last = value
+        }
+    }
+
+    /// A transform: its scale, then its offset in inches, as 64-bit floats.
+    mutating func transform(_ transform: CanvasTransform) {
+        f64(transform.scale)
+        f64(transform.dx.inches)
+        f64(transform.dy.inches)
+    }
+
+    /// A text box: id, corner and size in inches, letter height, markup colour, then its text as UTF-8.
+    mutating func textBox(_ box: TextBox) {
+        varint(UInt64(max(box.id.value, 0)))
+        f64(box.origin.x.inches)
+        f64(box.origin.y.inches)
+        f64(box.size.width.inches)
+        f64(box.size.height.inches)
+        f64(box.fontSize.inches)
+        u8(InkCodecTables.colourCode(box.colour))
+        let utf8 = Array(box.text.utf8)
+        varint(UInt64(utf8.count))
+        raw(utf8)
+    }
+
     private mutating func historyStroke(_ stroke: InkStroke, on ink: Ink) {
-        if ink.contains(stroke.id) {
+        // A moved stroke keeps its id, so the id alone says nothing: only the very stroke on the canvas goes by id.
+        if let index = ink.index(of: stroke.id), ink.strokes[index] == stroke {
             u8(1)
             varint(UInt64(max(stroke.id.value, 0)))
         } else {
@@ -211,6 +333,11 @@ struct ByteWriter {
 enum EditTag: UInt8 {
     case draw = 1
     case erase = 2
+    case transform = 3
+    case duplicate = 4
+    case delete = 5
+    case addText = 6
+    case editText = 7
 }
 
 struct ByteReader {
@@ -307,14 +434,81 @@ struct ByteReader {
         case .draw:
             return .draw(try historyStroke(on: ink))
         case .erase:
-            let count = try self.count(each: 2)
-            var removed: [InkStroke] = []
-            removed.reserveCapacity(count)
-            for _ in 0..<count { removed.append(try historyStroke(on: ink)) }
-            return .erase(removed)
+            return .erase(try historyStrokes(on: ink))
+        case .transform:
+            let strokes = try historyStrokes(on: ink)
+            let boxes = try textBoxes()
+            return .transform(strokes, boxes, try transform())
+        case .duplicate:
+            let strokes = try historyStrokes(on: ink)
+            let boxes = try textBoxes()
+            return .duplicate(strokes, boxes, sources: try selection())
+        case .delete:
+            let strokes = try historyStrokes(on: ink)
+            return .delete(strokes, try textBoxes())
+        case .addText:
+            return .addText(try textBox())
+        case .editText:
+            let before = try textBox()
+            return .editText(before: before, after: try textBox())
         case nil:
             throw InkCodec.Malformed(reason: "unknown undo step")
         }
+    }
+
+    private mutating func historyStrokes(on ink: Ink) throws -> [InkStroke] {
+        let count = try self.count(each: 2)
+        var strokes: [InkStroke] = []
+        strokes.reserveCapacity(count)
+        for _ in 0..<count { strokes.append(try historyStroke(on: ink)) }
+        return strokes
+    }
+
+    private mutating func textBoxes() throws -> [TextBox] {
+        let count = try self.count(each: 43)
+        var boxes: [TextBox] = []
+        boxes.reserveCapacity(count)
+        for _ in 0..<count { boxes.append(try textBox()) }
+        return boxes
+    }
+
+    mutating func selection() throws -> CanvasSelection {
+        let strokes = try ids().map(StrokeID.init)
+        let texts = try ids().map(TextBoxID.init)
+        return CanvasSelection(strokes: strokes, texts: texts)
+    }
+
+    private mutating func ids() throws -> [Int] {
+        let count = try varintCount(each: 1)
+        var values: [Int] = []
+        values.reserveCapacity(count)
+        var last = 0
+        for _ in 0..<count {
+            last = last.addingReportingOverflow(Int(clamping: try varint())).partialValue
+            values.append(last)
+        }
+        return values
+    }
+
+    mutating func transform() throws -> CanvasTransform {
+        let scale = try f64(), dx = try f64(), dy = try f64()
+        guard scale.isFinite, scale > 0, dx.isFinite, dy.isFinite else {
+            throw InkCodec.Malformed(reason: "a transform that is not a finite move and resize")
+        }
+        return CanvasTransform(scale: scale, dx: .inches(dx), dy: .inches(dy))
+    }
+
+    /// The text box's fixed part is 42 bytes and its text at least one more for the length, so a damaged count is
+    /// caught by `count(each: 43)`.
+    mutating func textBox() throws -> TextBox {
+        let id = TextBoxID(Int(clamping: try varint()))
+        let x = try f64(), y = try f64(), width = try f64(), height = try f64(), fontSize = try f64()
+        guard let colour = InkCodecTables.colour(try u8()) else { throw InkCodec.Malformed(reason: "unknown colour") }
+        let length = try varintCount(each: 1)
+        let text = String(decoding: try raw(length), as: UTF8.self)
+        return TextBox(id: id, origin: CanvasPoint(x: .inches(x), y: .inches(y)),
+                       size: CanvasSize(width: .inches(width), height: .inches(height)), fontSize: .inches(fontSize),
+                       colour: colour, text: text)
     }
 
     private mutating func historyStroke(on ink: Ink) throws -> InkStroke {

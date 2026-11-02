@@ -51,7 +51,7 @@ private struct CanvasLayer: View {
 
     var body: some View {
         InkCanvasView(editor: editor, isDark: isDark, viewport: editor.viewport, units: editor.canvas.units,
-                      fingerDraws: fingerDraws)
+                      fingerDraws: fingerDraws, tool: editor.tool)
     }
 }
 
@@ -318,7 +318,7 @@ private struct StatusBar: View {
             // The readouts are their own views, so the pen moving or the zoom changing redraws only them.
             PenReadout(editor: editor)
             ScaleReadout(editor: editor)
-            ToolPrompt(tool: editor.tool)
+            ToolPrompt(tool: editor.tool, hasSelection: !editor.selection.isEmpty)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(countText)
                 .foregroundStyle(Chrome.secondaryText)
@@ -355,10 +355,12 @@ private struct StatusBar: View {
 /// this text.
 private struct ToolPrompt: View {
     let tool: CanvasTool
+    /// Whether the lasso has a selection, which it then says to drag (#7).
+    let hasSelection: Bool
     @AppStorage(FingerDrawingSetting.storageKey) private var fingerDraws = FingerDrawingSetting.default
 
     var body: some View {
-        Text(tool.prompt(fingerDraws: fingerDraws))
+        Text(tool.prompt(fingerDraws: fingerDraws, hasSelection: hasSelection))
             .foregroundStyle(Chrome.secondaryText)
             .lineLimit(1)
             .truncationMode(.tail)

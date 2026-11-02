@@ -313,6 +313,66 @@ final class StorageBudgetTests: XCTestCase {
         XCTAssertEqual(session.ink.count, 600)
     }
 
+    // MARK: Moving a selection (#7)
+
+    /// A canvas of 1,000 strokes of `points` points each, ids 1 to 1,000, and a store to append to.
+    private func thousandStrokes(points: Int) throws -> (InkSession, InkStore) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vellum-move-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        var session = InkSession()
+        for i in 0..<1_000 {
+            let line = (0..<points).map { k in
+                CanvasPoint(x: .inches(Double(i % 40) * 10 + Double(k) * 0.05), y: .inches(Double(i / 40) * 10 + sin(Double(k))))
+            }
+            session.draw(line, tool: .pen, colour: .red, width: .inches(0.1))
+        }
+        let store = try InkStore(folder: folder)
+        try store.append(session.takeEvents())
+        return (session, store)
+    }
+
+    /// The bytes one selection change appends to the log.
+    private func bytesAppended(_ change: (inout InkSession) -> Void, points: Int = 120) throws -> (bytes: Int, operations: Int) {
+        let (start, store) = try thousandStrokes(points: points)
+        var session = start
+        change(&session)
+        let before = FileWork.current
+        try store.append(session.takeEvents())
+        let work = FileWork.current - before
+        store.closeFiles()
+        return (work.bytesWritten, work.operations)
+    }
+
+    private static let all = CanvasSelection(strokes: (1...1_000).map(StrokeID.init))
+    private static let move = CanvasTransform.translation(dx: .inches(3.5), dy: .inches(-2))
+
+    /// Moving 1,000 strokes logs their ids and the transform, about a byte a stroke, never their points: the record is
+    /// the same size whether the strokes have 120 points or 2, so no stroke is encoded again.
+    func testMovingAThousandStrokesLogsTheirIdsNotTheirPoints() throws {
+        let long = try bytesAppended({ $0.transform(Self.all, by: Self.move) }, points: 120)
+        let short = try bytesAppended({ $0.transform(Self.all, by: Self.move) }, points: 2)
+        assertWithinBudget("bytes-appended-per-1000-stroke-move", long.bytes)
+        assertWithinBudget("file-operations-per-append", long.operations)
+        // Were the moved strokes written again, the 120-point record would be longer by one stroke's extra points
+        // for every stroke re-encoded.
+        let oneLong = InkStroke(id: StrokeID(1), tool: .pen, colour: .red, width: .inches(0.1),
+                                points: (0..<120).map { CanvasPoint(x: .inches(Double($0) * 0.05), y: .inches(sin(Double($0)))) })
+        let oneShort = InkStroke(id: StrokeID(1), tool: .pen, colour: .red, width: .inches(0.1),
+                                 points: Array(oneLong.points.prefix(2)))
+        let perStroke = InkCodec.encode(.draw(oneLong)).count - InkCodec.encode(.draw(oneShort)).count
+        assertWithinBudget("strokes-reencoded-per-move", (long.bytes - short.bytes) / perStroke)
+    }
+
+    func testDuplicatingOrDeletingAThousandStrokesLogsTheirIds() throws {
+        let duplicate = try bytesAppended { session in
+            _ = session.duplicate(Self.all, by: Self.move)
+        }
+        assertWithinBudget("bytes-appended-per-1000-stroke-duplicate", duplicate.bytes)
+        let delete = try bytesAppended { $0.delete(Self.all) }
+        assertWithinBudget("bytes-appended-per-1000-stroke-delete", delete.bytes)
+    }
+
     // MARK: Baselines
 
     func testTheBaselineFileIsRead() {

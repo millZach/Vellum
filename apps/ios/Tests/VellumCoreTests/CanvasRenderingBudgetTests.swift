@@ -231,6 +231,41 @@ final class CanvasRenderingBudgetTests: XCTestCase {
         check("finger_cancelled_sweep_strokes_erased", Double(3 - sweep.session.ink.strokes.count), before: 0)
     }
 
+    /// The lasso (#7): a loop round the middle of the 10,000-stroke canvas at everything, a quarter of its height
+    /// across. It looks only at strokes whose bounds meet the loop's, through the index, and at most 32 points of each.
+    /// A plain approach tests every point of every stroke on the canvas.
+    func testALassoLooksOnlyAtStrokesNearItsLoop() throws {
+        let bounds = try XCTUnwrap(Self.ink.bounds)
+        let radius = min(bounds.size.width, bounds.size.height).inches / 8
+        let centre = bounds.center
+        let loop = (0..<400).map { i -> CanvasPoint in
+            let a = Double(i) / 400 * 2 * Double.pi
+            return CanvasPoint(x: .inches(centre.x.inches + radius * cos(a)), y: .inches(centre.y.inches + radius * sin(a)))
+        }
+        let lasso = try XCTUnwrap(Lasso(loop))
+        var work = InkIndex.Work()
+        let selection = lasso.select(in: Self.index, texts: [], work: &work)
+        print("lasso selected \(selection.strokes.count) strokes")
+        XCTAssertGreaterThan(selection.strokes.count, 10)
+        check("lasso_strokes_visited", Double(work.strokesVisited), before: Double(Self.ink.strokes.count))
+        check("lasso_points_inspected", Double(work.pointsInspected), before: Double(Self.totalPoints))
+    }
+
+    /// Snapping at a hold (#7) reads the stroke twice and fits shapes to 64 points spaced along it, however many
+    /// samples the stroke has: here a 10,000-sample circle. It runs once at the hold, never per Pencil sample.
+    func testSnappingAtAHoldTestsABoundedNumberOfPoints() throws {
+        let samples = 10_000
+        let circle = (0...samples).map { i -> CanvasPoint in
+            let a = Double(i) / Double(samples) * 2 * Double.pi
+            return CanvasPoint(x: .inches(60 * cos(a)), y: .inches(60 * sin(a)))
+        }
+        var work = ShapeSnap.Work()
+        let shape = ShapeSnap.recognize(circle, minimumSize: .zero, work: &work)
+        XCTAssertEqual(shape?.name, "circle")
+        check("snap_points_tested_per_hold", Double(work.pointsTested), before: Double(samples))
+        check("snap_points_read_per_hold", Double(work.pointsRead), before: Double(samples))
+    }
+
     func testTilesCoverTheirRegionWithoutGaps() {
         let tiling = InkTiling(level: 3, anchor: CanvasPoint(x: .inches(1_000), y: .inches(-500)))
         let box = InkIndex.Box(minX: 990, minY: -530, maxX: 1_200, maxY: -400)

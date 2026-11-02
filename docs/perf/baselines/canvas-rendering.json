@@ -111,6 +111,46 @@
       "note": "A finger eraser sweep over three strokes cancelled by a second finger 80 ms after touchdown: strokes erased. The sweep holds its samples while pending, so nothing is erased. New with #24."
     },
     {
+      "metric": "lasso_strokes_visited",
+      "kind": "count",
+      "value": 1240,
+      "before": 10000,
+      "unit": "strokes",
+      "tolerance": 0,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 CI run 41375765893 (deterministic; also Linux Swift)",
+      "note": "A lasso loop round the middle of the 10,000-stroke canvas, a quarter of its height across, at everything (#7): strokes whose cached bounds the index compared. The before is a plain scan of every stroke. New with #7."
+    },
+    {
+      "metric": "lasso_points_inspected",
+      "kind": "count",
+      "value": 24570,
+      "before": 794528,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 CI run 41375765893 (deterministic; also Linux Swift)",
+      "note": "The same lasso: points tested against the loop, Lasso.pointsTested (32) per stroke whose bounds meet the loop's (along its length for a stroke with fewer points). The before is every point of every stroke. New with #7."
+    },
+    {
+      "metric": "snap_points_tested_per_hold",
+      "kind": "count",
+      "value": 5733,
+      "before": 10000,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "feat/snap-lasso-text 2026-11-02 CI run 41364633767 (deterministic; also Linux Swift)",
+      "note": "Recognising a 10,000-sample circle when the Pencil holds still (#7): evenly spaced points tested against the candidate shapes, 63 points at 90 angles for the smallest bounding rectangle and 63 for the fit, the same however long the stroke. Runs once per hold, never per Pencil sample. The before is the stroke's samples, for scale. New with #7."
+    },
+    {
+      "metric": "snap_points_read_per_hold",
+      "kind": "count",
+      "value": 20002,
+      "before": 10000,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "feat/snap-lasso-text 2026-11-02 CI run 41364633767 (deterministic; also Linux Swift)",
+      "note": "The same hold: the stroke's points read, twice (its length and bounds, then spacing 64 points along it). Once per hold. New with #7."
+    },
+    {
       "metric": "draw_frame_ms_max",
       "kind": "time",
       "value": 4.27,
@@ -337,6 +377,114 @@
       "tolerance": 0.25,
       "measured": "402cf05 2026-11-01 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41322007076",
       "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only: an optimised Release build on a shared simulator that runs at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. Main's renderer finished only 3 to 4 frames of this in its 20-second cap."
+    },
+    {
+      "metric": "drag_frame_ms_max",
+      "kind": "time",
+      "value": 37.79,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. The median is the drag itself (one transform a frame); the slow frames are the tiles the selection left and landed on being redrawn, whose stroke lookup runs on the main thread. New with #7."
+    },
+    {
+      "metric": "drag_frame_ms_max_release",
+      "kind": "time",
+      "value": 33.86,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. The median is the drag itself (one transform a frame); the slow frames are the tiles the selection left and landed on being redrawn, whose stroke lookup runs on the main thread. New with #7."
+    },
+    {
+      "metric": "drag_frame_ms_p50",
+      "kind": "time",
+      "value": 2.26,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. The median is the drag itself (one transform a frame); the slow frames are the tiles the selection left and landed on being redrawn, whose stroke lookup runs on the main thread. New with #7."
+    },
+    {
+      "metric": "drag_frame_ms_p50_release",
+      "kind": "time",
+      "value": 1.74,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. The median is the drag itself (one transform a frame); the slow frames are the tiles the selection left and landed on being redrawn, whose stroke lookup runs on the main thread. New with #7."
+    },
+    {
+      "metric": "drag_frame_ms_p95",
+      "kind": "time",
+      "value": 30.57,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. The median is the drag itself (one transform a frame); the slow frames are the tiles the selection left and landed on being redrawn, whose stroke lookup runs on the main thread. New with #7."
+    },
+    {
+      "metric": "drag_frame_ms_p95_release",
+      "kind": "time",
+      "value": 25.88,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. The median is the drag itself (one transform a frame); the slow frames are the tiles the selection left and landed on being redrawn, whose stroke lookup runs on the main thread. New with #7."
+    },
+    {
+      "metric": "snap_frame_ms_max",
+      "kind": "time",
+      "value": 14.33,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7."
+    },
+    {
+      "metric": "snap_frame_ms_max_release",
+      "kind": "time",
+      "value": 6.64,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7."
+    },
+    {
+      "metric": "snap_frame_ms_p50",
+      "kind": "time",
+      "value": 1.31,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7."
+    },
+    {
+      "metric": "snap_frame_ms_p50_release",
+      "kind": "time",
+      "value": 1.34,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7."
+    },
+    {
+      "metric": "snap_frame_ms_p95",
+      "kind": "time",
+      "value": 1.74,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7."
+    },
+    {
+      "metric": "snap_frame_ms_p95_release",
+      "kind": "time",
+      "value": 1.87,
+      "unit": "ms",
+      "tolerance": 0.25,
+      "measured": "feat/snap-lasso-text 431a6a5 2026-11-02 GitHub xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; CI run 41375765893",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7."
     }
   ]
 }

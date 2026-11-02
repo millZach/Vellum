@@ -150,6 +150,7 @@ final class CanvasesModel {
         // From the test canvas, the list's chevron closes it and the canvas under it, which is saved as always.
         testEditor = nil
         guard let editor = openEditor else { return }
+        editor.finishTextEditing()
         openEditor = nil
         lastOpened = nil
         if let saver = editor.saver, let savers {
@@ -213,6 +214,8 @@ final class CanvasesModel {
 
     /// The app is leaving the screen: flush every canvas still being written to storage while iOS still lets it run.
     func appWillLeaveScreen() {
+        // A text box being typed in is saved first, so its text is flushed with everything else.
+        openEditor?.finishTextEditing()
         guard let savers else { return }
         let task = BackgroundTask.begin()
         savers.flushAll { task.end() }

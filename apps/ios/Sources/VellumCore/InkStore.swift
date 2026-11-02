@@ -64,7 +64,11 @@ public final class InkStore {
         public var description: String { "The ink log can't be written: \(reason)" }
     }
 
-    static let version: UInt16 = 1
+    /// The ink files' version. Version 2 (#7) adds event kinds (moves and resizes, duplicates, deletes, text boxes)
+    /// and the snapshot's text boxes. A version 1 file opens as it is: its events are the first four kinds, and a
+    /// version 1 snapshot is read as one with no text boxes. Events are told apart by their kind's code, which is never
+    /// reused, so new events appended to a version 1 log replay too; the next compaction writes version 2 files.
+    static let version: UInt16 = 2
     static let snapshotMagic: [UInt8] = Array("VINK".utf8)
     static let logMagic: [UInt8] = Array("VLOG".utf8)
     /// The log's header: magic (4), version (2), reserved (2), generation (8).
@@ -121,11 +125,12 @@ public final class InkStore {
         var takenAt = Self.headerSize
         var snapshotSize = 0
         if let bytes = try DurableFile.read(snapshotURL) {
-            (generation, takenAt) = try Self.readSnapshotHeader(bytes)
+            let version: UInt16
+            (generation, takenAt, version) = try Self.readSnapshotHeader(bytes)
             let (payloads, end) = InkCodec.unframe(bytes, from: Self.snapshotHeaderSize)
             guard payloads.count == 1, end == bytes.count else { throw OpenError.damagedSnapshot("checksum or length") }
             do {
-                session = try InkCodec.decodeSession(payloads[0])
+                session = try InkCodec.decodeSession(payloads[0], version: version)
             } catch {
                 throw OpenError.damagedSnapshot("\(error)")
             }
@@ -136,7 +141,7 @@ public final class InkStore {
         var logSize = Self.headerSize
         var freshLog: [UInt8]?
         if let bytes = try DurableFile.read(logURL), bytes.count >= Self.headerSize {
-            let logGeneration = try Self.readHeader(bytes, magic: Self.logMagic, name: Self.logName)
+            let logGeneration = try Self.readHeader(bytes, magic: Self.logMagic, name: Self.logName).generation
             if logGeneration > generation {
                 throw OpenError.logAheadOfSnapshot
             } else if logGeneration == generation {
@@ -407,21 +412,22 @@ public final class InkStore {
         return w.bytes
     }
 
-    private static func readHeader(_ bytes: [UInt8], magic: [UInt8], name: String) throws -> UInt64 {
+    private static func readHeader(_ bytes: [UInt8], magic: [UInt8], name: String) throws
+        -> (generation: UInt64, version: UInt16) {
         guard bytes.count >= headerSize, Array(bytes[0..<4]) == magic else { throw OpenError.notInkFile(name) }
         var r = ByteReader(bytes[4..<headerSize])
         let version = try r.u16()
         guard version <= Self.version else { throw OpenError.unsupportedVersion(name, version) }
         _ = try r.u16()
-        return try r.u64()
+        return (try r.u64(), version)
     }
 
-    /// The snapshot's generation and where in the previous generation's log it was taken.
-    private static func readSnapshotHeader(_ bytes: [UInt8]) throws -> (UInt64, Int) {
-        let generation = try readHeader(bytes, magic: snapshotMagic, name: snapshotName)
+    /// The snapshot's generation, where in the previous generation's log it was taken, and its version.
+    private static func readSnapshotHeader(_ bytes: [UInt8]) throws -> (UInt64, Int, UInt16) {
+        let (generation, version) = try readHeader(bytes, magic: snapshotMagic, name: snapshotName)
         guard bytes.count >= snapshotHeaderSize else { throw OpenError.damagedSnapshot("header cut short") }
         var r = ByteReader(bytes[headerSize..<snapshotHeaderSize])
-        return (generation, Int(clamping: try r.u64()))
+        return (generation, Int(clamping: try r.u64()), version)
     }
 }
 

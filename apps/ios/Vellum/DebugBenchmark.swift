@@ -125,6 +125,56 @@ final class DebugBenchmark: NSObject {
                     view.moveInput(samples: samples, predicted: [])
                 }
             }, tearDown: { b in b.editor.tool = .pen }),
+            // #7: dragging a lasso selection. The loop is taken above the eraser's band, round a few hundred strokes,
+            // and the Pencil lands on it in the set-up, which lifts the strokes onto their own layer; each frame then
+            // moves them by one transform, and the last frame drops them, which saves the move as one record.
+            Scenario(name: "drag", frames: 240, setUp: { b in
+                b.editor.zoomToEverything()
+                b.editor.tool = .lasso
+                guard let view = b.view else { return }
+                let centre = CGPoint(x: view.bounds.midX, y: 150)
+                let loop = (0..<120).map { i -> CanvasPoint in
+                    let a = Double(i) / 120 * 2 * .pi
+                    return b.editor.viewport.canvasPoint(for: ScreenPoint(x: Double(centre.x) + 160 * cos(a), y: Double(centre.y) + 60 * sin(a)))
+                }
+                b.editor.selectInLoop(loop)
+                b.record("  drag selection strokes=\(b.editor.selection.strokes.count)")
+                b.strokePoint = centre
+                _ = view.beginInput(at: centre)
+            }, step: { b, i in
+                guard let view = b.view else { return }
+                b.strokePoint.x += i < 120 ? 1.5 : -1.5
+                b.strokePoint.y += 0.5
+                if i == 239 {
+                    view.endInput(samples: [b.strokePoint], keep: true)
+                } else {
+                    view.moveInput(samples: [b.strokePoint], predicted: [])
+                }
+            }, tearDown: { b in
+                b.editor.tool = .pen
+            }),
+            // #7: a rough box drawn with the pen over 120 frames, held still for 80 (the hold snaps it to a
+            // rectangle, recognised once), then lifted.
+            Scenario(name: "snap", frames: 200, setUp: { b in
+                b.editor.zoomToEverything()
+                b.editor.tool = .pen
+                guard let view = b.view else { return }
+                b.strokePoint = CGPoint(x: 160, y: 440)
+                _ = view.beginInput(at: b.strokePoint)
+            }, step: { b, i in
+                guard let view = b.view else { return }
+                if i < 120 {
+                    // Round the box's four sides, 30 frames each, with a little wobble.
+                    let corners = [CGPoint(x: 160, y: 440), CGPoint(x: 420, y: 444), CGPoint(x: 416, y: 580),
+                                   CGPoint(x: 162, y: 576), CGPoint(x: 164, y: 446)]
+                    let side = i / 30, t = CGFloat(i % 30 + 1) / 30
+                    let a = corners[side], c = corners[side + 1]
+                    b.strokePoint = CGPoint(x: a.x + (c.x - a.x) * t + sin(CGFloat(i)), y: a.y + (c.y - a.y) * t)
+                    view.moveInput(samples: [b.strokePoint], predicted: [])
+                } else if i == 199 {
+                    view.endInput(samples: [], keep: true)
+                }
+            }, tearDown: { _ in }),
         ]
     }
 
@@ -243,7 +293,7 @@ final class DebugBenchmark: NSObject {
         record("done")
     }
 
-    private func record(_ line: String) {
+    fileprivate func record(_ line: String) {
         print("VellumBenchmark: " + line)
         lines.append(line)
         let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]

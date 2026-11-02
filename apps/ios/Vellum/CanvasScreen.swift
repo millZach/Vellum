@@ -21,11 +21,18 @@ struct CanvasScreen: View {
                 let safe = proxy.safeAreaInsets
                 HStack(alignment: .top, spacing: 8) {
                     ToolRail(editor: editor)
-                    VStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
                         HStack(alignment: .top) {
+                            // The top bar takes the room it needs before the spacer does, so the canvas name shows
+                            // in full whenever it fits beside the actions.
                             TopBar(editor: editor, showCanvases: showCanvases)
+                                .layoutPriority(1)
                             Spacer(minLength: 8)
                             CanvasActions()
+                        }
+                        if editor.tool == .frame {
+                            FramePaperPicker(editor: editor)
+                                .padding(.top, 8)
                         }
                         Spacer(minLength: 0)
                         StatusBar(editor: editor)
@@ -205,6 +212,7 @@ private struct TopBar: View {
             Text(editor.canvas.name)
                 .font(.system(size: 14, weight: .bold))
                 .lineLimit(1)
+                .layoutPriority(1)
                 .onLongPressGesture(minimumDuration: 0.8) {
                     if testCanvas != nil { offersTestCanvas = true }
                 }
@@ -306,6 +314,32 @@ private struct CanvasActions: View {
     }
 }
 
+/// The paper a frame is drawn on, under the top bar while the frame tool is in hand (#8, "drag a box"): the scale
+/// comes from the drag, so the paper is the only thing to pick.
+private struct FramePaperPicker: View {
+    @Bindable var editor: CanvasEditor
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Frame paper").foregroundStyle(Chrome.secondaryText)
+            Picker("Frame paper", selection: $editor.framePaper) {
+                ForEach(PaperSize.frameSizes, id: \.self) { paper in
+                    Text(paper.name).tag(paper)
+                }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            Text("Scale: from your drag").foregroundStyle(Chrome.secondaryText)
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 10)
+        .frame(height: 36)
+        .chromePanel(cornerRadius: 10)
+        .accessibilityElement(children: .contain)
+        .accessibilityHint("The paper size of the next frame. Its drawing scale is the one whose paper covers your drag")
+    }
+}
+
 // MARK: - Status bar
 
 /// The pen's position, the scale bar, what the tool expects next, the sheet and frame count, zoom to everything, and
@@ -318,7 +352,7 @@ private struct StatusBar: View {
             // The readouts are their own views, so the pen moving or the zoom changing redraws only them.
             PenReadout(editor: editor)
             ScaleReadout(editor: editor)
-            ToolPrompt(tool: editor.tool, hasSelection: !editor.selection.isEmpty)
+            ToolPrompt(tool: editor.tool, hasSelection: !editor.selection.isEmpty, step: editor.toolStep)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(countText)
                 .foregroundStyle(Chrome.secondaryText)
@@ -344,7 +378,7 @@ private struct StatusBar: View {
     }
 
     private var countText: String {
-        let sheets = editor.canvas.sheets.count, frames = editor.canvas.frames.count
+        let sheets = editor.canvas.sheets.count, frames = editor.frameCount
         return "\(sheets) sheet\(sheets == 1 ? "" : "s") · \(frames) frame\(frames == 1 ? "" : "s")"
     }
 }
@@ -357,10 +391,12 @@ private struct ToolPrompt: View {
     let tool: CanvasTool
     /// Whether the lasso has a selection, which it then says to drag (#7).
     let hasSelection: Bool
+    /// Where a measure, dimension or window is up to (#8).
+    let step: CanvasTool.Step
     @AppStorage(FingerDrawingSetting.storageKey) private var fingerDraws = FingerDrawingSetting.default
 
     var body: some View {
-        Text(tool.prompt(fingerDraws: fingerDraws, hasSelection: hasSelection))
+        Text(tool.prompt(fingerDraws: fingerDraws, hasSelection: hasSelection, step: step))
             .foregroundStyle(Chrome.secondaryText)
             .lineLimit(1)
             .truncationMode(.tail)

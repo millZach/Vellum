@@ -101,18 +101,25 @@ extension InkStroke {
     }
 }
 
-/// What the lasso has selected: strokes and text boxes, by id, each list in ascending order without repeats. A
-/// selection is not saved; it lives on the canvas screen and follows undo and redo (#7).
+/// What the lasso has selected: strokes, text boxes, and since #8 dimensions and frames, by id, each list in ascending
+/// order without repeats. A selection is not saved; it lives on the canvas screen and follows undo and redo (#7).
 public struct CanvasSelection: Hashable, Sendable {
     public private(set) var strokes: [StrokeID]
     public private(set) var texts: [TextBoxID]
+    public private(set) var dimensions: [DimensionID]
+    public private(set) var frames: [FrameID]
 
-    public init(strokes: [StrokeID] = [], texts: [TextBoxID] = []) {
+    public init(strokes: [StrokeID] = [], texts: [TextBoxID] = [], dimensions: [DimensionID] = [],
+                frames: [FrameID] = []) {
         self.strokes = Array(Set(strokes)).sorted()
         self.texts = Array(Set(texts)).sorted()
+        self.dimensions = Array(Set(dimensions)).sorted()
+        self.frames = Array(Set(frames)).sorted()
     }
 
     public static let empty = CanvasSelection()
-    public var isEmpty: Bool { strokes.isEmpty && texts.isEmpty }
-    public var count: Int { strokes.count + texts.count }
+    public var isEmpty: Bool { strokes.isEmpty && texts.isEmpty && dimensions.isEmpty && frames.isEmpty }
+    public var count: Int { strokes.count + texts.count + dimensions.count + frames.count }
+    /// Whether it holds dimensions or frames, which the ink files only know since version 3.
+    var holdsAnnotations: Bool { !dimensions.isEmpty || !frames.isEmpty }
 }

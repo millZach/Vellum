@@ -10,3 +10,11 @@ Zach asked for a canvas he can "zoom way out" on, "like in AutoCAD model view", 
 - Each canvas chooses its units: feet and inches, decimal feet or metric. A new canvas starts in feet and inches.
 - A frame (a paper size at a drawing scale) is how a region of model space becomes one printable, sendable sheet again, as a layout viewport does in AutoCAD.
 - "Print size" means a sheet prints at its paper size when it is printed at its drawing scale.
+
+## Amendment (#8): measures, dimensions and frames read the model
+
+Zach's picks from the prototype at the tag `prototype/measure-frame` settle how lengths are read and regions framed:
+
+- **Lengths round in the canvas units.** Feet and inches round to the nearest 1/16" (Zach picked 1/16" over 1/2", 1/4" and 1"); decimal feet and metric stay as the canvas units already set them (hundredths of a foot, millimetres). A measure or dimension with either point on an NTS sheet reads printed inches marked NTS in every canvas units (`Canvas.measure`). A dimension's length is never stored: it is read from its points whenever it is drawn, so changing the canvas units changes it.
+- **A dimension is pulled off, the AutoCAD way.** Two taps, then a third point: above or below the two points reads the horizontal distance (DIMLINEAR), beside them the vertical, out at an angle or between them the straight distance (DIMALIGNED). Its points are kept on the ink grid, so it reopens exactly.
+- **A frame is a dragged box.** Zach picks the paper (8.5 × 11, 11 × 17, 24 × 36 or 30 × 42); the paper is turned the way the drag is, and the frame takes the largest standard drawing scale whose paper still covers the drag (the fewest real inches to the printed inch), centred on it (`Frame.fitting`). The scales tried are full size, the architectural scales and the engineering scales on a feet canvas, and 1:1 to 1:5000 in 1-2-5 steps on a metric one. A window offers "Make a frame here", which fits a frame to it the same way.

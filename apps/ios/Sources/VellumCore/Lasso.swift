@@ -129,15 +129,26 @@ public struct Lasso: Sendable {
         return Double(inside) >= Self.insideShare * Double(Self.pointsTested)
     }
 
-    /// What the loop selects among the ink in an index and a canvas's text boxes.
-    public func select(in index: InkIndex, texts: [TextBox]) -> CanvasSelection {
+    /// What the loop selects among the ink in an index and a canvas's text boxes, dimensions and frames. A dimension
+    /// is selected when the middle of its dimension line, where its text sits, is inside the loop; a frame when all
+    /// four of its corners are, so a loop drawn round ink inside a frame never takes the frame with it.
+    public func select(in index: InkIndex, texts: [TextBox], dimensions: [CanvasDimension] = [],
+                       frames: [Frame] = []) -> CanvasSelection {
         var work = InkIndex.Work()
-        return select(in: index, texts: texts, work: &work)
+        return select(in: index, texts: texts, dimensions: dimensions, frames: frames, work: &work)
     }
 
-    public func select(in index: InkIndex, texts: [TextBox], work: inout InkIndex.Work) -> CanvasSelection {
+    public func select(in index: InkIndex, texts: [TextBox], dimensions: [CanvasDimension] = [], frames: [Frame] = [],
+                       work: inout InkIndex.Work) -> CanvasSelection {
         let strokes = index.strokes(in: box, work: &work).filter { selects($0, work: &work) }
         let boxes = texts.filter { contains($0.rect.center) }
-        return CanvasSelection(strokes: strokes.map(\.id), texts: boxes.map(\.id))
+        let pickedDimensions = dimensions.filter { contains($0.textPosition) }
+        let pickedFrames = frames.filter { frame in
+            let b = frame.bounds
+            return [CanvasPoint(x: b.minX, y: b.minY), CanvasPoint(x: b.maxX, y: b.minY),
+                    CanvasPoint(x: b.maxX, y: b.maxY), CanvasPoint(x: b.minX, y: b.maxY)].allSatisfy(contains)
+        }
+        return CanvasSelection(strokes: strokes.map(\.id), texts: boxes.map(\.id),
+                               dimensions: pickedDimensions.map(\.id), frames: pickedFrames.map(\.id))
     }
 }

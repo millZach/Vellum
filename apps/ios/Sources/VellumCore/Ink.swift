@@ -363,32 +363,46 @@ public struct Ink: Hashable, Sendable {
 }
 
 /// What one change did to the canvas: the strokes it added and the ids of the strokes it took away, and the same for
-/// text boxes. A move or a resize takes its strokes away and adds them back, under the same ids, where they went. The
-/// canvas screen passes it on to whatever keeps state in step with the ink, so nothing has to diff or copy the whole
-/// canvas to follow a change.
+/// text boxes, dimensions and frames. A move or a resize takes its things away and adds them back, under the same ids,
+/// where they went. The canvas screen passes it on to whatever keeps state in step with the ink, so nothing has to
+/// diff or copy the whole canvas to follow a change.
 public struct InkChange: Hashable, Sendable {
     public var added: [InkStroke] = []
     public var removed: [StrokeID] = []
     public var addedTexts: [TextBox] = []
     public var removedTexts: [TextBoxID] = []
+    public var addedDimensions: [CanvasDimension] = []
+    public var removedDimensions: [DimensionID] = []
+    public var addedFrames: [Frame] = []
+    public var removedFrames: [FrameID] = []
 
     public init(added: [InkStroke] = [], removed: [StrokeID] = [], addedTexts: [TextBox] = [],
-                removedTexts: [TextBoxID] = []) {
+                removedTexts: [TextBoxID] = [], addedDimensions: [CanvasDimension] = [],
+                removedDimensions: [DimensionID] = [], addedFrames: [Frame] = [], removedFrames: [FrameID] = []) {
         self.added = added
         self.removed = removed
         self.addedTexts = addedTexts
         self.removedTexts = removedTexts
+        self.addedDimensions = addedDimensions
+        self.removedDimensions = removedDimensions
+        self.addedFrames = addedFrames
+        self.removedFrames = removedFrames
     }
 
     public static let none = InkChange()
-    public var isEmpty: Bool { added.isEmpty && removed.isEmpty && addedTexts.isEmpty && removedTexts.isEmpty }
+    public var isEmpty: Bool { added.isEmpty && removed.isEmpty && !touchesText && !touchesAnnotations }
     /// Whether text boxes changed.
     public var touchesText: Bool { !addedTexts.isEmpty || !removedTexts.isEmpty }
+    /// Whether dimensions or frames changed.
+    public var touchesAnnotations: Bool {
+        !addedDimensions.isEmpty || !removedDimensions.isEmpty || !addedFrames.isEmpty || !removedFrames.isEmpty
+    }
 }
 
 /// One change to a canvas, as it is written to the Duo (ADR-0014): a stroke drawn, strokes erased, an undo or a redo;
-/// since #7, a selection moved or resized, duplicated or deleted, and a text box placed or edited. Replaying a canvas's
-/// events in order through `InkSession.apply` rebuilds its ink, its text boxes and its undo history exactly.
+/// since #7, a selection moved or resized, duplicated or deleted, and a text box placed or edited; since #8, a
+/// dimension or a frame placed. Replaying a canvas's events in order through `InkSession.apply` rebuilds its ink, its
+/// text boxes, dimensions and frames, and its undo history exactly.
 public enum InkEvent: Hashable, Sendable {
     /// A stroke drawn, added on top of the ink. A snapped line or shape is a stroke like any other.
     case draw(InkStroke)
@@ -399,20 +413,26 @@ public enum InkEvent: Hashable, Sendable {
     case redo
     /// A selection moved or resized: the ids and the transform, never the moved strokes' points.
     case transform(CanvasSelection, CanvasTransform)
-    /// A selection duplicated: copies of its strokes and text boxes, moved by the transform, numbered in order from
-    /// `firstStroke` and `firstText`.
-    case duplicate(CanvasSelection, CanvasTransform, firstStroke: StrokeID, firstText: TextBoxID)
+    /// A selection duplicated: copies of its strokes, text boxes, dimensions and frames, moved by the transform,
+    /// numbered in order from the first ids given.
+    case duplicate(CanvasSelection, CanvasTransform, firstStroke: StrokeID, firstText: TextBoxID,
+                   firstDimension: DimensionID = DimensionID(1), firstFrame: FrameID = FrameID(1))
     /// A selection deleted, its strokes and text boxes whole.
     case delete(CanvasSelection)
     /// A text box placed, with its text.
     case addText(TextBox)
     /// A text box's text (and the height it needs) changed.
     case editText(TextBox)
+    /// A dimension placed (#8).
+    case addDimension(CanvasDimension)
+    /// A frame placed (#8).
+    case addFrame(Frame)
 }
 
-/// The ink and text boxes on a canvas, with undo and redo: drawing, erasing, and since #7 moving, resizing,
-/// duplicating and deleting a selection, and placing and editing text boxes. Every change it makes is also kept as an
-/// `InkEvent` until `takeEvents` hands it to be saved, so what is written to the Duo is exactly what was done.
+/// The ink, text boxes, dimensions and frames on a canvas, with undo and redo: drawing, erasing, and since #7 moving,
+/// resizing, duplicating and deleting a selection, and placing and editing text boxes; since #8, placing dimensions
+/// and frames. Every change it makes is also kept as an `InkEvent` until `takeEvents` hands it to be saved, so what is
+/// written to the Duo is exactly what was done.
 ///
 /// The undo history keeps the last `undoLimit` steps, and no more of them than keep the geometry only the history
 /// holds (erased strokes, undone strokes, strokes as they were before a move) under `historyPointBudget` points; the
@@ -427,10 +447,16 @@ public struct InkSession: Hashable, Sendable {
     public private(set) var ink: Ink
     /// The text boxes, in the order placed (ascending id).
     public private(set) var texts: [TextBox]
+    /// The dimensions, in the order placed (ascending id).
+    public private(set) var dimensions: [CanvasDimension]
+    /// The frames, in the order placed (ascending id).
+    public private(set) var frames: [Frame]
     private(set) var undoStack: [Edit] = []
     private(set) var redoStack: [Edit] = []
     private(set) var nextID: Int
     private(set) var nextTextID: Int
+    private(set) var nextDimensionID: Int
+    private(set) var nextFrameID: Int
     /// Points held only by the history: erased strokes in undo steps, undone strokes in redo steps.
     public private(set) var historyPoints = 0
     /// Whether the top undo step belongs to the eraser sweep in progress, so the sweep's next hit joins it.
@@ -444,6 +470,45 @@ public struct InkSession: Hashable, Sendable {
     /// the selection to the canvas screen.
     public private(set) var selectionAfterLastChange: CanvasSelection?
 
+    /// The things a selection step holds: strokes, text boxes, dimensions and frames.
+    struct Pieces: Hashable, Sendable {
+        var strokes: [InkStroke] = []
+        var texts: [TextBox] = []
+        var dimensions: [CanvasDimension] = []
+        var frames: [Frame] = []
+
+        var isEmpty: Bool { strokes.isEmpty && texts.isEmpty && dimensions.isEmpty && frames.isEmpty }
+        var holdsAnnotations: Bool { !dimensions.isEmpty || !frames.isEmpty }
+
+        var selection: CanvasSelection {
+            CanvasSelection(strokes: strokes.map(\.id), texts: texts.map(\.id), dimensions: dimensions.map(\.id),
+                            frames: frames.map(\.id))
+        }
+
+        func transformed(by transform: CanvasTransform) -> Pieces {
+            Pieces(strokes: strokes.map { $0.transformed(by: transform) },
+                   texts: texts.map { $0.transformed(by: transform) },
+                   dimensions: dimensions.map { $0.transformed(by: transform) },
+                   frames: frames.map { $0.transformed(by: transform) })
+        }
+
+        /// What putting these in place of the ones with their ids did.
+        var replacement: InkChange {
+            InkChange(added: strokes, removed: strokes.map(\.id), addedTexts: texts, removedTexts: texts.map(\.id),
+                      addedDimensions: dimensions, removedDimensions: dimensions.map(\.id), addedFrames: frames,
+                      removedFrames: frames.map(\.id))
+        }
+
+        var addition: InkChange {
+            InkChange(added: strokes, addedTexts: texts, addedDimensions: dimensions, addedFrames: frames)
+        }
+
+        var removal: InkChange {
+            InkChange(removed: strokes.map(\.id), removedTexts: texts.map(\.id),
+                      removedDimensions: dimensions.map(\.id), removedFrames: frames.map(\.id))
+        }
+    }
+
     /// One undoable step. Strokes keep their ids, and the ink is in id order, so undo and redo put each back exactly
     /// where it was without remembering positions.
     enum Edit: Hashable, Sendable {
@@ -451,34 +516,47 @@ public struct InkSession: Hashable, Sendable {
         case draw(InkStroke)
         /// Every stroke one eraser sweep took.
         case erase([InkStroke])
-        /// A selection moved or resized: its strokes and text boxes as they were before, and the transform. Redoing
-        /// works the moved ones out again from these, exactly as the first time.
-        case transform([InkStroke], [TextBox], CanvasTransform)
+        /// A selection moved or resized: what it held as it was before, and the transform. Redoing works the moved
+        /// things out again from these, exactly as the first time.
+        case transform(Pieces, CanvasTransform)
         /// A selection duplicated: the copies, and what they were copied from.
-        case duplicate([InkStroke], [TextBox], sources: CanvasSelection)
-        /// A selection deleted: its strokes and text boxes.
-        case delete([InkStroke], [TextBox])
+        case duplicate(Pieces, sources: CanvasSelection)
+        /// A selection deleted: what it held.
+        case delete(Pieces)
         /// A text box placed.
         case addText(TextBox)
         /// A text box edited: as it was, and as it is.
         case editText(before: TextBox, after: TextBox)
+        /// A dimension placed.
+        case addDimension(CanvasDimension)
+        /// A frame placed.
+        case addFrame(Frame)
     }
 
-    public init(ink: Ink = Ink(), texts: [TextBox] = []) {
+    public init(ink: Ink = Ink(), texts: [TextBox] = [], dimensions: [CanvasDimension] = [], frames: [Frame] = []) {
         self.ink = ink
         self.texts = texts.sorted { $0.id < $1.id }
+        self.dimensions = dimensions.sorted { $0.id < $1.id }
+        self.frames = frames.sorted { $0.id < $1.id }
         nextID = (ink.strokes.last?.id.value ?? 0) + 1
         nextTextID = (self.texts.last?.id.value ?? 0) + 1
+        nextDimensionID = (self.dimensions.last?.id.value ?? 0) + 1
+        nextFrameID = (self.frames.last?.id.value ?? 0) + 1
     }
 
     /// A session restored from a snapshot, with its undo history.
-    init(ink: Ink, texts: [TextBox], undoStack: [Edit], redoStack: [Edit], nextID: Int, nextTextID: Int) {
+    init(ink: Ink, texts: [TextBox], dimensions: [CanvasDimension] = [], frames: [Frame] = [], undoStack: [Edit],
+         redoStack: [Edit], nextID: Int, nextTextID: Int, nextDimensionID: Int = 1, nextFrameID: Int = 1) {
         self.ink = ink
         self.texts = texts.sorted { $0.id < $1.id }
+        self.dimensions = dimensions.sorted { $0.id < $1.id }
+        self.frames = frames.sorted { $0.id < $1.id }
         self.undoStack = undoStack
         self.redoStack = redoStack
         self.nextID = max(nextID, (ink.strokes.last?.id.value ?? 0) + 1)
         self.nextTextID = max(nextTextID, (self.texts.last?.id.value ?? 0) + 1)
+        self.nextDimensionID = max(nextDimensionID, (self.dimensions.last?.id.value ?? 0) + 1)
+        self.nextFrameID = max(nextFrameID, (self.frames.last?.id.value ?? 0) + 1)
         historyPoints = undoStack.reduce(0) { $0 + Self.heldPoints($1, inUndo: true) }
             + redoStack.reduce(0) { $0 + Self.heldPoints($1, inUndo: false) }
     }
@@ -487,9 +565,24 @@ public struct InkSession: Hashable, Sendable {
     public var canRedo: Bool { !redoStack.isEmpty }
     public var undoSteps: Int { undoStack.count }
 
+    /// Whether the canvas has ever had a dimension or a frame, so its snapshot needs version 3's annotations.
+    var hasHadAnnotations: Bool {
+        nextDimensionID > 1 || nextFrameID > 1 || !dimensions.isEmpty || !frames.isEmpty
+    }
+
     /// The text box with this id, if it is on the canvas.
     public func text(_ id: TextBoxID) -> TextBox? {
-        textIndex(id).map { texts[$0] }
+        Self.find(id, in: texts).map { texts[$0] }
+    }
+
+    /// The dimension with this id, if it is on the canvas.
+    public func dimension(_ id: DimensionID) -> CanvasDimension? {
+        Self.find(id, in: dimensions).map { dimensions[$0] }
+    }
+
+    /// The frame with this id, if it is on the canvas.
+    public func frame(_ id: FrameID) -> Frame? {
+        Self.find(id, in: frames).map { frames[$0] }
     }
 
     /// Hands over the changes made since the last call, for saving, and forgets them.
@@ -548,19 +641,28 @@ public struct InkSession: Hashable, Sendable {
     @discardableResult
     public mutating func duplicate(_ selection: CanvasSelection, by transform: CanvasTransform) -> CanvasSelection {
         guard holdsAny(of: selection) else { return .empty }
-        perform(.duplicate(selection, transform, firstStroke: StrokeID(nextID), firstText: TextBoxID(nextTextID)))
+        perform(.duplicate(selection, transform, firstStroke: StrokeID(nextID), firstText: TextBoxID(nextTextID),
+                           firstDimension: DimensionID(nextDimensionID), firstFrame: FrameID(nextFrameID)))
         return selectionAfterLastChange ?? .empty
     }
 
-    /// Deletes a selection's strokes and text boxes as one undo step.
+    /// Deletes a selection's strokes, text boxes, dimensions and frames as one undo step.
     public mutating func delete(_ selection: CanvasSelection) {
         guard holdsAny(of: selection) else { return }
         perform(.delete(selection))
     }
 
-    /// Whether any of a selection's strokes or text boxes is on the canvas, so a change to it is a step worth saving.
+    /// Whether any of a selection's things is on the canvas, so a change to it is a step worth saving.
     private func holdsAny(of selection: CanvasSelection) -> Bool {
         selection.strokes.contains { ink.contains($0) } || selection.texts.contains { text($0) != nil }
+            || selection.dimensions.contains { dimension($0) != nil } || selection.frames.contains { frame($0) != nil }
+    }
+
+    /// What a selection names that is on the canvas.
+    private func pieces(of selection: CanvasSelection) -> Pieces {
+        Pieces(strokes: selection.strokes.compactMap { id in ink.index(of: id).map { ink.strokes[$0] } },
+               texts: selection.texts.compactMap(text), dimensions: selection.dimensions.compactMap(dimension),
+               frames: selection.frames.compactMap(frame))
     }
 
     // MARK: Text boxes
@@ -590,6 +692,28 @@ public struct InkSession: Hashable, Sendable {
         guard box != self.text(id) else { return false }
         perform(.editText(box))
         return true
+    }
+
+    // MARK: Dimensions and frames (#8)
+
+    /// Places a dimension pulled off two points by a third, as one undo step, and returns it with its id. Two points
+    /// in the same place dimension nothing and place nothing.
+    @discardableResult
+    public mutating func addDimension(start: CanvasPoint, end: CanvasPoint, through: CanvasPoint,
+                                      colour: MarkupColour, textHeight: Length) -> CanvasDimension? {
+        let dimension = CanvasDimension.pulled(id: DimensionID(nextDimensionID), start: start, end: end, through: through,
+                                         colour: colour, textHeight: textHeight).onInkGrid
+        guard dimension.start != dimension.end else { return nil }
+        perform(.addDimension(dimension))
+        return dimension
+    }
+
+    /// Places a frame, as one undo step, and returns it with its id.
+    @discardableResult
+    public mutating func addFrame(paper: PaperSize, scale: DrawingScale, origin: CanvasPoint) -> Frame {
+        let frame = Frame(id: FrameID(nextFrameID), paper: paper, scale: scale, origin: origin.onInkGrid)
+        perform(.addFrame(frame))
+        return frame
     }
 
     public mutating func undo() {
@@ -644,49 +768,69 @@ public struct InkSession: Hashable, Sendable {
             return InkChange(removed: removed.map(\.id))
         case .transform(let selection, let transform):
             guard !transform.isIdentity else { return .none }
-            let strokes = selection.strokes.compactMap { id in ink.index(of: id).map { ink.strokes[$0] } }
-            let boxes = selection.texts.compactMap(text)
-            guard !strokes.isEmpty || !boxes.isEmpty else { return .none }
-            record(.transform(strokes, boxes, transform))
-            selectionAfterLastChange = Self.selection(strokes, boxes)
-            return place(strokes.map { $0.transformed(by: transform) }, boxes.map { $0.transformed(by: transform) })
-        case .duplicate(let selection, let transform, let firstStroke, let firstText):
-            let sources = selection.strokes.compactMap { id in ink.index(of: id).map { ink.strokes[$0] } }
-            let sourceBoxes = selection.texts.compactMap(text)
-            guard !sources.isEmpty || !sourceBoxes.isEmpty,
-                  firstStroke.value >= nextID || sources.isEmpty,
-                  firstText.value >= nextTextID || sourceBoxes.isEmpty else { return .none }
-            let copies = sources.enumerated().map { i, stroke in
-                stroke.transformed(by: transform, id: StrokeID(firstStroke.value + i))
-            }
-            let boxCopies = sourceBoxes.enumerated().map { i, box in
-                box.transformed(by: transform).withID(TextBoxID(firstText.value + i))
-            }
-            if let last = copies.last { nextID = last.id.value + 1 }
-            if let last = boxCopies.last { nextTextID = last.id.value + 1 }
-            ink.restore(copies)
-            insertTexts(boxCopies)
-            record(.duplicate(copies, boxCopies, sources: Self.selection(sources, sourceBoxes)))
-            selectionAfterLastChange = Self.selection(copies, boxCopies)
-            return InkChange(added: copies, addedTexts: boxCopies)
+            let before = pieces(of: selection)
+            guard !before.isEmpty else { return .none }
+            record(.transform(before, transform))
+            selectionAfterLastChange = before.selection
+            return place(before.transformed(by: transform))
+        case .duplicate(let selection, let transform, let firstStroke, let firstText, let firstDimension,
+                        let firstFrame):
+            let sources = pieces(of: selection)
+            guard !sources.isEmpty,
+                  firstStroke.value >= nextID || sources.strokes.isEmpty,
+                  firstText.value >= nextTextID || sources.texts.isEmpty,
+                  firstDimension.value >= nextDimensionID || sources.dimensions.isEmpty,
+                  firstFrame.value >= nextFrameID || sources.frames.isEmpty else { return .none }
+            let copies = Pieces(
+                strokes: sources.strokes.enumerated().map { i, stroke in
+                    stroke.transformed(by: transform, id: StrokeID(firstStroke.value + i))
+                },
+                texts: sources.texts.enumerated().map { i, box in
+                    box.transformed(by: transform).withID(TextBoxID(firstText.value + i))
+                },
+                dimensions: sources.dimensions.enumerated().map { i, dimension in
+                    dimension.transformed(by: transform, id: DimensionID(firstDimension.value + i))
+                },
+                frames: sources.frames.enumerated().map { i, frame in
+                    frame.transformed(by: transform, id: FrameID(firstFrame.value + i))
+                })
+            if let last = copies.strokes.last { nextID = last.id.value + 1 }
+            if let last = copies.texts.last { nextTextID = last.id.value + 1 }
+            if let last = copies.dimensions.last { nextDimensionID = last.id.value + 1 }
+            if let last = copies.frames.last { nextFrameID = last.id.value + 1 }
+            insert(copies)
+            record(.duplicate(copies, sources: sources.selection))
+            selectionAfterLastChange = copies.selection
+            return copies.addition
         case .delete(let selection):
-            let removed = ink.remove(selection.strokes)
-            let removedBoxes = removeTexts(selection.texts)
-            guard !removed.isEmpty || !removedBoxes.isEmpty else { return .none }
-            record(.delete(removed, removedBoxes))
+            let removed = take(selection)
+            guard !removed.isEmpty else { return .none }
+            record(.delete(removed))
             selectionAfterLastChange = .empty
-            return InkChange(removed: removed.map(\.id), removedTexts: removedBoxes.map(\.id))
+            return removed.removal
         case .addText(let box):
             guard text(box.id) == nil, !box.text.isEmpty else { return .none }
             nextTextID = max(nextTextID, box.id.value + 1)
-            insertTexts([box])
+            Self.insert([box], into: &texts)
             record(.addText(box))
             return InkChange(addedTexts: [box])
         case .editText(let box):
             guard let before = text(box.id), before != box else { return .none }
-            replaceTexts([box])
+            Self.replace([box], in: &texts)
             record(.editText(before: before, after: box))
             return InkChange(addedTexts: [box], removedTexts: [box.id])
+        case .addDimension(let dimension):
+            guard self.dimension(dimension.id) == nil else { return .none }
+            nextDimensionID = max(nextDimensionID, dimension.id.value + 1)
+            Self.insert([dimension], into: &dimensions)
+            record(.addDimension(dimension))
+            return InkChange(addedDimensions: [dimension])
+        case .addFrame(let frame):
+            guard self.frame(frame.id) == nil else { return .none }
+            nextFrameID = max(nextFrameID, frame.id.value + 1)
+            Self.insert([frame], into: &frames)
+            record(.addFrame(frame))
+            return InkChange(addedFrames: [frame])
         case .undo:
             guard let edit = undoStack.popLast() else { return .none }
             sweepHasEntry = false
@@ -712,25 +856,29 @@ public struct InkSession: Hashable, Sendable {
         case .erase(let strokes):
             ink.restore(strokes)
             return InkChange(added: strokes)
-        case .transform(let strokes, let boxes, _):
-            selectionAfterLastChange = Self.selection(strokes, boxes)
-            return place(strokes, boxes)
-        case .duplicate(let copies, let boxes, let sources):
-            ink.remove(copies.map(\.id))
-            removeTexts(boxes.map(\.id))
+        case .transform(let before, _):
+            selectionAfterLastChange = before.selection
+            return place(before)
+        case .duplicate(let copies, let sources):
+            take(copies.selection)
             selectionAfterLastChange = sources
-            return InkChange(removed: copies.map(\.id), removedTexts: boxes.map(\.id))
-        case .delete(let strokes, let boxes):
-            ink.restore(strokes)
-            insertTexts(boxes)
-            selectionAfterLastChange = Self.selection(strokes, boxes)
-            return InkChange(added: strokes, addedTexts: boxes)
+            return copies.removal
+        case .delete(let removed):
+            insert(removed)
+            selectionAfterLastChange = removed.selection
+            return removed.addition
         case .addText(let box):
-            removeTexts([box.id])
+            Self.remove([box.id], from: &texts)
             return InkChange(removedTexts: [box.id])
         case .editText(let before, _):
-            replaceTexts([before])
+            Self.replace([before], in: &texts)
             return InkChange(addedTexts: [before], removedTexts: [before.id])
+        case .addDimension(let dimension):
+            Self.remove([dimension.id], from: &dimensions)
+            return InkChange(removedDimensions: [dimension.id])
+        case .addFrame(let frame):
+            Self.remove([frame.id], from: &frames)
+            return InkChange(removedFrames: [frame.id])
         }
     }
 
@@ -742,68 +890,86 @@ public struct InkSession: Hashable, Sendable {
         case .erase(let strokes):
             ink.remove(strokes.map(\.id))
             return InkChange(removed: strokes.map(\.id))
-        case .transform(let strokes, let boxes, let transform):
-            selectionAfterLastChange = Self.selection(strokes, boxes)
-            return place(strokes.map { $0.transformed(by: transform) }, boxes.map { $0.transformed(by: transform) })
-        case .duplicate(let copies, let boxes, _):
-            ink.restore(copies)
-            insertTexts(boxes)
-            selectionAfterLastChange = Self.selection(copies, boxes)
-            return InkChange(added: copies, addedTexts: boxes)
-        case .delete(let strokes, let boxes):
-            ink.remove(strokes.map(\.id))
-            removeTexts(boxes.map(\.id))
+        case .transform(let before, let transform):
+            selectionAfterLastChange = before.selection
+            return place(before.transformed(by: transform))
+        case .duplicate(let copies, _):
+            insert(copies)
+            selectionAfterLastChange = copies.selection
+            return copies.addition
+        case .delete(let removed):
+            take(removed.selection)
             selectionAfterLastChange = .empty
-            return InkChange(removed: strokes.map(\.id), removedTexts: boxes.map(\.id))
+            return removed.removal
         case .addText(let box):
-            insertTexts([box])
+            Self.insert([box], into: &texts)
             return InkChange(addedTexts: [box])
         case .editText(_, let after):
-            replaceTexts([after])
+            Self.replace([after], in: &texts)
             return InkChange(addedTexts: [after], removedTexts: [after.id])
+        case .addDimension(let dimension):
+            Self.insert([dimension], into: &dimensions)
+            return InkChange(addedDimensions: [dimension])
+        case .addFrame(let frame):
+            Self.insert([frame], into: &frames)
+            return InkChange(addedFrames: [frame])
         }
     }
 
-    /// Puts strokes and text boxes in place of the ones with their ids: a move, a resize, or undoing one.
-    private mutating func place(_ strokes: [InkStroke], _ boxes: [TextBox]) -> InkChange {
-        ink.replace(strokes)
-        replaceTexts(boxes)
-        return InkChange(added: strokes, removed: strokes.map(\.id), addedTexts: boxes, removedTexts: boxes.map(\.id))
+    /// Puts things in place of the ones with their ids: a move, a resize, or undoing one.
+    private mutating func place(_ pieces: Pieces) -> InkChange {
+        ink.replace(pieces.strokes)
+        Self.replace(pieces.texts, in: &texts)
+        Self.replace(pieces.dimensions, in: &dimensions)
+        Self.replace(pieces.frames, in: &frames)
+        return pieces.replacement
     }
 
-    private static func selection(_ strokes: [InkStroke], _ boxes: [TextBox]) -> CanvasSelection {
-        CanvasSelection(strokes: strokes.map(\.id), texts: boxes.map(\.id))
+    /// Adds things back (an undone delete, a duplicate), each in its place by id.
+    private mutating func insert(_ pieces: Pieces) {
+        ink.restore(pieces.strokes)
+        Self.insert(pieces.texts, into: &texts)
+        Self.insert(pieces.dimensions, into: &dimensions)
+        Self.insert(pieces.frames, into: &frames)
     }
 
-    // MARK: The text boxes, in id order
+    /// Takes away what a selection names and returns what was there.
+    @discardableResult
+    private mutating func take(_ selection: CanvasSelection) -> Pieces {
+        Pieces(strokes: ink.remove(selection.strokes), texts: Self.remove(selection.texts, from: &texts),
+               dimensions: Self.remove(selection.dimensions, from: &dimensions),
+               frames: Self.remove(selection.frames, from: &frames))
+    }
 
-    private func textIndex(_ id: TextBoxID) -> Int? {
-        var low = 0, high = texts.count
+    // MARK: Text boxes, dimensions and frames, each in id order
+
+    private static func find<T: Identifiable>(_ id: T.ID, in list: [T]) -> Int? where T.ID: Comparable {
+        var low = 0, high = list.count
         while low < high {
             let mid = (low + high) / 2
-            if texts[mid].id < id { low = mid + 1 } else { high = mid }
+            if list[mid].id < id { low = mid + 1 } else { high = mid }
         }
-        return low < texts.count && texts[low].id == id ? low : nil
+        return low < list.count && list[low].id == id ? low : nil
     }
 
-    private mutating func insertTexts(_ boxes: [TextBox]) {
-        guard !boxes.isEmpty else { return }
-        for box in boxes where textIndex(box.id) == nil { texts.append(box) }
-        if zip(texts, texts.dropFirst()).contains(where: { $0.id > $1.id }) { texts.sort { $0.id < $1.id } }
+    private static func insert<T: Identifiable>(_ items: [T], into list: inout [T]) where T.ID: Comparable {
+        guard !items.isEmpty else { return }
+        for item in items where find(item.id, in: list) == nil { list.append(item) }
+        if zip(list, list.dropFirst()).contains(where: { $0.id > $1.id }) { list.sort { $0.id < $1.id } }
     }
 
     @discardableResult
-    private mutating func removeTexts(_ ids: [TextBoxID]) -> [TextBox] {
+    private static func remove<T: Identifiable>(_ ids: [T.ID], from list: inout [T]) -> [T] where T.ID: Comparable {
         guard !ids.isEmpty else { return [] }
         let gone = Set(ids)
-        let removed = texts.filter { gone.contains($0.id) }
-        if !removed.isEmpty { texts.removeAll { gone.contains($0.id) } }
+        let removed = list.filter { gone.contains($0.id) }
+        if !removed.isEmpty { list.removeAll { gone.contains($0.id) } }
         return removed
     }
 
-    private mutating func replaceTexts(_ boxes: [TextBox]) {
-        for box in boxes {
-            if let i = textIndex(box.id) { texts[i] = box }
+    private static func replace<T: Identifiable>(_ items: [T], in list: inout [T]) where T.ID: Comparable {
+        for item in items {
+            if let i = find(item.id, in: list) { list[i] = item }
         }
     }
 
@@ -849,11 +1015,12 @@ public struct InkSession: Hashable, Sendable {
 
     /// The points of an edit's strokes that only the history holds: an undo step's erased or deleted strokes, or its
     /// strokes as they were before a move; a redo step's undone stroke or copies. The rest are on the canvas.
+    /// Dimensions and frames hold no ink points.
     static func heldPoints(_ edit: Edit, inUndo: Bool) -> Int {
         switch (edit, inUndo) {
-        case (.erase(let strokes), true), (.delete(let strokes, _), true), (.transform(let strokes, _, _), true):
-            points(strokes)
-        case (.duplicate(let strokes, _, _), false): points(strokes)
+        case (.erase(let strokes), true): points(strokes)
+        case (.delete(let pieces), true), (.transform(let pieces, _), true): points(pieces.strokes)
+        case (.duplicate(let pieces, _), false): points(pieces.strokes)
         case (.draw(let stroke), false): stroke.points.count
         default: 0
         }
@@ -861,16 +1028,20 @@ public struct InkSession: Hashable, Sendable {
 
     private static func points(_ strokes: [InkStroke]) -> Int { strokes.reduce(0) { $0 + $1.points.count } }
 
-    /// Two sessions are equal when their ink, text boxes and undo history are; unsaved events and the sweep in
-    /// progress are not part of what is saved.
+    /// Two sessions are equal when their ink, text boxes, dimensions, frames and undo history are; unsaved events and
+    /// the sweep in progress are not part of what is saved.
     public static func == (lhs: InkSession, rhs: InkSession) -> Bool {
-        lhs.ink == rhs.ink && lhs.texts == rhs.texts && lhs.undoStack == rhs.undoStack
-            && lhs.redoStack == rhs.redoStack && lhs.nextID == rhs.nextID && lhs.nextTextID == rhs.nextTextID
+        lhs.ink == rhs.ink && lhs.texts == rhs.texts && lhs.dimensions == rhs.dimensions && lhs.frames == rhs.frames
+            && lhs.undoStack == rhs.undoStack && lhs.redoStack == rhs.redoStack && lhs.nextID == rhs.nextID
+            && lhs.nextTextID == rhs.nextTextID && lhs.nextDimensionID == rhs.nextDimensionID
+            && lhs.nextFrameID == rhs.nextFrameID
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(ink)
         hasher.combine(texts)
+        hasher.combine(dimensions)
+        hasher.combine(frames)
         hasher.combine(nextID)
     }
 }

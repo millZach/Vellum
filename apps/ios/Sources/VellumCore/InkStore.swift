@@ -68,7 +68,10 @@ public final class InkStore {
     /// and the snapshot's text boxes. A version 1 file opens as it is: its events are the first four kinds, and a
     /// version 1 snapshot is read as one with no text boxes. Events are told apart by their kind's code, which is never
     /// reused, so new events appended to a version 1 log replay too; the next compaction writes version 2 files.
-    static let version: UInt16 = 2
+    /// Version 3 (#8) adds dimensions and frames: their events, and the snapshot's dimensions and frames after its text
+    /// boxes. Older files open as they are, in the same way, and the snapshot payload of a canvas with neither is
+    /// written byte for byte as version 2 wrote it.
+    static let version: UInt16 = 3
     static let snapshotMagic: [UInt8] = Array("VINK".utf8)
     static let logMagic: [UInt8] = Array("VLOG".utf8)
     /// The log's header: magic (4), version (2), reserved (2), generation (8).

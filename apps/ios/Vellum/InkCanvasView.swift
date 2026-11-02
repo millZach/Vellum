@@ -50,6 +50,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             guard isDark != oldValue else { return }
             renderer.isDark = isDark
             textOverlay.isDark = isDark
+            annotationOverlay.isDark = isDark
             selectionOverlay.setDark(isDark)
             applyColours()
         }
@@ -63,6 +64,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             textTap.isEnabled = tool == .textBox
             scribble?.isActive = tool == .textBox
             if oldValue == .textBox { textOverlay.finishEditing() }
+            // A measure, a dimension half placed, a window: each belongs to its tool and goes when it is put down.
+            resetLengthsAndRegions(keepingMeasure: false)
         }
     }
 
@@ -71,6 +74,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         didSet {
             guard units != oldValue else { return }
             shownViewport = nil
+            annotationOverlay.unitsChanged()
             viewportDidChange()
         }
     }
@@ -161,10 +165,41 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private var scribble: CanvasScribble?
     private let textTap = UITapGestureRecognizer()
 
+    // Measure, dimension, frame and window (#8).
+    private let annotationOverlay: AnnotationOverlay
+    private let loupe = Loupe()
+    private lazy var windowMenu = WindowMenu(
+        zoom: { [weak self] in self?.zoomToWindow() },
+        makeFrame: { [weak self] in self?.makeFrameFromWindow() },
+        close: { [weak self] in self?.closeWindow() })
+    /// The Pencil (or a finger) down with one of these tools, and what it is doing.
+    private var regionInput: RegionInput?
+    /// Where the tip is now, waiting for the next display frame to be snapped and shown.
+    private var regionTip: CGPoint?
+    private var regionTipMoved = false
+    /// A measure's or dimension's points so far.
+    private var firstTarget: PointSnap.Target?
+    private var secondPoint: CanvasPoint?
+    /// The window chosen, waiting for what to do with it.
+    private var chosenWindow: CanvasRect?
+
+    /// What the Pencil is doing with the measure, dimension, frame or window tool while it is down.
+    private enum RegionInput {
+        /// Finding a measure's or dimension's point: snapped, shown in the loupe, taken on lift.
+        case point
+        /// Pulling a dimension's line off its two points.
+        case pull
+        /// Dragging a frame's box from a canvas point.
+        case frame(from: CanvasPoint)
+        /// Dragging a window from a canvas point.
+        case window(from: CanvasPoint)
+    }
+
     init(editor: CanvasEditor) {
         self.editor = editor
         renderer = InkTileRenderer(index: { [unowned editor] in editor.inkIndex })
         textOverlay = TextBoxOverlay(editor: editor)
+        annotationOverlay = AnnotationOverlay(editor: editor)
         super.init(frame: .zero)
         isOpaque = true
         isMultipleTouchEnabled = true
@@ -176,8 +211,11 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         }
         layer.addSublayer(renderer.layer)
         layer.addSublayer(renderer.pendingInkLayer)
+        annotationOverlay.install(in: self)
         textOverlay.install(in: self)
         selectionOverlay.install(in: self)
+        layer.addSublayer(loupe.layer)
+        addSubview(windowMenu)
         selectionOverlay.setDark(isDark)
         applyColours()
 
@@ -187,7 +225,15 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         }
         editor.onSelectionChange = { [weak self] in self?.selectionDidChange() }
         editor.onTextsChange = { [weak self] change in self?.textOverlay.textsChanged(change) }
-        editor.willChangeHistory = { [weak self] in self?.textOverlay.finishEditing() }
+        editor.onAnnotationsChange = { [weak self] change in
+            self?.annotationOverlay.annotationsChanged(change)
+            self?.updateSelectionOverlay()
+        }
+        editor.willChangeHistory = { [weak self] in
+            self?.textOverlay.finishEditing()
+            // Undo part way through a dimension or measure starts it again, as the prototype does.
+            self?.resetLengthsAndRegions(keepingMeasure: true)
+        }
         editor.onFinishTextEditing = { [weak self] in self?.textOverlay.finishEditing() }
         #if DEBUG
         editor.onDebugOpenStroke = { [weak self] stroke in self?.showOpenStroke(stroke) }
@@ -233,6 +279,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             sublayer.frame = bounds
         }
         CATransaction.commit()
+        annotationOverlay.resize(to: bounds)
+        Pill.displayScale = traitCollection.displayScale
         renderer.displayScale = traitCollection.displayScale
         editor.viewDidResize(width: Double(bounds.width), height: Double(bounds.height))
         shownViewport = nil
@@ -243,6 +291,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         #if DEBUG
         DebugFingerStroke.attach(self)
         DebugSelection.attach(self, editor: editor)
+        DebugMeasureFrame.attach(self, editor: editor)
         #endif
     }
 
@@ -265,6 +314,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         }
         CATransaction.commit()
         textOverlay.show(viewport)
+        annotationOverlay.show(viewport)
+        if let chosenWindow { windowMenu.place(under: screenRect(chosenWindow), in: bounds) }
+        if case .point? = regionInput { regionTipMoved = true }
         updateSelectionOverlay()
     }
 
@@ -478,6 +530,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         lastSample = location
         if editor.tool == .lasso {
             beginLasso(at: location, point: point)
+        } else if editor.tool.group == .lengthsAndRegions {
+            beginRegionInput(at: location, point: point)
         } else if editor.tool == .eraser {
             erasing = true
             if holdingEraser {
@@ -551,6 +605,10 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             lassoMoved(samples)
             return
         }
+        if regionInput != nil {
+            regionMoved(samples)
+            return
+        }
         if snappedShape != nil {
             // Snapped: the shape stays as it is until the Pencil lifts.
             if let last = samples.last {
@@ -568,7 +626,10 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     /// The Pencil lifted (or was interrupted): its last samples, and whether to keep the stroke.
     func endInput(samples: [CGPoint], keep: Bool) {
-        if lassoing || drag != nil {
+        if regionInput != nil {
+            regionMoved(samples)
+            finishRegionInput(keep: keep)
+        } else if lassoing || drag != nil {
             lassoMoved(samples)
         } else if !samples.isEmpty, snappedShape == nil {
             consume(samples, ending: true)
@@ -669,7 +730,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func stopDisplayLinkIfIdle() {
-        guard liveTouch == nil, liveStroke == nil, !erasing, !lassoing, drag == nil, fingersDown == 0 else { return }
+        guard liveTouch == nil, liveStroke == nil, !erasing, !lassoing, drag == nil, regionInput == nil,
+              fingersDown == 0 else { return }
         displayLink?.invalidate()
         displayLink = nil
     }
@@ -683,6 +745,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
            hold.update(at: ScreenPoint(x: Double(at.x), y: Double(at.y)), time: link.timestamp) {
             snapLiveStroke()
         }
+        // A measure's or dimension's point, a dimension's line, a frame or a window: followed once a frame, never
+        // per sample.
+        if regionTipMoved { regionTick() }
         publishPenPosition()
     }
 
@@ -739,12 +804,16 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private func gestureBegan() {
         fingersDown += 1
         textOverlay.isGesturing = true
+        annotationOverlay.isGesturing = true
         startDisplayLink()
     }
 
     private func gestureEnded() {
         fingersDown = max(0, fingersDown - 1)
-        if fingersDown == 0 { textOverlay.settle() }
+        if fingersDown == 0 {
+            textOverlay.settle()
+            annotationOverlay.settle()
+        }
         stopDisplayLinkIfIdle()
     }
 
@@ -774,7 +843,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard let view = touch.view, view !== self else { return true }
         if let typing = textOverlay.editing?.view, view.isDescendant(of: typing) { return false }
-        return !view.isDescendant(of: selectionOverlay.menu)
+        return !view.isDescendant(of: selectionOverlay.menu) && !view.isDescendant(of: windowMenu)
     }
 }
 
@@ -966,6 +1035,7 @@ extension InkCanvasUIView {
         current.layer.transform = Self.transform(from: current.base, to: editor.viewport, applying: current.transform)
         CATransaction.commit()
         textOverlay.drag(current.transform, ids: editor.selection.texts)
+        annotationOverlay.drag(current.transform, selection: editor.selection)
         updateSelectionOverlay()
     }
 
@@ -976,6 +1046,7 @@ extension InkCanvasUIView {
         drag = nil
         editor.dropSelection(keep ? finished.transform : .identity)
         textOverlay.drag(nil, ids: editor.selection.texts)
+        annotationOverlay.drag(nil, selection: editor.selection)
         updateSelectionOverlay()
         let layer = finished.layer
         Task { @MainActor [weak self] in
@@ -1004,7 +1075,7 @@ extension InkCanvasUIView {
     }
 
     /// Places the selection's box, handles and menu from its bounds (moved with a drag in progress).
-    private func updateSelectionOverlay() {
+    func updateSelectionOverlay() {
         guard bounds.width > 0 else { return }
         let viewport = editor.viewport
         var rect: CGRect?
@@ -1049,4 +1120,203 @@ extension InkCanvasUIView {
         let halfLine = CGFloat(TextBox.screenFontSize * 0.6)
         textOverlay.beginNew(at: canvasPoint(CGPoint(x: location.x, y: location.y - halfLine)))
     }
+}
+
+// MARK: - Measure, dimension, frame and window (#8)
+
+extension InkCanvasUIView {
+    /// A drag shorter than this on screen, in points, is a tap, and makes no frame or window.
+    private static let smallestDrag: CGFloat = 8
+
+    /// The Pencil touched down with the measure, dimension, frame or window tool.
+    private func beginRegionInput(at location: CGPoint, point: CanvasPoint) {
+        regionTip = location
+        switch editor.tool {
+        case .measure, .dimension:
+            if secondPoint != nil {
+                regionInput = .pull
+            } else {
+                regionInput = .point
+                // A new measure starts: the last one goes.
+                if editor.tool == .measure, firstTarget == nil { annotationOverlay.tool.measure = nil }
+            }
+        case .frame:
+            regionInput = .frame(from: point)
+        case .window:
+            closeWindow()
+            regionInput = .window(from: point)
+        default:
+            return
+        }
+        regionTick()
+    }
+
+    private func regionMoved(_ samples: [CGPoint]) {
+        guard let last = samples.last else { return }
+        regionTip = last
+        regionTipMoved = true
+        pendingPenPosition = canvasPoint(last)
+    }
+
+    /// Follows the tip, once a display frame: snaps it and shows the loupe, pulls the dimension's line, or sizes the
+    /// frame or window.
+    private func regionTick() {
+        regionTipMoved = false
+        guard let input = regionInput, let tip = regionTip else { return }
+        let point = canvasPoint(tip)
+        switch input {
+        case .point:
+            let target = editor.snapTarget(at: point)
+            var state = annotationOverlay.tool
+            state.tip = (point, target)
+            state.isMeasure = editor.tool == .measure
+            annotationOverlay.tool = state
+            loupe.show(tip: tip, target: target, viewport: editor.viewport, renderer: renderer, in: bounds, dark: isDark)
+        case .pull:
+            guard let first = firstTarget?.point, let second = secondPoint else { return }
+            annotationOverlay.tool.pulling = CanvasDimension.pulled(
+                id: DimensionID(0), start: first, end: second, through: point, colour: editor.colour,
+                textHeight: editor.viewport.canvasLength(ofScreen: CanvasDimension.screenTextHeight))
+        case .frame(let from):
+            let rect = Self.rect(from, point)
+            annotationOverlay.tool.frameDrag = (rect, editor.frame(fitting: rect))
+        case .window(let from):
+            annotationOverlay.tool.window = Self.rect(from, point)
+        }
+    }
+
+    /// The Pencil lifted (`keep`) or was taken away: takes the point, places the dimension or frame, or offers the
+    /// window's menu.
+    private func finishRegionInput(keep: Bool) {
+        guard let input = regionInput, let tip = regionTip else { return }
+        regionInput = nil
+        regionTipMoved = false
+        loupe.hide()
+        annotationOverlay.tool.tip = nil
+        let point = canvasPoint(tip)
+        guard keep else {
+            annotationOverlay.tool.frameDrag = nil
+            annotationOverlay.tool.window = nil
+            return
+        }
+        switch input {
+        case .point:
+            takePoint(editor.snapTarget(at: point))
+        case .pull:
+            guard let first = firstTarget?.point, let second = secondPoint else { return }
+            let placed = editor.addDimension(start: first, end: second, through: point)
+            resetLengthsAndRegions(keepingMeasure: true)
+            if let placed { announce("Dimension kept: \(editor.label(for: placed))") }
+        case .frame(let from):
+            annotationOverlay.tool.frameDrag = nil
+            guard isDrag(from, point) else { return }
+            let frame = editor.addFrame(fitting: Self.rect(from, point))
+            announce("Frame: \(frame.label)")
+        case .window(let from):
+            guard isDrag(from, point) else {
+                annotationOverlay.tool.window = nil
+                return
+            }
+            let rect = Self.rect(from, point)
+            chosenWindow = rect
+            annotationOverlay.tool.window = rect
+            windowMenu.place(under: screenRect(rect), in: bounds)
+            windowMenu.isHidden = false
+            bringSubviewToFront(windowMenu)
+            editor.toolStep = .chooseWindowAction
+        }
+    }
+
+    /// A measure's or dimension's point, taken on lift.
+    private func takePoint(_ target: PointSnap.Target) {
+        guard let first = firstTarget else {
+            firstTarget = target
+            annotationOverlay.tool.firstPoint = target.point
+            annotationOverlay.tool.isMeasure = editor.tool == .measure
+            editor.toolStep = .secondPoint
+            return
+        }
+        let a = editor.viewport.screenPoint(for: first.point), b = editor.viewport.screenPoint(for: target.point)
+        guard hypot(b.x - a.x, b.y - a.y) >= 2 else {
+            resetLengthsAndRegions(keepingMeasure: true)
+            announce("Same point twice. Try again.")
+            return
+        }
+        if editor.tool == .measure {
+            resetLengthsAndRegions(keepingMeasure: false)
+            annotationOverlay.tool.measure = (first.point, target.point)
+            announce("Measured \(editor.measureText(from: first.point, to: target.point))")
+        } else {
+            secondPoint = target.point
+            editor.toolStep = .pullOff
+            annotationOverlay.tool.pulling = CanvasDimension.pulled(
+                id: DimensionID(0), start: first.point, end: target.point, through: target.point,
+                colour: editor.colour, textHeight: editor.viewport.canvasLength(ofScreen: CanvasDimension.screenTextHeight))
+        }
+    }
+
+    /// Starts the tool in hand afresh: no points, no dimension being pulled, no window; the last measure stays only
+    /// with `keepingMeasure`.
+    func resetLengthsAndRegions(keepingMeasure: Bool) {
+        firstTarget = nil
+        secondPoint = nil
+        regionInput = nil
+        regionTipMoved = false
+        loupe.hide()
+        var state = AnnotationOverlay.ToolState()
+        if keepingMeasure { state.measure = annotationOverlay.tool.measure }
+        annotationOverlay.tool = state
+        chosenWindow = nil
+        windowMenu.isHidden = true
+        if editor.toolStep != .start { editor.toolStep = .start }
+    }
+
+    private func zoomToWindow() {
+        guard let rect = chosenWindow else { return }
+        closeWindow()
+        editor.zoom(to: rect)
+        viewportDidChange()
+    }
+
+    private func makeFrameFromWindow() {
+        guard let rect = chosenWindow else { return }
+        closeWindow()
+        let frame = editor.addFrame(fitting: rect)
+        announce("Frame: \(frame.label)")
+    }
+
+    private func closeWindow() {
+        chosenWindow = nil
+        annotationOverlay.tool.window = nil
+        windowMenu.isHidden = true
+        if editor.toolStep == .chooseWindowAction { editor.toolStep = .start }
+    }
+
+    private func isDrag(_ from: CanvasPoint, _ to: CanvasPoint) -> Bool {
+        let a = editor.viewport.screenPoint(for: from), b = editor.viewport.screenPoint(for: to)
+        return hypot(b.x - a.x, b.y - a.y) >= Self.smallestDrag
+    }
+
+    private static func rect(_ a: CanvasPoint, _ b: CanvasPoint) -> CanvasRect {
+        let x0 = min(a.x.inches, b.x.inches), y0 = min(a.y.inches, b.y.inches)
+        return CanvasRect(origin: CanvasPoint(x: .inches(x0), y: .inches(y0)),
+                          size: CanvasSize(width: .inches(abs(a.x.inches - b.x.inches)),
+                                           height: .inches(abs(a.y.inches - b.y.inches))))
+    }
+
+    private func screenRect(_ rect: CanvasRect) -> CGRect {
+        let viewport = editor.viewport
+        let a = viewport.screenPoint(for: rect.origin)
+        return CGRect(x: a.x, y: a.y, width: rect.size.width.inches * viewport.pointsPerInch,
+                      height: rect.size.height.inches * viewport.pointsPerInch)
+    }
+
+    private func announce(_ text: String) {
+        UIAccessibility.post(notification: .announcement, argument: text)
+    }
+
+    #if DEBUG
+    /// The labels shown on the canvas, for the captures' console.
+    var debugAnnotationLabels: [String] { annotationOverlay.debugLabels }
+    #endif
 }

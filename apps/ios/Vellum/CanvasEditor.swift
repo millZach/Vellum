@@ -68,6 +68,7 @@ final class CanvasEditor {
         inkIndex = index ?? InkIndex(session.ink)
         canUndo = session.canUndo
         canRedo = session.canRedo
+        frameCount = session.frames.count
         self.saver = saver
         viewport = Viewport(pointsPerInch: Self.startingPointsPerInch, screenWidth: 951, screenHeight: 669)
         self.startingView = startingView
@@ -80,9 +81,10 @@ final class CanvasEditor {
     /// True during an eraser sweep, which bumps `inkRevision` once, when it ends (`endEraserSweep`).
     @ObservationIgnored private var sweeping = false
 
-    /// The rectangle everything on the canvas covers, its ink and text boxes included.
+    /// The rectangle everything on the canvas covers, its ink, text boxes, dimensions and frames included.
     var extents: CanvasRect? {
-        CanvasRect.union([canvas.extents, session.ink.bounds].compactMap { $0 } + session.texts.map(\.rect))
+        CanvasRect.union([canvas.extents, session.ink.bounds].compactMap { $0 } + session.texts.map(\.rect)
+            + session.dimensions.map(\.bounds) + session.frames.map(\.bounds))
     }
 
     /// The canvas units, saved with the canvas's name when they change.
@@ -96,14 +98,18 @@ final class CanvasEditor {
         }
     }
 
-    /// The tool in hand. Putting the lasso down lets go of its selection.
+    /// The tool in hand. Putting the lasso down lets go of its selection; any tool change starts the next one afresh.
     var tool: CanvasTool {
         get { pen.tool }
         set {
             pen.tool = newValue
             if newValue != .lasso { select(.empty) }
+            toolStep = .start
         }
     }
+
+    /// Where a measure, dimension or window is up to, for the status bar's prompt (#8). The canvas view sets it.
+    var toolStep = CanvasTool.Step.start
 
     var colour: MarkupColour {
         get { pen.colour }
@@ -220,7 +226,8 @@ final class CanvasEditor {
     /// Selects what a lasso loop takes (`Lasso`): looked up in the index, never the whole canvas.
     func selectInLoop(_ points: [CanvasPoint]) {
         guard let lasso = Lasso(points) else { return select(.empty) }
-        select(lasso.select(in: inkIndex, texts: session.texts))
+        select(lasso.select(in: inkIndex, texts: session.texts, dimensions: session.dimensions,
+                            frames: session.frames))
     }
 
     /// The rectangle the selection covers, from the index's cached bounds and the text boxes; nil with nothing
@@ -230,6 +237,8 @@ final class CanvasEditor {
         var rects: [CanvasRect] = []
         if let box = inkIndex.bounds(of: selection.strokes) { rects.append(box.rect) }
         for id in selection.texts { if let box = session.text(id) { rects.append(box.rect) } }
+        for id in selection.dimensions { if let dimension = session.dimension(id) { rects.append(dimension.bounds) } }
+        for id in selection.frames { if let frame = session.frame(id) { rects.append(frame.bounds) } }
         return CanvasRect.union(rects)
     }
 
@@ -289,6 +298,64 @@ final class CanvasEditor {
         syncInk()
     }
 
+    // MARK: Measures, dimensions, frames and windows (#8)
+
+    /// The dimensions on the canvas, in the order placed.
+    var dimensions: [CanvasDimension] { session.dimensions }
+    /// The frames on the canvas, in the order placed.
+    var frames: [Frame] { session.frames }
+    func dimension(_ id: DimensionID) -> CanvasDimension? { session.dimension(id) }
+    func frame(_ id: FrameID) -> Frame? { session.frame(id) }
+    /// How many frames the canvas holds, for the status bar.
+    private(set) var frameCount = 0
+    /// Told what each change did to the dimensions and frames, so the canvas view shows them.
+    @ObservationIgnored var onAnnotationsChange: (@MainActor (InkChange) -> Void)?
+    /// The paper a new frame is drawn on, chosen beside the top bar while the frame tool is in hand.
+    var framePaper = PaperSize.defaultFrame
+
+    /// Where a measure or dimension tap at a canvas point lands: the ink end, corner or circle centre within 20 screen
+    /// points, found through the index, or the point itself.
+    func snapTarget(at point: CanvasPoint) -> PointSnap.Target {
+        PointSnap.target(at: point, pointsPerInch: viewport.pointsPerInch, in: inkIndex)
+    }
+
+    /// A length between two points as the canvas shows it: in its units, or printed inches marked NTS on an NTS sheet.
+    func measureText(from start: CanvasPoint, to end: CanvasPoint) -> String {
+        canvas.format(canvas.measure(from: start, to: end))
+    }
+
+    /// What a dimension reads, in the canvas units.
+    func label(for dimension: CanvasDimension) -> String { canvas.format(canvas.measure(dimension)) }
+
+    /// Places a dimension pulled off two points by a third, in the markup colour in hand, its text the dimension
+    /// text height at this zoom. Nil when the two points are the same.
+    @discardableResult
+    func addDimension(start: CanvasPoint, end: CanvasPoint, through: CanvasPoint) -> CanvasDimension? {
+        let dimension = session.addDimension(start: start, end: end, through: through, colour: pen.colour,
+                                             textHeight: viewport.canvasLength(ofScreen: CanvasDimension.screenTextHeight))
+        syncInk()
+        return dimension
+    }
+
+    /// The frame a dragged rectangle makes on the paper in hand (`Frame.fitting`), not yet placed.
+    func frame(fitting rect: CanvasRect) -> Frame {
+        Frame.fitting(rect, paper: framePaper, units: canvas.units)
+    }
+
+    /// Places the frame a dragged rectangle makes, as one undo step.
+    @discardableResult
+    func addFrame(fitting rect: CanvasRect) -> Frame {
+        let fitted = frame(fitting: rect)
+        let frame = session.addFrame(paper: fitted.paper, scale: fitted.scale, origin: fitted.origin)
+        syncInk()
+        return frame
+    }
+
+    /// Fits a window into the part of the canvas the chrome leaves free.
+    func zoom(to rect: CanvasRect) {
+        viewport.fit(rect, insets: Self.chromeInsets, fill: 0.95)
+    }
+
     func zoomToEverything() {
         if let extents {
             viewport.fit(extents, insets: Self.chromeInsets)
@@ -320,12 +387,19 @@ final class CanvasEditor {
         inkDidChange?(change)
         onInkChange?(inkIndex.apply(change))
         if change.touchesText { onTextsChange?(change) }
+        if change.touchesAnnotations {
+            onAnnotationsChange?(change)
+            if frameCount != session.frames.count { frameCount = session.frames.count }
+        }
         if let after = session.selectionAfterLastChange {
             select(after)
-        } else if !selection.isEmpty, !change.removed.isEmpty || !change.removedTexts.isEmpty {
+        } else if !selection.isEmpty, !change.removed.isEmpty || !change.removedTexts.isEmpty
+                    || !change.removedDimensions.isEmpty || !change.removedFrames.isEmpty {
             // Whatever a change took away is no longer selected.
             select(CanvasSelection(strokes: selection.strokes.filter { inkIndex.contains($0) },
-                                   texts: selection.texts.filter { session.text($0) != nil }))
+                                   texts: selection.texts.filter { session.text($0) != nil },
+                                   dimensions: selection.dimensions.filter { session.dimension($0) != nil },
+                                   frames: selection.frames.filter { session.frame($0) != nil }))
         }
         if !sweeping { inkRevision += 1 }
         if canUndo != session.canUndo { canUndo = session.canUndo }

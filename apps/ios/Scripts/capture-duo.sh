@@ -1,5 +1,5 @@
 #!/bin/sh
-# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, snap, lasso and text boxes, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
+# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, snap, lasso and text boxes, measure, dimension, frame and window, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
 # app. The fold is moved by Scripts/duo/posture.m, a simulator-side tool that calls SpringBoard's display tool service,
 # the way Sotto captured its Duo layouts (Sotto tag prototype/iphone-duo-layout).
 # usage: capture-duo.sh [output folder]   (default .build-captures)
@@ -145,6 +145,23 @@ for appearance in light dark; do
   capture canvas-lasso --ui-tab canvases --ui-reset --ui-fixture --ui-lasso
   capture canvas-lasso-moved --ui-tab canvases --ui-reset --ui-fixture --ui-lasso-move
   capture canvas-text --ui-tab canvases --ui-reset --ui-new-canvas --ui-text
+  WAIT=$saved_wait
+done
+
+# Measure, dimension, frame and window (#8), in light and dark. Debug-only launch arguments
+# (Vellum/DebugMeasureFrame.swift) drive the canvas view's own input paths on the fixture, tapping a few points off the
+# ink so each tap snaps to it: a measure (36'-8 1/16"), two dimensions pulled off (horizontal 8'-0" and aligned
+# 19'-1 1/4"), the loupe up while the Pencil is down, a frame dragged round the valve (24x36 at 1 1/2" = 1'-0"), and a
+# window with its menu. The lengths match MeasureFrameCaptureTests. The top bar shows the fixture's full name.
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  saved_wait=${WAIT:-6}; WAIT=${SELECTION_WAIT:-10}
+  capture canvas-top-bar --ui-tab canvases --ui-reset --ui-fixture
+  capture canvas-measure --ui-tab canvases --ui-reset --ui-fixture --ui-measure
+  capture canvas-dimension --ui-tab canvases --ui-reset --ui-fixture --ui-dimension
+  capture canvas-loupe --ui-tab canvases --ui-reset --ui-fixture --ui-loupe
+  capture canvas-frame --ui-tab canvases --ui-reset --ui-fixture --ui-frame
+  capture canvas-window --ui-tab canvases --ui-reset --ui-fixture --ui-window
   WAIT=$saved_wait
 done
 

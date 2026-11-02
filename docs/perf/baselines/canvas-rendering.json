@@ -151,6 +151,26 @@
       "note": "The same hold: the stroke's points read, twice (its length and bounds, then spacing 64 points along it). Once per hold. New with #7."
     },
     {
+      "metric": "point_snap_strokes_visited_per_tap",
+      "kind": "count",
+      "value": 2000,
+      "before": 10000,
+      "unit": "strokes",
+      "tolerance": 0,
+      "measured": "feat/measure-frame 2026-11-02 placeholder, set from the first CI run",
+      "note": "A measure or dimension tap (#8) snapping to the nearest ink end, corner or circle centre within 20 screen points: strokes whose cached bounds the index compares, the worst of ten taps across the middle of the made-up 10,000-stroke canvas at the zoom that fits it all. Through InkIndex, never the whole canvas (before: every stroke). New with #8."
+    },
+    {
+      "metric": "point_snap_points_inspected_per_tap",
+      "kind": "count",
+      "value": 100000,
+      "before": 0,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "feat/measure-frame 2026-11-02 placeholder, set from the first CI run",
+      "note": "The same taps: points read from the strokes near the tip (each such stroke's points once, for its ends, corners and centre). Before: every point on the canvas. New with #8."
+    },
+    {
       "metric": "draw_frame_ms_max",
       "kind": "time",
       "value": 4.27,

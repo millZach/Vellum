@@ -10,6 +10,8 @@ struct RootView: View {
     /// The canvases and the open canvas live here, above the tabs, so switching tabs keeps the canvas open.
     @State private var canvases = CanvasesModel()
     @Environment(\.scenePhase) private var scenePhase
+    /// Light, Dark or System (ADR-0011), chosen from the canvas screen's top bar.
+    @AppStorage(AppearanceSetting.storageKey) private var appearance = AppearanceSetting.default.rawValue
 
     var body: some View {
         TabView(selection: $selection) {
@@ -25,7 +27,11 @@ struct RootView: View {
                 }
             }
         }
+        .background(WindowAppearance(style: (AppearanceSetting(rawValue: appearance) ?? .default).interfaceStyle))
         .task {
+            #if DEBUG
+            DebugAppearanceSteps.run()
+            #endif
             #if DEBUG || BENCHMARK
             // The 10,000-stroke test canvas for the captures and the benchmark (`--ui-fixture-large`): opened in place
             // of a saved canvas, so it never touches Zach's.
@@ -55,6 +61,44 @@ struct RootView: View {
         if let name = DebugLaunch.argument("--ui-tab"), let tab = AppTab(rawValue: name) { return tab }
         #endif
         return .canvases
+    }
+}
+
+/// Pins the window to Light or Dark, or lets it follow the Duo, by setting the window's own
+/// `overrideUserInterfaceStyle`. SwiftUI's `.preferredColorScheme` stopped updating once it had been set, so after
+/// picking Light neither Dark nor System came back (#26). The window's style reaches every view and sheet in it.
+private struct WindowAppearance: UIViewRepresentable {
+    let style: UIUserInterfaceStyle
+
+    func makeUIView(context: Context) -> WindowStyleView { WindowStyleView() }
+
+    func updateUIView(_ view: WindowStyleView, context: Context) { view.style = style }
+}
+
+final class WindowStyleView: UIView {
+    var style: UIUserInterfaceStyle = .unspecified {
+        didSet { if style != oldValue { apply() } }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        apply()
+    }
+
+    private func apply() {
+        guard let scene = window?.windowScene else { return }
+        for sceneWindow in scene.windows where sceneWindow.overrideUserInterfaceStyle != style {
+            sceneWindow.overrideUserInterfaceStyle = style
+        }
     }
 }
 

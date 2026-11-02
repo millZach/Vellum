@@ -68,7 +68,8 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
     /// Places every label for a view of the canvas.
     func show(_ viewport: Viewport) {
         self.viewport = viewport
-        guard host != nil else { return }
+        // A canvas without text boxes does no work here on a pan or a pinch.
+        guard host != nil, !(labels.isEmpty && editing == nil && editor.texts.isEmpty) else { return }
         let current = Set(editor.texts.map(\.id))
         for id in labels.keys where !current.contains(id) { labels.removeValue(forKey: id)?.label.removeFromSuperview() }
         for box in editor.texts { place(box) }

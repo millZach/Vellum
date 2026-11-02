@@ -73,6 +73,8 @@ final class SelectionOverlay {
 
     /// Shows the selection around `ink` (its bounds on screen), or nothing; the menu only when `showsMenu`.
     func show(ink: CGRect?, count: Int, showsMenu: Bool, in bounds: CGRect) {
+        // Nothing selected and nothing shown: a pan or a pinch without a selection touches no layer.
+        if ink == nil || count == 0, box == nil { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }

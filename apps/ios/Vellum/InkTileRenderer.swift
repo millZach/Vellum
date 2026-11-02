@@ -122,6 +122,18 @@ final class InkTileRenderer {
         return CATransform3DMakeAffineTransform(CGAffineTransform(a: k, b: 0, c: 0, d: k, tx: origin.x, ty: origin.y))
     }
 
+    // MARK: The loupe (#8)
+
+    /// The drawn tiles of the level on screen that touch a region, with that level's tiling: the loupe shows these
+    /// same images magnified, so it never draws the canvas a second time. Tiles not drawn yet are left out.
+    func drawnTiles(touching box: InkIndex.Box) -> (tiling: InkTiling, tiles: [(key: InkTiling.Key, image: CGImage)])? {
+        guard let level = book.current else { return nil }
+        let tiles = book.tiles(of: level, touching: box).compactMap { tile in
+            tile.payload.image.map { (key: tile.key, image: $0) }
+        }
+        return (level.tiling, tiles)
+    }
+
     // MARK: Changes of ink
 
     /// Commits the stroke being drawn: `commit` adds it to the ink, and the layers it was drawn on live, in screen

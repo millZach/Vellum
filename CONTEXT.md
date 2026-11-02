@@ -25,11 +25,11 @@ A stroke straightened into a line, a rectangle or a circle (or an ellipse): the 
 _Avoid_: shape recognition, auto-shape, perfect shape
 
 **Lasso**:
-The tool that selects by drawing a loop: it takes every stroke at least half inside the loop and every text box whose centre is inside.
+The tool that selects by drawing a loop: it takes every stroke at least half inside the loop, every text box whose centre is inside, every dimension whose text is inside, and every frame wholly inside.
 _Avoid_: marquee, selection tool, window (a window is a dragged rectangle)
 
 **Selection**:
-The strokes and text boxes the lasso has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner, duplicated or deleted, each as one undo step. It is not saved, and it stays selected through undo and redo.
+The strokes, text boxes, dimensions and frames the lasso has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner, duplicated or deleted, each as one undo step. It is not saved, and it stays selected through undo and redo.
 _Avoid_: group, highlight
 
 **Draw with finger**:
@@ -41,7 +41,7 @@ What a colour of ink means to an agent: red is something to add, green is someth
 _Avoid_: pen colour, highlight
 
 **Ink log**:
-The record on the Duo of every change to a canvas's ink and text boxes since its last snapshot (a stroke drawn, strokes erased, a selection moved, resized, duplicated or deleted, a text box placed or edited, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
+The record on the Duo of every change to a canvas's ink, text boxes, dimensions and frames since its last snapshot (a stroke drawn, strokes erased, a selection moved, resized, duplicated or deleted, a text box placed or edited, a dimension or frame placed, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
 _Avoid_: journal, history file, autosave
 
 **Canvas saver**:
@@ -49,7 +49,7 @@ The one owner of a canvas's files while anything is being written to them (`Canv
 _Avoid_: writer, persistence manager, autosaver
 
 **Canvas folder**:
-The folder on the Duo that holds one canvas: its name and canvas units (`canvas.json`), its ink snapshot and its ink log, and nothing else, so #12 can mirror it to Dropbox as it is.
+The folder on the Duo that holds one canvas: its name and canvas units (`canvas.json`), its ink snapshot and its ink log (which hold its text boxes, dimensions and frames too), and nothing else, so #12 can mirror it to Dropbox as it is.
 _Avoid_: document, package, bundle
 
 **Text box**:
@@ -77,23 +77,39 @@ A sheet that is not to scale, such as a loop drawing or a schematic. It is place
 _Avoid_: unscaled PDF
 
 **Frame**:
-A rectangle on the canvas with a paper size and a drawing scale, such as 24 × 36 at 1/4" = 1'-0", that Zach lays work out inside. A frame prints, exports or goes to an agent as one sheet, like a layout viewport in AutoCAD.
+A rectangle on the canvas with a paper size and a drawing scale, such as 24 × 36 at 1/4" = 1'-0", that Zach lays work out inside. A frame prints, exports or goes to an agent as one sheet, like a layout viewport in AutoCAD. It is placed by picking a paper size and dragging a box: Vellum picks the largest standard drawing scale whose paper still covers the drag, and labels the frame with its paper and scale. A canvas holds any number.
 _Avoid_: layout, viewport, page, border
 
 **Canvas units**:
-The units a canvas shows lengths in, chosen per canvas: feet and inches, decimal feet or metric.
+The units a canvas shows lengths in, chosen per canvas: feet and inches (to the nearest 1/16"), decimal feet (to the hundredth) or metric (to the millimetre).
 _Avoid_: precision, format
 
 **Measure**:
-A length read off the canvas between two points, in real-world units, that is not kept.
+A length read off the canvas between two points, in real-world units, that is not kept. Two taps, each taking a snap point.
 _Avoid_: dimension (a dimension stays on the canvas)
 
 **Dimension**:
-A kept annotation on the canvas that shows a real-world length between two points, like AutoCAD's linear dimension.
+A kept annotation on the canvas that shows a real-world length between two points, like AutoCAD's linear dimension: two taps, then a third point pulls its dimension line off them. Pulled above or below the points it reads the horizontal distance, beside them the vertical, out at an angle the straight (aligned) distance. It is drawn in the markup colour in hand, its text zooms with the ink, and the lasso selects, moves and deletes it like ink.
 _Avoid_: measurement, measure
 
+**Dimension line**:
+The line of a dimension that carries its length, pulled off the points dimensioned, with a tick across each end.
+_Avoid_: leader, arrow
+
+**Extension line**:
+A line of a dimension that runs from just off a point dimensioned to just past the dimension line, so the dimension can sit clear of the object.
+_Avoid_: witness line, projection line
+
+**Snap point**:
+An ink end, corner or circle centre that a measure or dimension tap takes when it lands within about 20 screen points of one; otherwise the tap takes the point under the tip.
+_Avoid_: snap (a snap straightens a stroke), osnap, grip
+
+**Loupe**:
+The magnifier that shows the canvas under the Pencil or finger, three times larger, while a measure or dimension point is being found, with the snap point marked. The point is taken when the tip lifts.
+_Avoid_: magnifier, zoom lens
+
 **Window**:
-A rectangle dragged on the canvas to choose a region: to zoom to it, or to choose what is exported or sent.
+A rectangle dragged on the canvas to choose a region: to zoom to it, to make a frame of it, or to choose what is exported or sent.
 _Avoid_: selection box, lasso
 
 ## Places

@@ -16,14 +16,23 @@ final class CanvasToolTests: XCTestCase {
         ])
     }
 
-    func testTheInkSelectionAndTextToolsWorkAndTheRestSaySo() {
-        XCTAssertEqual(CanvasTool.allCases.filter(\.isAvailable),
-                       [.pen, .highlighter, .eraser, .lineAndShape, .lasso, .textBox])
-        for tool in CanvasTool.allCases where !tool.isAvailable {
-            XCTAssertTrue(tool.hint.hasPrefix("Not available yet"), tool.title)
+    /// Since #8 every tool on the rail works, measure, dimension, frame and window included.
+    func testEveryToolOnTheRailWorks() {
+        XCTAssertEqual(CanvasTool.allCases.filter(\.isAvailable), CanvasTool.allCases)
+        for tool in CanvasTool.allCases {
+            XCTAssertNil(tool.comingIn, tool.title)
+            XCTAssertFalse(tool.hint.hasPrefix("Not available yet"), tool.title)
         }
-        XCTAssertNil(CanvasTool.lasso.comingIn)
-        XCTAssertEqual(CanvasTool.measure.comingIn, 8)
+    }
+
+    /// The #8 tools' hints say how they work: the snap and loupe, pulling a dimension off, the frame's scale.
+    func testTheMeasureDimensionFrameAndWindowHintsSayHowTheyWork() {
+        XCTAssertTrue(CanvasTool.measure.hint.contains("snaps"), CanvasTool.measure.hint)
+        XCTAssertTrue(CanvasTool.dimension.hint.contains("above or below for horizontal"), CanvasTool.dimension.hint)
+        XCTAssertTrue(CanvasTool.frame.hint.contains("drawing scale"), CanvasTool.frame.hint)
+        XCTAssertTrue(CanvasTool.window.hint.contains("zoom to it"), CanvasTool.window.hint)
+        XCTAssertNil(CanvasTool.measure.inkTool)
+        XCTAssertNil(CanvasTool.frame.inkTool)
     }
 
     /// The pen, the highlighter and the line and shape tool (#7) leave ink; the line tool's is the pen's.
@@ -94,6 +103,24 @@ final class CanvasToolPromptTests: XCTestCase {
                 }
             }
         }
+    }
+
+    /// Part way through a measure, dimension or window, the prompt says what comes next (#8), and fits.
+    func testThePromptsPartWayThroughFitAndSayWhatComesNext() {
+        let steps: [CanvasTool.Step] = [.start, .secondPoint, .pullOff, .chooseWindowAction]
+        for tool in CanvasTool.allCases {
+            for step in steps {
+                let prompt = tool.prompt(fingerDraws: false, hasSelection: false, step: step)
+                XCTAssertLessThanOrEqual(prompt.count, 28, prompt)
+            }
+        }
+        XCTAssertEqual(CanvasTool.measure.prompt(fingerDraws: false, hasSelection: false), "Measure: tap first point")
+        XCTAssertEqual(CanvasTool.dimension.prompt(fingerDraws: false, hasSelection: false, step: .secondPoint),
+                       "Tap the second point")
+        XCTAssertEqual(CanvasTool.dimension.prompt(fingerDraws: false, hasSelection: false, step: .pullOff),
+                       "Drag or tap to place line")
+        XCTAssertEqual(CanvasTool.window.prompt(fingerDraws: false, hasSelection: false, step: .chooseWindowAction),
+                       "Zoom or make a frame")
     }
 
     /// With something selected, the lasso's prompt says to drag it (#7); the other tools ignore a selection.

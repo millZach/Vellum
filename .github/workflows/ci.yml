@@ -86,26 +86,51 @@ jobs:
   duo-captures:
     name: Duo simulator captures
     runs-on: xcode-27
-    # The #7 captures (snap, lasso, moved selection, text, in light and dark) pushed the job past 30 minutes.
-    timeout-minutes: 45
+    # The #7 captures (snap, lasso, moved selection, text, in light and dark) pushed the job past 30 minutes, and
+    # the #8 captures (measure, dimension, loupe, frame, window) take it to 34-46 minutes depending on the runner.
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Capture every tab and the Home Screen unfolded, in light and dark
-        run: sh apps/ios/Scripts/capture-duo.sh .build-captures
+        run: PART=captures sh apps/ios/Scripts/capture-duo.sh .build-captures
       # Timings are recorded and compared with docs/perf/baselines, warning at 25% worse; they never fail the build.
       - name: Compare canvas frame timings with the baseline
         if: always()
-        run: |
-          python3 apps/ios/Scripts/perf-compare.py canvas-rendering apps/ios/.build-captures/benchmark.json
-          python3 apps/ios/Scripts/perf-compare.py canvas-rendering apps/ios/.build-captures/benchmark-release.json
+        run: python3 apps/ios/Scripts/perf-compare.py canvas-rendering apps/ios/.build-captures/benchmark.json
       - name: Keep the captures
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: duo-captures
+          path: apps/ios/.build-captures/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Evidence, not part of the merge bar: the canvas benchmark in an optimised (Release, BENCHMARK) build on the iPhone
+  # Duo simulator. Split from the captures job when the #8 captures took that job past its 45 minutes.
+  duo-release-benchmark:
+    name: Duo release benchmark
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run the benchmark in a Release build
+        run: PART=release-benchmark sh apps/ios/Scripts/capture-duo.sh .build-captures
+      - name: Compare canvas frame timings with the baseline
+        if: always()
+        run: python3 apps/ios/Scripts/perf-compare.py canvas-rendering apps/ios/.build-captures/benchmark-release.json
+      - name: Keep the benchmark
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: duo-release-benchmark
           path: apps/ios/.build-captures/
           include-hidden-files: true
           if-no-files-found: warn

@@ -175,6 +175,43 @@ final class DebugBenchmark: NSObject {
                     view.endInput(samples: [], keep: true)
                 }
             }, tearDown: { _ in }),
+            // #8: a frame dragged across the middle of the canvas, a point and a half a frame: each frame finds the
+            // smallest covering scale and places the ghost frame and its label; the last frame places the frame.
+            Scenario(name: "frame", frames: 240, setUp: { b in
+                b.editor.zoomToEverything()
+                b.editor.tool = .frame
+                guard let view = b.view else { return }
+                b.strokePoint = CGPoint(x: 200, y: 160)
+                _ = view.beginInput(at: b.strokePoint)
+            }, step: { b, i in
+                guard let view = b.view else { return }
+                b.strokePoint.x += 1.6
+                b.strokePoint.y += 1.1
+                if i == 239 {
+                    view.endInput(samples: [b.strokePoint], keep: true)
+                } else {
+                    view.moveInput(samples: [b.strokePoint], predicted: [])
+                }
+            }, tearDown: { b in b.editor.tool = .pen }),
+            // #8: the measure tool's Pencil down and wandering over the ink: each frame snaps the tip through the
+            // index and moves the loupe, which shows the tiles already drawn. Lifted on the last frame, which takes the
+            // first point.
+            Scenario(name: "loupe", frames: 240, setUp: { b in
+                b.editor.zoomToEverything()
+                b.editor.tool = .measure
+                guard let view = b.view else { return }
+                b.strokePoint = CGPoint(x: 220, y: view.bounds.midY)
+                _ = view.beginInput(at: b.strokePoint)
+            }, step: { b, i in
+                guard let view = b.view else { return }
+                b.strokePoint.x += 2
+                b.strokePoint.y = view.bounds.midY + 120 * sin(b.strokePoint.x / 50)
+                if i == 239 {
+                    view.endInput(samples: [b.strokePoint], keep: true)
+                } else {
+                    view.moveInput(samples: [b.strokePoint], predicted: [])
+                }
+            }, tearDown: { b in b.editor.tool = .pen }),
         ]
     }
 

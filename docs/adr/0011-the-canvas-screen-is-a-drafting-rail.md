@@ -16,3 +16,16 @@ Vellum follows the Duo's light or dark setting, and its settings can pin it to L
 ## Amendment (#7): line and shape, lasso and text box
 
 The line and shape tool, the lasso and the text box tool now work. The line and shape tool draws pen ink that snaps to a straight line, a rectangle or a circle when it lifts (the pen snaps too, when the Pencil holds still at the end of a stroke). The lasso draws a dashed loop in the chrome's accent and shows what it selected as the prototype does: a dashed box 6 points outside the selection, with a handle at each corner for resizing, and a dark menu under it with the count, Duplicate and Delete; the status bar then says to drag the selection. The prototype's menu also offers Send…, which comes with sending jobs; and its glow on selected ink is left out, since it would mean redrawing the selection's tiles. A tap with the text box tool places a text box or edits the one tapped, and writing with the Pencil places one where the writing starts.
+
+## Amendment (#8): measure, dimension, frame and window
+
+Every tool on the rail now works, as Zach picked them from the prototype at the tag `prototype/measure-frame`:
+
+- **Measure**: two taps; the length shows in an orange box on a dashed line until the next measure or another tool, and is not kept.
+- **Dimension**: two taps, then a third drag or tap pulls the dimension line off the points, with extension lines; kept, in the markup colour in hand.
+- **Finding points**: a measure or dimension tap snaps to an ink end, corner or circle centre within about 20 screen points, found through the ink index. While the tip is down a loupe 120 points across shows the canvas under it three times larger, 104 points above the tip (beside it near the top), with a teal marker on the snap point and its name; the point is taken on lift. The loupe shows the ink tiles already drawn (ADR-0012), never a second drawing of the canvas.
+- **Frame**: a "Frame paper" picker sits under the top bar while the tool is in hand; dragging a box shows the frame it makes and its label (paper and scale) live, and lifting places it. The status bar counts frames.
+- **Window**: dragging a box offers a dark menu like the selection's: Zoom to window, Make a frame here, and Send… (disabled, "later", until sending jobs exist).
+- The status bar's prompt follows each step: "Tap the second point", "Drag or tap to place line", "Zoom to it or make a frame".
+- As with every tool, the Pencil uses them and fingers pan and pinch; with Draw with finger on, one finger uses them too.
+- The top bar gives the canvas name layout priority, so it shows in full whenever it fits beside the actions.

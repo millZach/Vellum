@@ -39,10 +39,13 @@ enum InkCodec {
 
     // MARK: Events
 
-    /// Each kind of event's code. Codes are never reused: 1 to 4 are version 1's, 5 to 9 came with #7.
+    /// Each kind of event's code. Codes are never reused: 1 to 4 are version 1's, 5 to 9 came with #7, 10 to 14 with
+    /// #8. A move, duplicate or delete of a selection holding no dimension or frame keeps its #7 code and bytes; one
+    /// holding any takes the #8 code, whose selection adds the dimension and frame ids.
     private enum EventTag: UInt8 {
         case draw = 1, erase = 2, undo = 3, redo = 4
         case transform = 5, duplicate = 6, delete = 7, addText = 8, editText = 9
+        case addDimension = 10, addFrame = 11, transformAll = 12, duplicateAll = 13, deleteAll = 14
     }
 
     static func encode(_ event: InkEvent) -> [UInt8] {
@@ -61,24 +64,38 @@ enum InkCodec {
         case .redo:
             w.u8(EventTag.redo.rawValue)
         case .transform(let selection, let transform):
-            w.u8(EventTag.transform.rawValue)
-            w.selection(selection)
+            let all = selection.holdsAnnotations
+            w.u8((all ? EventTag.transformAll : EventTag.transform).rawValue)
+            w.selection(selection, all: all)
             w.transform(transform)
-        case .duplicate(let selection, let transform, let firstStroke, let firstText):
-            w.u8(EventTag.duplicate.rawValue)
-            w.selection(selection)
+        case .duplicate(let selection, let transform, let firstStroke, let firstText, let firstDimension,
+                        let firstFrame):
+            let all = selection.holdsAnnotations
+            w.u8((all ? EventTag.duplicateAll : EventTag.duplicate).rawValue)
+            w.selection(selection, all: all)
             w.transform(transform)
             w.varint(UInt64(max(firstStroke.value, 0)))
             w.varint(UInt64(max(firstText.value, 0)))
+            if all {
+                w.varint(UInt64(max(firstDimension.value, 0)))
+                w.varint(UInt64(max(firstFrame.value, 0)))
+            }
         case .delete(let selection):
-            w.u8(EventTag.delete.rawValue)
-            w.selection(selection)
+            let all = selection.holdsAnnotations
+            w.u8((all ? EventTag.deleteAll : EventTag.delete).rawValue)
+            w.selection(selection, all: all)
         case .addText(let box):
             w.u8(EventTag.addText.rawValue)
             w.textBox(box)
         case .editText(let box):
             w.u8(EventTag.editText.rawValue)
             w.textBox(box)
+        case .addDimension(let dimension):
+            w.u8(EventTag.addDimension.rawValue)
+            w.dimension(dimension)
+        case .addFrame(let frame):
+            w.u8(EventTag.addFrame.rawValue)
+            w.frame(frame)
         }
         return w.bytes
     }
@@ -101,20 +118,28 @@ enum InkCodec {
             event = .undo
         case .redo:
             event = .redo
-        case .transform:
-            event = .transform(try r.selection(), try r.transform())
-        case .duplicate:
-            let selection = try r.selection()
+        case .transform, .transformAll:
+            event = .transform(try r.selection(all: tag == .transformAll), try r.transform())
+        case .duplicate, .duplicateAll:
+            let all = tag == .duplicateAll
+            let selection = try r.selection(all: all)
             let transform = try r.transform()
             let firstStroke = StrokeID(Int(clamping: try r.varint()))
             let firstText = TextBoxID(Int(clamping: try r.varint()))
-            event = .duplicate(selection, transform, firstStroke: firstStroke, firstText: firstText)
-        case .delete:
-            event = .delete(try r.selection())
+            let firstDimension = all ? DimensionID(Int(clamping: try r.varint())) : DimensionID(1)
+            let firstFrame = all ? FrameID(Int(clamping: try r.varint())) : FrameID(1)
+            event = .duplicate(selection, transform, firstStroke: firstStroke, firstText: firstText,
+                               firstDimension: firstDimension, firstFrame: firstFrame)
+        case .delete, .deleteAll:
+            event = .delete(try r.selection(all: tag == .deleteAll))
         case .addText:
             event = .addText(try r.textBox())
         case .editText:
             event = .editText(try r.textBox())
+        case .addDimension:
+            event = .addDimension(try r.dimension())
+        case .addFrame:
+            event = .addFrame(try r.frame())
         }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after an event") }
         return event
@@ -122,9 +147,12 @@ enum InkCodec {
 
     // MARK: Snapshots
 
-    /// A session's ink, text boxes and undo history, the payload of a snapshot: the next stroke id, the strokes, the
-    /// undo and redo steps, then, in version 2 and only on a canvas that has ever had a text box, the next text box id
-    /// and the text boxes. A canvas of ink alone is written exactly as version 1 wrote it, byte for byte.
+    /// A session's ink, text boxes, dimensions, frames and undo history, the payload of a snapshot: the next stroke id,
+    /// the strokes, the undo and redo steps, then, in version 2 and only on a canvas that has ever had a text box (or,
+    /// since version 3, a dimension or a frame), the next text box id and the text boxes, then, in version 3 and only
+    /// on a canvas that has ever had a dimension or a frame, the next dimension id and the dimensions and the next
+    /// frame id and the frames. A canvas of ink alone is written exactly as version 1 wrote it, byte for byte, and one
+    /// of ink and text boxes exactly as version 2 did.
     static func encode(_ session: InkSession) -> [UInt8] {
         var w = ByteWriter()
         w.i64(Int64(session.nextID))
@@ -134,10 +162,19 @@ enum InkCodec {
             w.u32(UInt32(stack.count))
             for edit in stack { w.edit(edit, on: session.ink) }
         }
-        if session.nextTextID > 1 || !session.texts.isEmpty {
+        let annotations = session.hasHadAnnotations
+        if session.nextTextID > 1 || !session.texts.isEmpty || annotations {
             w.varint(UInt64(max(session.nextTextID, 1)))
             w.u32(UInt32(session.texts.count))
             for box in session.texts { w.textBox(box) }
+        }
+        if annotations {
+            w.varint(UInt64(max(session.nextDimensionID, 1)))
+            w.u32(UInt32(session.dimensions.count))
+            for dimension in session.dimensions { w.dimension(dimension) }
+            w.varint(UInt64(max(session.nextFrameID, 1)))
+            w.u32(UInt32(session.frames.count))
+            for frame in session.frames { w.frame(frame) }
         }
         return w.bytes
     }
@@ -167,9 +204,23 @@ enum InkCodec {
             texts.reserveCapacity(textCount)
             for _ in 0..<textCount { texts.append(try r.textBox()) }
         }
+        var nextDimensionID = 1, nextFrameID = 1
+        var dimensions: [CanvasDimension] = []
+        var frames: [Frame] = []
+        if version >= 3, !r.isAtEnd {
+            nextDimensionID = Int(clamping: try r.varint())
+            let dimensionCount = try r.count(each: ByteReader.smallestDimension)
+            dimensions.reserveCapacity(dimensionCount)
+            for _ in 0..<dimensionCount { dimensions.append(try r.dimension()) }
+            nextFrameID = Int(clamping: try r.varint())
+            let frameCount = try r.count(each: ByteReader.smallestFrame)
+            frames.reserveCapacity(frameCount)
+            for _ in 0..<frameCount { frames.append(try r.frame()) }
+        }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after a snapshot") }
-        return InkSession(ink: ink, texts: texts, undoStack: stacks[0], redoStack: stacks[1], nextID: nextID,
-                          nextTextID: nextTextID)
+        return InkSession(ink: ink, texts: texts, dimensions: dimensions, frames: frames, undoStack: stacks[0],
+                          redoStack: stacks[1], nextID: nextID, nextTextID: nextTextID,
+                          nextDimensionID: nextDimensionID, nextFrameID: nextFrameID)
     }
 }
 
@@ -244,20 +295,18 @@ struct ByteWriter {
         case .erase(let strokes):
             u8(EditTag.erase.rawValue)
             historyStrokes(strokes, on: ink)
-        case .transform(let strokes, let boxes, let transform):
-            u8(EditTag.transform.rawValue)
-            historyStrokes(strokes, on: ink)
-            textBoxes(boxes)
+        case .transform(let pieces, let transform):
+            u8((pieces.holdsAnnotations ? EditTag.transformAll : EditTag.transform).rawValue)
+            self.pieces(pieces, on: ink)
             self.transform(transform)
-        case .duplicate(let strokes, let boxes, let sources):
-            u8(EditTag.duplicate.rawValue)
-            historyStrokes(strokes, on: ink)
-            textBoxes(boxes)
-            selection(sources)
-        case .delete(let strokes, let boxes):
-            u8(EditTag.delete.rawValue)
-            historyStrokes(strokes, on: ink)
-            textBoxes(boxes)
+        case .duplicate(let pieces, let sources):
+            let all = pieces.holdsAnnotations || sources.holdsAnnotations
+            u8((all ? EditTag.duplicateAll : EditTag.duplicate).rawValue)
+            self.pieces(pieces, on: ink, all: all)
+            selection(sources, all: all)
+        case .delete(let pieces):
+            u8((pieces.holdsAnnotations ? EditTag.deleteAll : EditTag.delete).rawValue)
+            self.pieces(pieces, on: ink)
         case .addText(let box):
             u8(EditTag.addText.rawValue)
             textBox(box)
@@ -265,7 +314,25 @@ struct ByteWriter {
             u8(EditTag.editText.rawValue)
             textBox(before)
             textBox(after)
+        case .addDimension(let dimension):
+            u8(EditTag.addDimension.rawValue)
+            self.dimension(dimension)
+        case .addFrame(let frame):
+            u8(EditTag.addFrame.rawValue)
+            self.frame(frame)
         }
+    }
+
+    /// A selection step's things: its strokes and text boxes as #7 wrote them, then, with `all`, its dimensions and
+    /// frames.
+    private mutating func pieces(_ pieces: InkSession.Pieces, on ink: Ink, all: Bool? = nil) {
+        historyStrokes(pieces.strokes, on: ink)
+        textBoxes(pieces.texts)
+        guard all ?? pieces.holdsAnnotations else { return }
+        u32(UInt32(pieces.dimensions.count))
+        for item in pieces.dimensions { dimension(item) }
+        u32(UInt32(pieces.frames.count))
+        for item in pieces.frames { frame(item) }
     }
 
     private mutating func historyStrokes(_ strokes: [InkStroke], on ink: Ink) {
@@ -281,9 +348,12 @@ struct ByteWriter {
     /// A selection: its stroke ids, then its text box ids, each as a varint count, the first id, and every later id
     /// as its step from the one before. A selection is in ascending order, so a run of strokes drawn one after
     /// another takes a byte an id.
-    mutating func selection(_ selection: CanvasSelection) {
+    mutating func selection(_ selection: CanvasSelection, all: Bool = false) {
         ids(selection.strokes.map(\.value))
         ids(selection.texts.map(\.value))
+        guard all else { return }
+        ids(selection.dimensions.map(\.value))
+        ids(selection.frames.map(\.value))
     }
 
     private mutating func ids(_ values: [Int]) {
@@ -316,6 +386,36 @@ struct ByteWriter {
         raw(utf8)
     }
 
+    /// A point on the ink grid, as zigzag varints: whole grid units, or its step from `from`.
+    private mutating func gridPoint(_ point: CanvasPoint, from: CanvasPoint = .origin) {
+        signedVarint(CanvasPoint.gridUnits(point.x) &- CanvasPoint.gridUnits(from.x))
+        signedVarint(CanvasPoint.gridUnits(point.y) &- CanvasPoint.gridUnits(from.y))
+    }
+
+    /// A dimension (#8): id, its first point in grid units, its second point and the point its line passes through as
+    /// steps from the first, its orientation, its markup colour, then its text height in inches as a 64-bit float.
+    mutating func dimension(_ dimension: CanvasDimension) {
+        varint(UInt64(max(dimension.id.value, 0)))
+        gridPoint(dimension.start)
+        gridPoint(dimension.end, from: dimension.start)
+        gridPoint(dimension.through, from: dimension.start)
+        u8(InkCodecTables.orientationCode(dimension.orientation))
+        u8(InkCodecTables.colourCode(dimension.colour))
+        f64(dimension.textHeight.inches)
+    }
+
+    /// A frame (#8): id, its paper's width and height in printed inches and its drawing scale's printed and real
+    /// sides in inches as 64-bit floats, the scale's notation, then its top-left corner in grid units.
+    mutating func frame(_ frame: Frame) {
+        varint(UInt64(max(frame.id.value, 0)))
+        f64(frame.paper.width.inches)
+        f64(frame.paper.height.inches)
+        f64(frame.scale.printed.inches)
+        f64(frame.scale.real.inches)
+        u8(frame.scale.notation == .ratio ? 1 : 0)
+        gridPoint(frame.origin)
+    }
+
     private mutating func historyStroke(_ stroke: InkStroke, on ink: Ink) {
         // A moved stroke keeps its id, so the id alone says nothing: only the very stroke on the canvas goes by id.
         if let index = ink.index(of: stroke.id), ink.strokes[index] == stroke {
@@ -338,6 +438,13 @@ enum EditTag: UInt8 {
     case delete = 5
     case addText = 6
     case editText = 7
+    // Version 3 (#8). A move, duplicate or delete holding a dimension or a frame takes these, which add them after
+    // the text boxes; one holding neither keeps its version 2 code and bytes.
+    case addDimension = 8
+    case addFrame = 9
+    case transformAll = 10
+    case duplicateAll = 11
+    case deleteAll = 12
 }
 
 struct ByteReader {
@@ -430,22 +537,25 @@ struct ByteReader {
     }
 
     mutating func edit(on ink: Ink) throws -> InkSession.Edit {
-        switch EditTag(rawValue: try u8()) {
+        let tag = EditTag(rawValue: try u8())
+        switch tag {
         case .draw:
             return .draw(try historyStroke(on: ink))
         case .erase:
             return .erase(try historyStrokes(on: ink))
-        case .transform:
-            let strokes = try historyStrokes(on: ink)
-            let boxes = try textBoxes()
-            return .transform(strokes, boxes, try transform())
-        case .duplicate:
-            let strokes = try historyStrokes(on: ink)
-            let boxes = try textBoxes()
-            return .duplicate(strokes, boxes, sources: try selection())
-        case .delete:
-            let strokes = try historyStrokes(on: ink)
-            return .delete(strokes, try textBoxes())
+        case .transform, .transformAll:
+            let pieces = try self.pieces(on: ink, all: tag == .transformAll)
+            return .transform(pieces, try transform())
+        case .duplicate, .duplicateAll:
+            let all = tag == .duplicateAll
+            let pieces = try self.pieces(on: ink, all: all)
+            return .duplicate(pieces, sources: try selection(all: all))
+        case .delete, .deleteAll:
+            return .delete(try pieces(on: ink, all: tag == .deleteAll))
+        case .addDimension:
+            return .addDimension(try dimension())
+        case .addFrame:
+            return .addFrame(try frame())
         case .addText:
             return .addText(try textBox())
         case .editText:
@@ -464,6 +574,57 @@ struct ByteReader {
         return strokes
     }
 
+    private mutating func pieces(on ink: Ink, all: Bool) throws -> InkSession.Pieces {
+        var pieces = InkSession.Pieces(strokes: try historyStrokes(on: ink), texts: try textBoxes())
+        guard all else { return pieces }
+        let dimensionCount = try count(each: Self.smallestDimension)
+        for _ in 0..<dimensionCount { pieces.dimensions.append(try dimension()) }
+        let frameCount = try count(each: Self.smallestFrame)
+        for _ in 0..<frameCount { pieces.frames.append(try frame()) }
+        return pieces
+    }
+
+    /// The fewest bytes a dimension and a frame take, so a damaged count is caught before it allocates.
+    static let smallestDimension = 17
+    static let smallestFrame = 36
+
+    private mutating func gridPoint(from: CanvasPoint = .origin) throws -> CanvasPoint {
+        let x = try signedVarint(), y = try signedVarint()
+        return CanvasPoint(x: CanvasPoint.length(gridUnits: CanvasPoint.gridUnits(from.x) &+ x),
+                           y: CanvasPoint.length(gridUnits: CanvasPoint.gridUnits(from.y) &+ y))
+    }
+
+    mutating func dimension() throws -> CanvasDimension {
+        let id = DimensionID(Int(clamping: try varint()))
+        let start = try gridPoint()
+        let end = try gridPoint(from: start)
+        let through = try gridPoint(from: start)
+        guard let orientation = InkCodecTables.orientation(try u8()) else {
+            throw InkCodec.Malformed(reason: "unknown dimension orientation")
+        }
+        guard let colour = InkCodecTables.colour(try u8()) else { throw InkCodec.Malformed(reason: "unknown colour") }
+        let textHeight = try f64()
+        guard textHeight.isFinite, textHeight > 0 else { throw InkCodec.Malformed(reason: "a dimension's text height") }
+        return CanvasDimension(id: id, start: start, end: end, through: through, orientation: orientation, colour: colour,
+                         textHeight: .inches(textHeight))
+    }
+
+    mutating func frame() throws -> Frame {
+        let id = FrameID(Int(clamping: try varint()))
+        let width = try f64(), height = try f64(), printed = try f64(), real = try f64()
+        let notation: DrawingScale.Notation
+        switch try u8() {
+        case 0: notation = .lengths
+        case 1: notation = .ratio
+        default: throw InkCodec.Malformed(reason: "unknown scale notation")
+        }
+        guard width.isFinite, height.isFinite, width > 0, height > 0,
+              let scale = DrawingScale(printed: .inches(printed), real: .inches(real), notation: notation) else {
+            throw InkCodec.Malformed(reason: "a frame's paper or scale")
+        }
+        return Frame(id: id, paper: .inches(width, by: height), scale: scale, origin: try gridPoint())
+    }
+
     private mutating func textBoxes() throws -> [TextBox] {
         let count = try self.count(each: 43)
         var boxes: [TextBox] = []
@@ -472,10 +633,13 @@ struct ByteReader {
         return boxes
     }
 
-    mutating func selection() throws -> CanvasSelection {
+    mutating func selection(all: Bool = false) throws -> CanvasSelection {
         let strokes = try ids().map(StrokeID.init)
         let texts = try ids().map(TextBoxID.init)
-        return CanvasSelection(strokes: strokes, texts: texts)
+        guard all else { return CanvasSelection(strokes: strokes, texts: texts) }
+        let dimensions = try ids().map(DimensionID.init)
+        let frames = try ids().map(FrameID.init)
+        return CanvasSelection(strokes: strokes, texts: texts, dimensions: dimensions, frames: frames)
     }
 
     private mutating func ids() throws -> [Int] {
@@ -541,6 +705,23 @@ enum InkCodecTables {
         switch code {
         case 1: .pen
         case 2: .highlighter
+        default: nil
+        }
+    }
+
+    static func orientationCode(_ orientation: CanvasDimension.Orientation) -> UInt8 {
+        switch orientation {
+        case .horizontal: 1
+        case .vertical: 2
+        case .aligned: 3
+        }
+    }
+
+    static func orientation(_ code: UInt8) -> CanvasDimension.Orientation? {
+        switch code {
+        case 1: .horizontal
+        case 2: .vertical
+        case 3: .aligned
         default: nil
         }
     }

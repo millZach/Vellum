@@ -56,7 +56,7 @@ Strokes are numbered in the order drawn and never renumbered, and every change k
 - The Canvases list reads only `canvas.json` files and cached thumbnails, never ink, so it is quick whatever the canvases hold. A thumbnail records which saved ink it shows. It is redrawn on the maintenance queue after a batch of edits, when a canvas is closed, and when a canvas opens with its thumbnail missing or stale.
 - A record that passes its checksum but does not decode, from a newer Vellum or damage, stops the replay there. Everything before it opens. A damaged snapshot is reported rather than overwritten.
 - If a write fails because the Duo is full, the log is trimmed back to before the attempt. The changes stay in memory with the canvas saver, which writes them with the next change or on its retry timer, whichever comes first, even after the canvas is closed. Meanwhile the status bar says "Not saved: this Duo is full".
-- Sheets and frames are not saved yet, because nothing places them. The ticket that places sheets adds them as their own log events.
+- Sheets are not saved yet, because nothing places them. The ticket that places sheets adds them as their own log events. Frames are saved since #8 (below).
 - Measured on Forge's Linux box (release build, ext4 on SSD): 10,000 strokes of 120 points append in 6 µs each (write only), a batched flush takes about 4 ms, and the canvas reopens in 32 ms. Compacting it takes about 400 ms on the maintenance queue, and appends carry on throughout.
 
 ## Amendment (#7): moves, resizes, duplicates, deletes and text boxes
@@ -73,3 +73,13 @@ Strokes keep their ids when they move, so the undo history keeps what the canvas
 A snapshot of a canvas that has never had a text box is written exactly as version 1 wrote it, byte for byte, so a canvas of ink alone costs what it did. A canvas with text boxes adds them after the undo history, with the next text box id. A version 1 snapshot reads as one with no text boxes, and a version 1 log replays as before; new events appended to a version 1 log replay too, since every event says what kind it is, and the next compaction writes version 2 files. The canvas folder still holds only `canvas.json`, `ink.snapshot` and `ink.log`.
 
 A text box being typed in is saved when the typing ends: a tap away from it, another tool, undo or redo, closing the canvas, or the app leaving the screen. A crash while typing loses the text being typed, as a crash loses the stroke still being drawn.
+
+## Amendment (#8): dimensions and frames
+
+Dimensions and frames are saved in the same log, as their own events, and each placing is one undo step. The ink files are now version 3, with five more kinds of event (codes are never reused):
+
+- **A dimension placed** (10): its id, its first point on the ink grid as zigzag varints, its second point and the point its line passes through as steps from the first, its orientation, its markup colour, and its text height in inches as a 64-bit float. A 30' dimension takes 43 bytes in the log.
+- **A frame placed** (11): its id, its paper's width and height and its drawing scale's printed and real sides in inches as 64-bit floats, the scale's notation, and its corner on the ink grid. 51 bytes.
+- **A move or resize, a duplicate and a delete of a selection holding a dimension or a frame** (12, 13, 14): the #7 records with the dimension and frame ids after the text box ids, and for a duplicate the first new dimension and frame ids. A selection of strokes and text boxes alone keeps its #7 code and bytes, so the 1,000-stroke budgets hold. Resizing scales a dimension's points and text; it moves a frame's centre but never changes its paper or scale.
+
+A snapshot of a canvas that has ever had a dimension or a frame adds them after its text boxes (writing the text box part even when it has none), each list with its next id. A snapshot of ink and text boxes alone is written byte for byte as version 2 wrote it. Older files open as they are, and new events appended to an older log replay too. The injected-failure, crash and torn-append tests now run with dimensions and frames in the log. The canvas folder still holds only `canvas.json`, `ink.snapshot` and `ink.log`.

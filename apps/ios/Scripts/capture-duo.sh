@@ -1,5 +1,5 @@
 #!/bin/sh
-# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, snap, lasso and text boxes, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
+# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, snap, lasso and text boxes, measure, dimension, frame and window, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
 # app. The fold is moved by Scripts/duo/posture.m, a simulator-side tool that calls SpringBoard's display tool service,
 # the way Sotto captured its Duo layouts (Sotto tag prototype/iphone-duo-layout).
 # usage: capture-duo.sh [output folder]   (default .build-captures)
@@ -82,6 +82,32 @@ kill_and_reopen() {
   xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
 }
 
+# Frame timing on the 10,000-stroke canvas (#21): the benchmark pans, pinches, draws and erases through the canvas
+# view's input paths and writes benchmark.txt and benchmark.json to the app's Documents folder. Simulator numbers are
+# indicative. benchmark <suffix>: runs the installed app's benchmark and keeps benchmark<suffix>.txt and .json.
+benchmark() {
+  xcrun simctl ui "$udid" appearance light
+  xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+  rm -f "$data/Documents/benchmark.txt" "$data/Documents/benchmark.json"
+  xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-fixture-large --ui-benchmark >/dev/null
+  waited=0
+  while [ "$waited" -lt 240 ] && ! grep -q '^done' "$data/Documents/benchmark.txt" 2>/dev/null; do
+    sleep 5; waited=$((waited + 5))
+  done
+  cp "$data/Documents/benchmark.txt" "$out/benchmark$1.txt" 2>/dev/null || echo "The benchmark wrote no results" > "$out/benchmark$1.txt"
+  cp "$data/Documents/benchmark.json" "$out/benchmark$1.json" 2>/dev/null || true
+  echo "Benchmark$1 (simulator, indicative only):"
+  cat "$out/benchmark$1.txt"
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+}
+
+# PART splits the work between CI jobs (the captures job outgrew its 45 minutes with #8): "captures" runs every capture
+# and the Debug benchmark, "release-benchmark" only the optimised build's benchmark; unset, it runs both.
+part=${PART:-all}
+
+if [ "$part" != release-benchmark ]; then
 for appearance in light dark; do
   xcrun simctl ui "$udid" appearance "$appearance"
   # The canvas screen: a new empty canvas, then the Debug-only fixture (ink in all four markup colours) zoomed to
@@ -148,6 +174,23 @@ for appearance in light dark; do
   WAIT=$saved_wait
 done
 
+# Measure, dimension, frame and window (#8), in light and dark. Debug-only launch arguments
+# (Vellum/DebugMeasureFrame.swift) drive the canvas view's own input paths on the fixture, tapping a few points off the
+# ink so each tap snaps to it: a measure (36'-8 1/16"), two dimensions pulled off (horizontal 8'-0" and aligned
+# 19'-1 1/4"), the loupe up while the Pencil is down, a frame dragged round the valve (24x36 at 1 1/2" = 1'-0"), and a
+# window with its menu. The lengths match MeasureFrameCaptureTests. The top bar shows the fixture's full name.
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  saved_wait=${WAIT:-6}; WAIT=${SELECTION_WAIT:-10}
+  capture canvas-top-bar --ui-tab canvases --ui-reset --ui-fixture
+  capture canvas-measure --ui-tab canvases --ui-reset --ui-fixture --ui-measure
+  capture canvas-dimension --ui-tab canvases --ui-reset --ui-fixture --ui-dimension
+  capture canvas-loupe --ui-tab canvases --ui-reset --ui-fixture --ui-loupe
+  capture canvas-frame --ui-tab canvases --ui-reset --ui-fixture --ui-frame
+  capture canvas-window --ui-tab canvases --ui-reset --ui-fixture --ui-window
+  WAIT=$saved_wait
+done
+
 # Settings from the canvas (#28): the gear at the end of the top bar opens the same Settings sheet as the Drawings tab's
 # gear. The Debug-only `--ui-canvas-settings` opens the canvas with the sheet up.
 for appearance in light dark; do
@@ -165,26 +208,6 @@ appearance=dark
 xcrun simctl ui "$udid" appearance dark
 capture appearance-light-then-system --ui-tab canvases --ui-reset --ui-new-canvas --ui-appearance-steps light,system
 
-# Frame timing on the 10,000-stroke canvas (#21): the benchmark pans, pinches, draws and erases through the canvas
-# view's input paths and writes benchmark.txt and benchmark.json to the app's Documents folder. Simulator numbers are
-# indicative. benchmark <suffix>: runs the installed app's benchmark and keeps benchmark<suffix>.txt and .json.
-benchmark() {
-  xcrun simctl ui "$udid" appearance light
-  xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
-  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
-  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
-  rm -f "$data/Documents/benchmark.txt" "$data/Documents/benchmark.json"
-  xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-fixture-large --ui-benchmark >/dev/null
-  waited=0
-  while [ "$waited" -lt 240 ] && ! grep -q '^done' "$data/Documents/benchmark.txt" 2>/dev/null; do
-    sleep 5; waited=$((waited + 5))
-  done
-  cp "$data/Documents/benchmark.txt" "$out/benchmark$1.txt" 2>/dev/null || echo "The benchmark wrote no results" > "$out/benchmark$1.txt"
-  cp "$data/Documents/benchmark.json" "$out/benchmark$1.json" 2>/dev/null || true
-  echo "Benchmark$1 (simulator, indicative only):"
-  cat "$out/benchmark$1.txt"
-  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
-}
 benchmark ""
 
 # The Home Screen, to show the installed app icon. Vellum has to be on the first page: if SpringBoard put it on a later
@@ -239,6 +262,9 @@ ls -l "$out/bundle-icons"
 xcrun --sdk iphonesimulator assetutil --info "$app/Assets.car" > "$out/bundle-icons/Assets.car.json" || echo "assetutil could not read Assets.car"
 grep -E "\"(Name|Appearance|RenditionName|PixelWidth)\"" "$out/bundle-icons/Assets.car.json" | head -40 || true
 
+fi
+
+if [ "$part" != captures ]; then
 # The same benchmark in an optimised build: Release, with the BENCHMARK flag that compiles the benchmark and the
 # --ui-fixture-large launch argument in (TestFlight builds have neither). Its metrics end in _release.
 xcodebuild -project Vellum.xcodeproj -scheme Vellum -configuration Release -sdk iphonesimulator \
@@ -246,3 +272,4 @@ xcodebuild -project Vellum.xcodeproj -scheme Vellum -configuration Release -sdk 
   SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) BENCHMARK' build -quiet
 xcrun simctl install "$udid" .build-native/Build/Products/Release-iphonesimulator/Vellum.app
 benchmark "-release"
+fi

@@ -64,6 +64,24 @@ final class InkStoreFailureTests: XCTestCase {
             unwritten += session.takeEvents()
             if (try? store.append(unwritten)) != nil { unwritten.removeAll() }
         }
+
+        /// The dimension and frame changes (#8): two dimensions and a frame placed, a move, a duplicate and a delete
+        /// of a selection holding them, and an undo.
+        mutating func annotate(into store: InkStore) {
+            session.addDimension(start: CanvasPoint(x: .feet(0), y: .feet(0)), end: CanvasPoint(x: .feet(4), y: .feet(1)),
+                                 through: CanvasPoint(x: .feet(2), y: .feet(-1)), colour: .sketch, textHeight: .inches(4))
+            session.addDimension(start: CanvasPoint(x: .feet(0), y: .feet(2)), end: CanvasPoint(x: .feet(3), y: .feet(6)),
+                                 through: CanvasPoint(x: .feet(-2), y: .feet(8)), colour: .red, textHeight: .inches(4))
+            let frame = session.addFrame(paper: PaperSize.archD.landscape, scale: .architectural(inchesPerFoot: 0.25),
+                                         origin: CanvasPoint(x: .feet(-20), y: .feet(-10)))
+            let picked = CanvasSelection(strokes: [StrokeID(4)], dimensions: [DimensionID(1)], frames: [frame.id])
+            session.transform(picked, by: .translation(dx: .inches(5), dy: .inches(5)))
+            let copies = session.duplicate(picked, by: .translation(dx: .feet(1), dy: .zero))
+            session.delete(CanvasSelection(dimensions: [DimensionID(2)] + copies.dimensions))
+            session.undo()
+            unwritten += session.takeEvents()
+            if (try? store.append(unwritten)) != nil { unwritten.removeAll() }
+        }
     }
 
     /// The file calls one compaction makes, in order, so each test can fail or crash at every one of them.
@@ -97,6 +115,7 @@ final class InkStoreFailureTests: XCTestCase {
                 for i in 0..<8 { writer.draw(wave(i), into: store) }
                 writer.undo(into: store)
                 writer.editSelection(into: store)
+                writer.annotate(into: store)
 
                 let counter = Counter()
                 DurableFile.Fault.inject { _, _ in
@@ -145,6 +164,9 @@ final class InkStoreFailureTests: XCTestCase {
         for i in 0..<8 { writer.draw(wave(i), into: store) }
         writer.undo(into: store)
         writer.editSelection(into: store)
+        writer.annotate(into: store)
+        XCTAssertEqual(writer.session.dimensions.count, 3)
+        XCTAssertEqual(writer.session.frames.count, 2)
 
         let crashes = Crashes(folder: folder, scratch: self.folder.appendingPathComponent("crashes"))
         crashes.expected = writer.session
@@ -241,6 +263,25 @@ final class InkStoreFailureTests: XCTestCase {
         XCTAssertEqual(reopened.recovery.droppedBytes, 0)
         XCTAssertEqual(reopened.session, writer.session)
         XCTAssertEqual(reopened.session.ink.count, 7)
+    }
+
+    /// A dimension and a frame torn on the way to the Duo, the trim working: both are written again with the next
+    /// change and reopen (#8).
+    func testATornDimensionAndFrameAreWrittenAgainAndReopen() throws {
+        let store = try InkStore(folder: folder)
+        var writer = Writer()
+        writer.draw(wave(0), into: store)
+        DurableFile.Fault.inject { operation, _ in operation == .write ? .shortWrite(7, ENOSPC) : nil }
+        writer.annotate(into: store)
+        XCTAssertFalse(writer.unwritten.isEmpty, "the torn append failed")
+        DurableFile.Fault.inject(nil)
+        writer.draw(wave(1), into: store)
+        XCTAssertTrue(writer.unwritten.isEmpty)
+        store.closeFiles()
+        let reopened = try InkStore(folder: folder)
+        XCTAssertEqual(reopened.recovery.droppedBytes, 0)
+        XCTAssertEqual(reopened.session, writer.session)
+        XCTAssertEqual(reopened.session.dimensions.count, 3)
     }
 
     /// The same torn append, its trim working: the next append goes straight on.

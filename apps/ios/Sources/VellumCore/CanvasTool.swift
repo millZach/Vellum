@@ -1,6 +1,6 @@
 /// The tools on the canvas screen's rail, top to bottom (ADR-0011): pen, highlighter, eraser, line and shape; then
-/// lasso and text box; then measure, dimension, frame and window. Tools a later ticket builds are on the rail but
-/// disabled, with a hint saying they are coming, so the rail Zach learns now is the rail he keeps.
+/// lasso and text box; then measure, dimension, frame and window. Every one works since #8; a tool a later ticket
+/// adds goes on the rail disabled, with a hint saying it is coming, so the rail Zach learns is the rail he keeps.
 public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     case pen
     case highlighter
@@ -67,17 +67,46 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
                        inkTool: nil, prompt: "Tap to place a text box",
                        help: "Tap to place a text box or edit one, then type, or write with the Pencil and it becomes text")
         case .measure:
-            Descriptor(title: "Measure", systemImage: "ruler", group: .lengthsAndRegions, comingIn: 8, inkTool: nil,
-                       prompt: "Measure: tap the first point")
+            Descriptor(title: "Measure", systemImage: "ruler", group: .lengthsAndRegions, comingIn: nil, inkTool: nil,
+                       prompt: "Measure: tap first point",
+                       help: "Tap two points to read the length between them in the canvas units. A tap snaps to "
+                           + "ink ends, corners and circle centres, shown in a magnifier while you touch")
         case .dimension:
             Descriptor(title: "Dimension", systemImage: "arrow.left.and.right", group: .lengthsAndRegions,
-                       comingIn: 8, inkTool: nil, prompt: "Dimension: tap the first point")
+                       comingIn: nil, inkTool: nil, prompt: "Dimension: tap first point",
+                       help: "Tap two points, then drag or tap where the dimension line goes: above or below for "
+                           + "horizontal, beside for vertical, out at an angle for aligned. It stays on the canvas")
         case .frame:
-            Descriptor(title: "Frame", systemImage: "rectangle.inset.filled", group: .lengthsAndRegions, comingIn: 8,
-                       inkTool: nil, prompt: "Tap to place a frame")
+            Descriptor(title: "Frame", systemImage: "rectangle.inset.filled", group: .lengthsAndRegions, comingIn: nil,
+                       inkTool: nil, prompt: "Drag a box for a frame",
+                       help: "Pick a paper size, then drag a box round what the frame takes in. Vellum picks the "
+                           + "drawing scale whose paper covers it")
         case .window:
-            Descriptor(title: "Window", systemImage: "square.dashed", group: .lengthsAndRegions, comingIn: 8,
-                       inkTool: nil, prompt: "Drag a window around a region")
+            Descriptor(title: "Window", systemImage: "square.dashed", group: .lengthsAndRegions, comingIn: nil,
+                       inkTool: nil, prompt: "Drag a window over a region",
+                       help: "Drag a box round a region, then zoom to it or make a frame from it")
+        }
+    }
+
+    /// Where a measure, dimension or window is up to, for the status bar's prompt (#8).
+    public enum Step: Hashable, Sendable {
+        /// Nothing started: the tool's own prompt.
+        case start
+        /// A measure or dimension has its first point and waits for the second.
+        case secondPoint
+        /// A dimension has both points and waits for the third, which pulls its line off them.
+        case pullOff
+        /// A window is drawn and waits for what to do with it.
+        case chooseWindowAction
+    }
+
+    /// The status bar's prompt part way through a measure, dimension or window.
+    public static func prompt(for step: Step) -> String? {
+        switch step {
+        case .start: nil
+        case .secondPoint: "Tap the second point"
+        case .pullOff: "Drag or tap to place line"
+        case .chooseWindowAction: "Zoom or make a frame"
         }
     }
 
@@ -105,9 +134,11 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// The status bar's prompt for the lasso while something is selected.
     public static let selectionPrompt = "Drag the selection"
 
-    /// The status bar's prompt, given whether the lasso has a selection: with one, it says to drag it.
-    public func prompt(fingerDraws: Bool, hasSelection: Bool) -> String {
+    /// The status bar's prompt, given whether the lasso has a selection: with one, it says to drag it; and, for a
+    /// measure, dimension or window part way through, what it waits for next (#8).
+    public func prompt(fingerDraws: Bool, hasSelection: Bool, step: Step = .start) -> String {
         if self == .lasso, hasSelection { return Self.selectionPrompt }
+        if let next = Self.prompt(for: step) { return next }
         return prompt(fingerDraws: fingerDraws)
     }
 

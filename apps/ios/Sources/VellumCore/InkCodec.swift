@@ -444,7 +444,8 @@ struct ByteWriter {
     /// A sheet (#11): id, its paper's width and height in printed inches as 64-bit floats, its scale, its top-left
     /// corner in grid units, whether it inverts badly, then its page (1 and the PDF's name on the Duo, its file name,
     /// its Dropbox path, the page and the sheet number read, or 0 for none) and its scale areas (a count, then each
-    /// one's name, rectangle on the paper in printed inches as four 64-bit floats, and scale). About 200 bytes.
+    /// one's name, rectangle on the paper in printed inches as four 64-bit floats, and scale). The made-up AS NOTED
+    /// sheet takes 226 bytes.
     mutating func sheet(_ sheet: Sheet) {
         varint(UInt64(max(sheet.id.value, 0)))
         f64(sheet.paper.width.inches)

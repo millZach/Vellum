@@ -353,18 +353,27 @@ private struct ConfirmSheet: View {
                         Text(title(info)).font(.title3.weight(.semibold))
                         explanation(info)
                         if asks(info) { picker(info) }
-                        if let chosen = chosen(info) {
-                            Text("On the canvas it will cover \(coverage(info, chosen)).")
-                                .font(.callout).foregroundStyle(.secondary)
-                                .accessibilityIdentifier("coverage")
-                        }
-                        buttons(info)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(18)
             } else {
                 ProgressView("Reading the title block…").padding(40)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            // What it will cover, and Cancel and Place sheet, always in view however long the scales run.
+            if let info {
+                HStack(spacing: 10) {
+                    if let chosen = chosen(info) {
+                        Text("On the canvas it will cover \(coverage(info, chosen)).")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("coverage")
+                    }
+                    buttons(info)
+                }
+                .padding(.horizontal, 18).padding(.vertical, 10)
+                .background(.bar)
             }
         }
         .navigationTitle(info?.reading.sheetNumber ?? "Page \(page + 1)")

@@ -299,11 +299,16 @@ private struct SheetTileJob: @unchecked Sendable {
                                       space: space, bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
                                           | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
         let full = CGRect(x: 0, y: 0, width: pixels, height: pixels)
-        context.setFillColor(gray: 1, alpha: 1)
-        context.fill(full)
         let tile = job.key.paperRect
         // Pixels per printed inch at this level.
         let scale = SheetTileBook.scale(level: job.key.level) * Double(job.displayScale)
+        // A tile at the page's edge runs past it: only the page is painted, the rest stays clear (y up in pixels).
+        let page = CGRect(x: -tile.minX * scale, y: Double(pixels) - (job.paper.height.inches - tile.minY) * scale,
+                          width: job.paper.width.inches * scale, height: job.paper.height.inches * scale)
+        context.clear(full)
+        context.clip(to: page.intersection(full))
+        context.setFillColor(gray: 1, alpha: 1)
+        context.fill(full)
         context.saveGState()
         // y down from the tile's top-left, in printed inches.
         context.translateBy(x: 0, y: CGFloat(pixels))

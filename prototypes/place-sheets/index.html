@@ -1,0 +1,1042 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Never merge to main; the lead keeps it as the tag prototype/place-sheets.
+  For Vellum #11: place PDF sheets from Dropbox at their drawing scale.
+
+  Already settled by the picked canvas prototype (prototype/canvas-screen, variant A), ADR-0002 and ADR-0011, so NOT asked here:
+    Add sheet sits at the right of the top bar and opens the Drawings tab's Dropbox browser (index search waits for milestone 2);
+    a confirm step names the SCALE Vellum read and what the sheet will cover, with Cancel, Change scale and Place sheet;
+    AS NOTED or a scan: Vellum says it can't tell and offers common scales to pick or type; NTS goes on at printed size;
+    every sheet is labelled with its number and scale; sheets invert in dark mode and a sheet that inverts badly shows dimmed.
+
+  Open questions, one section each. Choices stay in the URL: ?q1=A&q2=B&q3=C&q4=A (and &theme=light|dark to pin the theme).
+    q1  A PDF with several pages: how does Zach pick the page?        A page grid  B pages as rows  C step pages inside the confirm step
+    q2  AS NOTED, with details at different scales: how do they go on? A one scale for the sheet  B each detail its own sheet  C one sheet with scale areas
+    q3  Where does a new sheet land on the canvas?                     A beside the others  B where you are looking, then drag  C tap where it goes
+    q4  In dark mode, who decides a sheet shows dimmed?                A Vellum decides  B chosen when placing  C fixed on the sheet afterwards
+
+  Every PDF, title block, project and drawing here is made up and drawn as simple vectors.
+  Pointer: Pencil or mouse uses the tool; with Measure on, one finger measures too. Two fingers pan and pinch.
+  Mouse: right-drag pans, Ctrl + wheel (or a trackpad pinch) zooms, or use the + and - buttons.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Vellum: place sheets at their drawing scale (prototype)</title>
+<link rel="icon" href="data:,">
+<style>
+  :root, .th-light {
+    --ink:#1d1d1f; --mute:#6b6b70; --line:#d9d4c9; --paper:#f3efe6; --panel:rgba(252,250,246,.94); --accent:#2f5d8a; --accent-soft:#e6edf5;
+    --btn:#2f5d8a; --ghostbg:#fff; --page:#ece8df; --card:#fffdf9; --modal:#fffdf9; --row:#eee5d6; --rowhover:#f6f1e7; --tag:#eee8dc; --tagt:#555;
+    --nts:#8a5a00; --warn:#9a3412; --ok:#2f7a4f; --bad:#b42318; --area:#6b3fa8; --seg:#e4dfd3; --shadow:0 2px 10px rgba(0,0,0,.08);
+  }
+  body.dark, .th-dark {
+    --ink:#e8e6e1; --mute:#a9a9ae; --line:#3a3b40; --paper:#1c1d20; --panel:rgba(36,37,41,.94); --accent:#9cc4ec; --accent-soft:#2c3a4a;
+    --btn:#3f74a8; --ghostbg:#2a2b2f; --page:#141416; --card:#1f2023; --modal:#26272b; --row:#3a3b40; --rowhover:#303136; --tag:#3a3b40; --tagt:#cfcfd3;
+    --nts:#e0b45c; --warn:#f0a868; --ok:#6fcf97; --bad:#ff7b72; --area:#c4a2f0; --seg:#2a2b2f; --shadow:0 2px 12px rgba(0,0,0,.45);
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--page); color:var(--ink); font:15px/1.4 -apple-system,system-ui,"SF Pro Text","Segoe UI",sans-serif; padding-bottom:70px; }
+  button { font:inherit; color:inherit; border:0; background:none; cursor:pointer; padding:0; }
+  select { font:inherit; color:var(--ink); background:var(--ghostbg); border:1px solid var(--line); border-radius:7px; padding:3px 4px; }
+  input[type=text] { font:inherit; color:var(--ink); background:var(--ghostbg); border:1px solid var(--line); border-radius:8px; padding:6px 8px; width:9em; }
+  a { color:var(--accent); }
+  header, section.q, footer { max-width:980px; margin:0 auto; }
+  header { padding:14px 14px 0; }
+  .top { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  h1 { font-size:20px; margin:0; line-height:1.25; }
+  .sub { color:var(--mute); font-size:13px; margin:3px 0 0; }
+  .intro { margin:10px 0 8px; font-size:14.5px; }
+  .themebtn { flex:none; display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); background:var(--card); border-radius:20px; padding:6px 12px; font-size:13px; font-weight:600; }
+  .themebtn small { font-weight:400; color:var(--mute); }
+  details.settled { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:9px 13px; font-size:13.5px; margin:8px 0 2px; }
+  details.settled summary { cursor:pointer; font-weight:600; }
+  details.settled ul { margin:8px 0 2px; padding-left:18px; } details.settled li { margin:4px 0; }
+  .toc { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 0; }
+  .toc a { text-decoration:none; color:var(--ink); background:var(--card); border:1px solid var(--line); border-radius:16px; padding:4px 10px; font-size:13px; }
+  section.q { background:var(--card); border-radius:18px; margin:14px auto; padding:14px; box-shadow:var(--shadow); scroll-margin-top:8px; }
+  @media (max-width:1008px) { section.q { margin:14px; } }
+  section.q h2 { font-size:18px; margin:0 0 3px; line-height:1.25; }
+  section.q h2 .n { color:var(--accent); }
+  .why { margin:0 0 10px; color:var(--mute); font-size:14px; }
+  .seg { display:grid; gap:4px; background:var(--seg); padding:4px; border-radius:14px; }
+  .seg button { min-height:54px; border-radius:11px; padding:6px 10px; display:flex; align-items:center; gap:9px; text-align:left; font-weight:600; font-size:14.5px; line-height:1.2; color:var(--mute); }
+  .seg button .k { flex:none; width:28px; height:28px; border-radius:14px; display:flex; align-items:center; justify-content:center; background:var(--card); border:1px solid var(--line); font-size:13px; color:var(--ink); }
+  .seg button[aria-checked=true] { background:var(--card); color:var(--ink); box-shadow:0 1px 5px rgba(0,0,0,.16); }
+  .seg button[aria-checked=true] .k { background:var(--btn); color:#fff; border-color:var(--btn); }
+  .desc { margin:9px 2px 10px; font-size:14px; min-height:2.8em; }
+  .hint { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; color:var(--mute); font-size:12.5px; margin:8px 2px 0; }
+  .hint button { flex:none; color:var(--accent); font-weight:600; font-size:12.5px; padding:2px 4px; }
+  @media (max-width:560px) {
+    header { padding:12px 12px 0; } h1 { font-size:18px; } .themebtn small { display:none; }
+    section.q { margin:10px 6px; padding:12px 10px; border-radius:15px; }
+    .seg button { flex-direction:column; align-items:flex-start; justify-content:center; gap:4px; font-size:13px; min-height:66px; padding:6px 8px; }
+    .seg button .k { width:24px; height:24px; font-size:12px; }
+  }
+
+  /* ---------- the mini canvas screen ---------- */
+  .stage { position:relative; height:clamp(380px, calc(100vh - 262px), 560px); border-radius:14px; overflow:hidden; background:var(--paper); border:1px solid var(--line);
+           user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; font-size:13px; color:var(--ink); }
+  @supports (height:100svh) { .stage { height:clamp(380px, calc(100svh - 262px), 560px); } }
+  .stage canvas.cv { position:absolute; inset:0; width:100%; height:100%; touch-action:none; display:block; }
+  .panel { background:var(--panel); border:1px solid var(--line); box-shadow:0 2px 10px rgba(0,0,0,.08); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); }
+  .rail { position:absolute; left:8px; top:8px; width:46px; border-radius:13px; display:flex; flex-direction:column; align-items:center; padding:5px 0; gap:3px; }
+  .rail button { width:38px; height:38px; border-radius:9px; display:flex; align-items:center; justify-content:center; }
+  .rail button.on { background:var(--accent-soft); color:var(--accent); }
+  .tbar { position:absolute; left:62px; top:8px; height:38px; border-radius:12px; display:flex; align-items:center; gap:10px; padding:0 12px; white-space:nowrap; max-width:calc(100% - 190px); overflow:hidden; }
+  .tbar .units { color:var(--mute); font-size:12px; }
+  .tbar button { display:flex; align-items:center; }
+  .tact { position:absolute; right:8px; top:8px; display:flex; gap:8px; }
+  .ghost { border:1px solid var(--line); border-radius:9px; padding:7px 11px; background:var(--ghostbg); display:inline-flex; align-items:center; gap:5px; }
+  .ghost.sel { border-color:var(--accent); color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+  .primary { background:var(--btn); color:#fff; border-radius:9px; padding:8px 13px; font-weight:600; }
+  .primary[disabled] { opacity:.45; cursor:default; }
+  .sbar { position:absolute; left:62px; right:8px; bottom:8px; min-height:36px; border-radius:11px; display:flex; align-items:center; gap:6px; padding:3px 5px 3px 12px; font-size:12px; color:var(--mute); }
+  .sbar .pr { flex:1; min-width:0; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.3; }
+  .sbar .pr b { color:var(--ink); }
+  .sbar .cnt { white-space:nowrap; }
+  .sbar button { flex:none; width:30px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--ink); }
+  .ok { color:var(--ok); font-weight:600; } .bad { color:var(--bad); font-weight:600; }
+  @media (max-width:560px) { .sbar .cnt, .tbar .units { display:none; } .stage .pill { left:62px; right:8px; transform:none; justify-content:space-between; } }
+  .layer, .pills, .toasts { position:absolute; inset:0; pointer-events:none; }
+  .layer > *, .pills > * { pointer-events:auto; }
+  .scrim { position:absolute; inset:0; background:rgba(20,20,20,.30); display:flex; align-items:center; justify-content:center; padding:12px; }
+  .modal { width:min(560px,100%); max-height:100%; overflow:auto; -webkit-overflow-scrolling:touch; background:var(--modal); border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,.28); padding:14px 16px; touch-action:pan-y; }
+  .modal h2 { font-size:17px; margin:0 0 8px; display:flex; align-items:center; gap:8px; }
+  .modal p { margin:8px 0; }
+  .modal .row { display:flex; gap:8px; align-items:center; margin:10px 0 2px; flex-wrap:wrap; }
+  .modal .end { justify-content:flex-end; }
+  .modal .note { color:var(--mute); font-size:12px; flex:1; min-width:150px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; } .cols > div { min-width:0; }
+  .backbtn { display:inline-flex; align-items:center; color:var(--accent); font-weight:600; font-size:14px; margin:0 0 6px -4px; padding:2px 4px; }
+  @media (max-width:560px) { .scrim { align-items:flex-end; padding:8px; } .modal { padding:12px 13px; } }
+  .crumb { color:var(--mute); font-size:12px; margin:0 0 4px; }
+  .list > button, .list .prow { display:flex; width:100%; text-align:left; padding:9px 6px; border-bottom:1px solid var(--row); gap:10px; align-items:center; }
+  .list > button:hover, .list .prow:hover { background:var(--rowhover); }
+  .list .fi { flex:none; color:var(--accent); display:flex; }
+  .list .nm { flex:1; min-width:0; overflow-wrap:anywhere; }
+  .list .meta { display:block; color:var(--mute); font-size:11.5px; }
+  .list .chev { flex:none; color:var(--mute); transition:transform .15s; display:flex; }
+  .list .chev.open { transform:rotate(90deg); }
+  .list .prow { padding-left:34px; background:color-mix(in srgb, var(--row) 30%, transparent); }
+  .list .pno { flex:none; width:24px; color:var(--mute); font-size:12px; }
+  .tag { flex:none; font-size:11px; padding:2px 6px; border-radius:6px; background:var(--tag); color:var(--tagt); white-space:nowrap; }
+  .tag.nts { color:var(--nts); } .tag.warn { color:var(--warn); }
+  .bar { height:4px; border-radius:2px; background:var(--row); overflow:hidden; margin-top:5px; }
+  .bar i { display:block; height:100%; width:0; background:var(--accent); animation:fill .6s linear forwards; }
+  @keyframes fill { to { width:100%; } }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(128px,1fr)); gap:10px; margin:8px 0; }
+  .pcard { display:flex; flex-direction:column; gap:4px; text-align:left; border:1px solid var(--line); border-radius:11px; padding:6px; background:var(--ghostbg); }
+  .pcard:hover { border-color:var(--accent); }
+  .pcard canvas { width:100%; aspect-ratio:3/2; display:block; border-radius:5px; }
+  .pcard .cap { font-size:12px; line-height:1.25; }
+  .pcard .cap .meta { color:var(--mute); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+  .chips .ghost { padding:6px 9px; font-size:12.5px; }
+  .chips .ghost small { color:var(--mute); font-size:11px; }
+  .chips .ghost.sel small { color:inherit; }
+  .lbl { font-size:12px; color:var(--mute); margin:8px 0 2px; }
+  .pv { position:relative; margin:6px 0; border-radius:8px; overflow:hidden; background:var(--paper); border:1px solid var(--line); }
+  .pv canvas { display:block; width:100%; touch-action:none; }
+  .stepper { display:flex; align-items:center; gap:8px; margin:6px 0 2px; }
+  .stepper .ghost { width:40px; height:36px; justify-content:center; padding:0; font-size:18px; }
+  .stepper span { flex:1; text-align:center; font-size:13px; }
+  .pnums { display:flex; gap:4px; justify-content:center; flex-wrap:wrap; }
+  .pnums button { min-width:30px; height:28px; border-radius:7px; border:1px solid var(--line); font-size:12px; background:var(--ghostbg); }
+  .pnums button.sel { background:var(--btn); color:#fff; border-color:var(--btn); }
+  .drow { display:flex; align-items:center; gap:9px; padding:7px 4px; border-bottom:1px solid var(--row); cursor:pointer; }
+  .drow .cb { flex:none; width:22px; height:22px; border-radius:6px; border:1.5px solid var(--line); display:flex; align-items:center; justify-content:center; color:#fff; }
+  .drow .cb.on { background:var(--btn); border-color:var(--btn); }
+  .drow .dn { flex:1; min-width:0; font-size:13px; }
+  .dmrow { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:6px 0; }
+  .dmc { border:1px solid var(--line); border-radius:11px; padding:6px; display:flex; flex-direction:column; gap:4px; align-items:stretch; background:var(--ghostbg); font-weight:600; font-size:13px; }
+  .dmc canvas { width:100%; aspect-ratio:3/2; border-radius:6px; display:block; }
+  .dmc.sel { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); color:var(--accent); }
+  .pill { position:absolute; left:50%; top:56px; transform:translateX(-50%); display:flex; align-items:center; gap:10px; padding:6px 6px 6px 12px; border-radius:12px; font-size:13px; white-space:nowrap; max-width:calc(100% - 16px); }
+  .pill span { overflow:hidden; text-overflow:ellipsis; }
+  .pill .primary, .pill .ghost { padding:6px 11px; }
+  .pop { position:absolute; display:flex; align-items:center; gap:4px; padding:5px; border-radius:11px; background:#1d1d1f; color:#fff; font-size:12px; box-shadow:0 6px 20px rgba(0,0,0,.35); white-space:nowrap; }
+  .pop .t { padding:0 6px; color:#cfcfd3; }
+  .pop button { color:#fff; padding:7px 10px; border-radius:8px; font-size:12.5px; }
+  .pop button.on { background:#3f74a8; }
+  .toast { position:absolute; left:50%; bottom:62px; transform:translateX(-50%); padding:7px 12px; border-radius:10px; background:rgba(29,29,31,.88); color:#fff; font-size:12.5px; max-width:calc(100% - 24px); text-align:center; transition:opacity .3s; }
+  .check { margin:10px 2px 0; font-size:13px; }
+  .check .ch { font-weight:600; margin-bottom:4px; } .check .ch small { font-weight:400; color:var(--mute); }
+  .crow { display:flex; flex-wrap:wrap; gap:2px 12px; width:100%; text-align:left; padding:6px 4px; border-bottom:1px solid var(--row); }
+  .crow:hover { background:var(--rowhover); }
+  .crow .w { flex:1 1 220px; min-width:0; } .crow .w small { color:var(--mute); }
+  .crow .v { flex:none; color:var(--mute); } .crow .v b { color:var(--ink); }
+  #picks { position:fixed; left:50%; bottom:max(8px, env(safe-area-inset-bottom)); transform:translateX(-50%); display:flex; align-items:center; gap:4px; background:#000; color:#fff;
+           border-radius:22px; padding:5px 5px 5px 12px; font-size:13px; z-index:50; white-space:nowrap; box-shadow:0 4px 16px rgba(0,0,0,.3); max-width:calc(100vw - 12px); }
+  #picks a { color:#fff; text-decoration:none; padding:4px 6px; border-radius:12px; }
+  #picks a b { color:#9cc4ec; }
+  #picks button { color:#fff; background:#333; border-radius:16px; padding:6px 11px; font-size:12.5px; margin-left:4px; }
+  footer { padding:6px 16px 20px; color:var(--mute); font-size:12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div>
+      <h1>Place PDF sheets at their drawing scale</h1>
+      <p class="sub">Vellum #11 · throwaway prototype · every PDF, title block and project here is made up</p>
+    </div>
+    <button class="themebtn" id="themeBtn" type="button"></button>
+  </div>
+  <p class="intro">The canvas screen you picked already shows the add-sheet flow. These are the four things it leaves open for building #11. Each section has a live canvas: pick A, B or C and try it. Your picks stay in the link.</p>
+  <details class="settled">
+    <summary>Already settled, so not asked here</summary>
+    <ul>
+      <li><b>Add sheet</b> sits at the right of the top bar, beside Record and Send, and opens the same Dropbox browser as the Drawings tab. Index search comes with milestone 2.</li>
+      <li>After you pick a page, a <b>confirm step</b> names what Vellum read: "The title block says SCALE: 1/4" = 1'-0". On the canvas it will cover 144'-0" × 96'-0"", with Cancel, Change scale and Place sheet.</li>
+      <li><b>AS NOTED or a scan</b>: Vellum says it can't tell the scale and offers common scales to pick or type. Place sheet waits until you choose one.</li>
+      <li><b>NTS</b>: the sheet goes on at its printed size, and lengths on it read as printed inches marked NTS.</li>
+      <li>Every sheet has a <b>label</b> with its number and scale. After placing, the view zooms to the new sheet and a short message confirms it.</li>
+      <li><b>Dark mode</b> (ADR-0011): sheets invert, and a sheet that inverts badly shows dimmed instead. Sketch ink stays dark over light paper.</li>
+    </ul>
+  </details>
+  <nav class="toc" id="toc"></nav>
+</header>
+<main id="qs"></main>
+<footer>Pencil or mouse uses the selected tool. With Measure on, one finger measures too. Two fingers pan and pinch. With a mouse, right-drag pans and Ctrl + wheel zooms, or use + and −. Lengths are in feet and inches.</footer>
+<div id="picks"></div>
+
+<script>
+"use strict";
+// ---------- basics ----------
+const params = new URLSearchParams(location.search);
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const SCALES = [[`1/8" = 1'-0"`,96],[`3/16" = 1'-0"`,64],[`1/4" = 1'-0"`,48],[`3/8" = 1'-0"`,32],[`1/2" = 1'-0"`,24],[`3/4" = 1'-0"`,16],
+                [`1" = 1'-0"`,12],[`1-1/2" = 1'-0"`,8],[`3" = 1'-0"`,4],[`1" = 10'`,120],[`1" = 20'`,240],[`Full size 1:1`,1]];
+const scaleLabel = k => k === 0 ? 'NTS' : (SCALES.find(s => s[1] === k) || ['1:' + k])[0];
+function fmt(inches) { // canvas units: feet and inches, to the half inch, like the canvas prototype
+  const neg = inches < 0; inches = Math.abs(inches);
+  let ft = Math.floor(inches / 12); let rem = Math.round((inches - ft * 12) * 2) / 2;
+  if (rem >= 12) { ft++; rem = 0; }
+  const whole = Math.floor(rem), half = rem - whole ? ' 1/2' : '';
+  return (neg ? '-' : '') + `${ft}'-${whole}${half}"`;
+}
+const fmtNTS = p => (Math.round(p * 16) / 16).toFixed(2) + '" NTS';
+const paperName = p => `${Math.min(p.pw, p.ph)} × ${Math.max(p.pw, p.ph)}`;
+
+const ICON = {
+  hand:'<path d="M8 13V6a1.5 1.5 0 013 0v5 M11 11V4.5a1.5 1.5 0 013 0V11 M14 11V6a1.5 1.5 0 013 0v7c0 4-3 7-6 7s-5-2-7-6l-1-2a1.5 1.5 0 012.5-1.5L8 13"/>',
+  measure:'<path d="M3 15l12-12 6 6-12 12z M7 11l2 2 M10 8l2 2 M13 5l2 2"/>',
+  plus:'<path d="M12 5v14 M5 12h14"/>', minus:'<path d="M5 12h14"/>',
+  extents:'<path d="M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5"/>',
+  moon:'<path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2 M12 20v2 M4 12H2 M22 12h-2 M5 5l1.5 1.5 M17.5 17.5L19 19 M5 19l1.5-1.5 M17.5 6.5L19 5"/>',
+  folder:'<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>',
+  pdf:'<path d="M7 3h7l5 5v13H7z M14 3v5h5"/>', pdfs:'<path d="M9 3h7l4 4v11H9z M16 3v4h4 M6 6v15h11"/>',
+  chev:'<path d="M9 6l6 6-6 6"/>', back:'<path d="M15 6l-6 6 6 6"/>', check:'<path d="M5 12l4 4 10-10"/>',
+};
+const svg = (n, s = 20) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
+
+// ---------- theme ----------
+const mq = matchMedia('(prefers-color-scheme: dark)');
+let themePin = ['light', 'dark'].includes(params.get('theme')) ? params.get('theme') : null;
+const pageDark = () => themePin ? themePin === 'dark' : mq.matches;
+
+// ---------- colours: a sheet drawn as printed, inverted or dimmed ----------
+const hexCache = new Map();
+function rgbOf(h) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function mapRGB(c, mode) {
+  if (mode === 'inverted') return c.map(v => Math.round(18 + (255 - v) * 0.81));
+  if (mode === 'dimmed') return c.map(v => Math.round(v * 0.72));
+  return c.map(Math.round);
+}
+function mapHex(h, mode) {
+  if (mode === 'asPrinted') return h;
+  const key = h + mode; let v = hexCache.get(key);
+  if (!v) { const [r, g, b] = mapRGB(rgbOf(h), mode); v = `rgb(${r},${g},${b})`; hexCache.set(key, v); }
+  return v;
+}
+const texCache = {};
+function scanTex(mode) { // a made-up scanned paper texture: yellowed, noisy, darker at the edges, a couple of stains
+  if (texCache[mode]) return texCache[mode];
+  const w = 360, h = 240, c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+  const img = g.createImageData(w, h); let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const blots = [[80, 60, 40], [290, 170, 55], [205, 40, 22]];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let v = 0.935 + (rnd() - 0.5) * 0.09;
+    const e = Math.min(x / w, (w - 1 - x) / w, y / h, (h - 1 - y) / h); v -= Math.max(0, 0.05 - e) * 2.2;
+    for (const [bx, by, br] of blots) { const d = Math.hypot(x - bx, y - by) / br; if (d < 1) v -= (1 - d) * 0.09; }
+    if (rnd() < 0.004) v -= 0.45;
+    const rgb = mapRGB([255 * v, 255 * v * 0.972, 255 * v * 0.89].map(q => Math.max(0, Math.min(255, q))), mode);
+    const i = (y * w + x) * 4; img.data[i] = rgb[0]; img.data[i + 1] = rgb[1]; img.data[i + 2] = rgb[2]; img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0); return (texCache[mode] = c);
+}
+
+// ---------- drawing a page (all coordinates in printed inches) ----------
+let G, PM = 'asPrinted', PZ = 10, LW = 0.02, INK = '#222222', WOB = false, HAND = false;
+const col = h => mapHex(h, PM);
+const jit = (x, y) => (Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1 * 0.035;
+function ln(x1, y1, x2, y2) {
+  G.beginPath(); G.moveTo(x1, y1);
+  if (WOB) { for (let i = 1; i < 5; i++) { const t = i / 5; G.lineTo(x1 + (x2 - x1) * t + jit(x1 + i, y2), y1 + (y2 - y1) * t + jit(y1 + i, x2)); } }
+  G.lineTo(x2, y2); G.stroke();
+}
+function poly(pts, close) { G.beginPath(); pts.forEach((p, i) => i ? G.lineTo(p[0], p[1]) : G.moveTo(p[0], p[1])); if (close) G.closePath(); G.stroke(); }
+function box(x, y, w, h) { if (WOB) { ln(x, y, x + w, y); ln(x + w, y, x + w, y + h); ln(x + w, y + h, x, y + h); ln(x, y + h, x, y); } else G.strokeRect(x, y, w, h); }
+function fbox(x, y, w, h, f) { G.fillStyle = col(f); G.fillRect(x, y, w, h); }
+function circ(x, y, r) { G.beginPath(); G.arc(x, y, r, 0, Math.PI * 2); G.stroke(); }
+function fcirc(x, y, r, f) { G.beginPath(); G.arc(x, y, r, 0, Math.PI * 2); G.fillStyle = col(f); G.fill(); }
+function tx(t, x, y, size, o = {}) {
+  const px = size * PZ;
+  if (px < 2.4) { // too small to read: draw a faint bar, the way text greys out when zoomed out
+    if (px > 0.5) { G.save(); G.globalAlpha = 0.3; G.fillStyle = col(o.c || INK); const w = t.length * size * 0.5;
+      G.fillRect(o.a === 'center' ? x - w / 2 : o.a === 'right' ? x - w : x, y - size * 0.62, w, size * 0.5); G.restore(); }
+    return;
+  }
+  G.save(); G.translate(x, y); if (o.rot) G.rotate(o.rot); G.scale(size / 10, size / 10);
+  G.font = `${o.i || HAND ? 'italic ' : ''}${o.w || 400} 10px ${HAND ? '"Bradley Hand","Segoe Print","Comic Sans MS",cursive' : 'system-ui,-apple-system,"Segoe UI",sans-serif'}`;
+  G.fillStyle = col(o.c || INK); G.textAlign = o.a || 'left'; G.textBaseline = 'alphabetic'; G.fillText(t, 0, 0); G.restore();
+}
+function dimH(x1, x2, y, t) { G.lineWidth = LW; ln(x1, y, x2, y); for (const x of [x1, x2]) { ln(x, y - 0.22, x, y + 0.22); ln(x - 0.1, y + 0.1, x + 0.1, y - 0.1); } tx(t, (x1 + x2) / 2, y - 0.1, 0.24, { a:'center' }); }
+function dimV(x, y1, y2, t) { G.lineWidth = LW; ln(x, y1, x, y2); for (const y of [y1, y2]) { ln(x - 0.22, y, x + 0.22, y); ln(x - 0.1, y + 0.1, x + 0.1, y - 0.1); } tx(t, x - 0.1, (y1 + y2) / 2, 0.24, { a:'center', rot:-Math.PI / 2 }); }
+function cloudPts(cx, cy, w, h, n = 22) { const p = []; for (let i = 0; i <= n; i++) { const a = i / n * Math.PI * 2, r = 1 + 0.07 * Math.abs(Math.sin(i * Math.PI / 2 + 0.5)); p.push([cx + Math.cos(a) * w / 2 * r, cy + Math.sin(a) * h / 2 * r]); } return p; }
+
+function titleBlock(p) {
+  const tbw = Math.min(7, p.pw * 0.42), tbh = Math.min(2, p.ph * 0.18), x = p.pw - 0.5 - tbw, y = p.ph - 0.5 - tbh;
+  if (p.tbFill) fbox(x, y, tbw, tbh * 0.45, p.tbFill);
+  G.strokeStyle = col(INK); G.lineWidth = LW; box(x, y, tbw, tbh); ln(x, y + tbh * .45, x + tbw, y + tbh * .45); ln(x + tbw * .62, y + tbh * .45, x + tbw * .62, y + tbh);
+  tx(p.title.toUpperCase(), x + 0.15, y + tbh * 0.3, tbh * 0.16, { w:600, c:p.tbFill ? '#ffffff' : INK });
+  tx('RIVERSIDE PLANT (EXAMPLE)', x + 0.15, y + tbh * 0.64, tbh * 0.12);
+  tx('SCALE: ' + p.scaleText, x + 0.15, y + tbh * 0.88, tbh * 0.13, { w:600 });
+  tx(p.num, x + tbw * .66, y + tbh * 0.74, tbh * 0.24, { w:700 });
+  tx('REV ' + (p.rev || '0'), x + tbw * .66, y + tbh * 0.92, tbh * 0.11);
+}
+function drawPage(p) { // assumes G is set up with the page's transform and the paper already filled
+  INK = p.ink || '#222222'; HAND = !!p.scan; G.lineCap = 'round'; G.lineJoin = 'round';
+  if (p.scan) G.drawImage(scanTex(PM), 0, 0, p.pw, p.ph);
+  G.lineWidth = LW; G.strokeStyle = col(INK); box(0.5, 0.5, p.pw - 1, p.ph - 1);
+  if (PZ * p.pw > 26) { p.draw(p); G.setLineDash([]); G.lineWidth = LW; G.strokeStyle = col(INK); titleBlock(p); }
+  HAND = false; WOB = false;
+}
+function drawPlan(p) {
+  const gx = [3, 13, 23, 28], gy = [4, 10.25, 16.5];
+  WOB = !!p.scan;
+  G.save(); if (!p.scan) G.setLineDash([0.5, 0.15, 0.1, 0.15]); G.lineWidth = LW * 0.8;
+  gx.forEach(x => ln(x, 1.85, x, 17.4)); gy.forEach(y => ln(1.3, y, 29.8, y)); G.restore();
+  ['A', 'B', 'C', 'D'].forEach((l, i) => { circ(gx[i], 1.4, 0.38); tx(l, gx[i], 1.53, 0.36, { a:'center', w:600 }); });
+  ['1', '2', '3'].forEach((l, i) => { circ(30.2, gy[i], 0.38); tx(l, 30.2, gy[i] + 0.13, 0.36, { a:'center', w:600 }); });
+  G.lineWidth = LW * 3.2; box(3, 4, 25, 12.5); G.lineWidth = LW * 2; ln(23, 4, 23, 9); ln(23, 11, 23, 16.5); G.lineWidth = LW;
+  for (const [x, n] of [[5, 'B-1'], [15, 'B-2']]) { box(x, 6, 6, 3); box(x + 0.4, 6.4, 5.2, 2.2); circ(x + 5, 7.5, 0.5); tx('BOILER ' + n, x + 0.4, 9.7, 0.3, { w:600 }); }
+  for (const [x, n] of [[6, 'P-1A'], [8, 'P-1B']]) { box(x, 12.5, 1.2, 0.8); tx(n, x, 13.8, 0.24); }
+  box(15, 12, 5, 1.6); tx('DA-1 DEAERATOR', 15, 14.2, 0.26);
+  tx('BOILER HOUSE', 13, 11.3, 0.42, { a:'center', w:700 }); tx('ELEC RM', 25.5, 10.4, 0.32, { a:'center', w:600 });
+  dimH(3, 13, 2.7, `40'-0"`); dimH(13, 23, 2.7, `40'-0"`); dimH(23, 28, 2.7, `20'-0"`);
+  dimV(1.8, 4, 10.25, `25'-0"`); dimV(1.8, 10.25, 16.5, `25'-0"`);
+  tx(p.planTitle || 'BOILER HOUSE PLAN', 3, 19.3, 0.42, { w:700 }); tx(`SCALE: 1/4" = 1'-0"`, 3, 19.9, 0.28);
+  WOB = false;
+}
+function drawSections() {
+  G.lineWidth = LW * 2.4; ln(2, 19, 27, 19); G.lineWidth = LW; for (let x = 2.3; x < 27; x += 0.5) ln(x, 19, x - 0.35, 19.35);
+  G.lineWidth = LW * 2.6; ln(4, 19, 4, 4); ln(24, 19, 24, 4); ln(3.5, 4, 24.5, 4); G.lineWidth = LW;
+  box(8, 10, 9, 9); box(8.6, 10.6, 7.8, 5); tx('BOILER B-1', 12.5, 17.6, 0.36, { a:'center', w:600 });
+  box(12, 2.2, 1.2, 7.8); ln(24, 4, 24.7, 4); ln(24, 19, 24.7, 19);
+  tx(`T.O. ROOF  EL 130'-0"`, 24.9, 4.1, 0.26); tx(`FIN FLR  EL 100'-0"`, 24.9, 19.1, 0.26);
+  dimV(2.6, 4, 19, `30'-0"`); dimH(4, 24, 20.6, `40'-0"`);
+  tx('SECTION A-A', 4, 22.5, 0.42, { w:700 }); tx(`SCALE: 1/2" = 1'-0"`, 4, 23.1, 0.28);
+}
+function detailTitle(n, name, scale, x, y) {
+  circ(x + 0.3, y - 0.11, 0.3); tx(String(n), x + 0.3, y - 0.01, 0.28, { a:'center', w:700 });
+  tx(name, x + 0.75, y, 0.3, { w:700 }); ln(x + 0.75, y + 0.1, x + 4.1, y + 0.1); tx('SCALE: ' + scale, x + 0.75, y + 0.45, 0.22);
+}
+function drawDetails() {
+  // 1  instrument stand at 1" = 1'-0"
+  box(2.55, 1.7, 0.9, 0.7); tx('PT', 3.0, 2.14, 0.22, { a:'center' });
+  G.lineWidth = LW * 2.2; ln(3.0, 2.4, 3.0, 6.4); G.lineWidth = LW * 1.6; ln(2.25, 6.4, 3.75, 6.4); G.lineWidth = LW;
+  box(1.8, 6.45, 2.4, 0.6); for (let x = 1.95; x < 4.2; x += 0.3) ln(x, 7.05, x + 0.25, 6.45);
+  tx('2" PIPE STAND', 3.15, 4.4, 0.17); tx('BASE PL 1/2"', 3.85, 6.3, 0.15);
+  dimV(4.4, 2.4, 6.4, `4'-0"`);
+  detailTitle(1, 'INSTRUMENT STAND', `1" = 1'-0"`, 1.0, 8.6);
+  // 2  pipe support at 1-1/2" = 1'-0"
+  G.lineWidth = LW * 2; ln(6.6, 3.0, 9.6, 3.0); ln(6.9, 3.0, 6.9, 6.75); ln(9.3, 3.0, 9.3, 6.75); G.lineWidth = LW;
+  ln(6.5, 6.75, 7.3, 6.75); ln(8.9, 6.75, 9.7, 6.75); circ(8.1, 2.55, 0.45);
+  poly([[7.55, 3.0], [7.55, 2.45]]); poly([[8.65, 3.0], [8.65, 2.45]]); G.beginPath(); G.arc(8.1, 2.45, 0.55, Math.PI, 0); G.stroke();
+  tx('L3x3x1/4', 7.4, 3.45, 0.17); tx('4" PIPE', 8.7, 2.0, 0.17);
+  dimH(6.6, 9.6, 1.6, `2'-0"`); dimV(10.2, 3.0, 6.75, `2'-6"`);
+  detailTitle(2, 'PIPE SUPPORT', `1-1/2" = 1'-0"`, 6.0, 7.6);
+  // 3  tubing schematic, not to scale
+  circ(12.6, 2.0, 0.4); tx('PT', 12.6, 2.08, 0.2, { a:'center' }); box(13.6, 3.2, 1.4, 0.8); tx('3-VALVE MANIFOLD', 13.5, 4.4, 0.16);
+  poly([[12.6, 2.4], [12.6, 3.6], [13.6, 3.6]]); poly([[15.0, 3.4], [15.9, 3.4], [15.9, 5.6]]); poly([[15.0, 3.8], [15.5, 3.8], [15.5, 5.6]]);
+  tx('3/8" SS TUBING', 12.2, 5.4, 0.18); tx('TO PROCESS', 15.0, 6.0, 0.16);
+  detailTitle(3, 'TUBING SCHEMATIC', 'NTS', 12.0, 7.2);
+}
+function drawLoop(p) {
+  const [a, n] = p.tag.split('-');
+  box(1, 1.2, 3.5, 6); box(6.5, 1.2, 3, 6); box(11.5, 1.2, 4, 6);
+  tx('FIELD', 1.1, 1.0, 0.25, { w:600 }); tx('JB-12', 6.6, 1.0, 0.25, { w:600 }); tx('DCS CAB-1', 11.6, 1.0, 0.25, { w:600 });
+  circ(2.7, 4, 0.6); ln(2.1, 4, 3.3, 4); tx(a, 2.7, 3.85, 0.26, { a:'center', w:600 }); tx(n, 2.7, 4.45, 0.24, { a:'center' });
+  for (let i = 0; i < 5; i++) { const y = 2 + i * 1.1; ln(4.5, y, 6.5, y); ln(9.5, y, 11.5, y); circ(6.75, y, 0.12); circ(9.25, y, 0.12); tx(String(i + 1), 7.9, y + 0.08, 0.2, { a:'center' }); }
+  box(12, 3.0, 2.8, 1.4); tx('AI-' + n, 12.2, 3.8, 0.26, { w:600 }); tx('4-20 mA', 12.2, 4.2, 0.18);
+  tx('LOOP DIAGRAM  ' + p.tag, 1, 8.7, 0.36, { w:700 }); tx('SCALE: NTS', 1, 9.2, 0.24);
+}
+function drawCover() {
+  tx('RIVERSIDE PLANT (EXAMPLE)', 18, 5.5, 1.0, { a:'center', w:700 }); tx('BOILER HOUSE REVAMP', 18, 7.1, 0.75, { a:'center', w:600 });
+  tx('ISSUED FOR CONSTRUCTION', 18, 8.4, 0.45, { a:'center' });
+  box(10, 10, 16, 7); for (let i = 1; i < 7; i++) ln(10, 10 + i, 26, 10 + i); ln(13.5, 10, 13.5, 17);
+  tx('DWG', 10.3, 10.7, 0.32, { w:700 }); tx('TITLE', 13.8, 10.7, 0.32, { w:700 });
+  [['G-001', 'COVER SHEET AND DRAWING LIST'], ['M-101', 'BOILER HOUSE PLAN'], ['M-102', 'BOILER HOUSE SECTIONS'], ['D-501', 'INSTRUMENT DETAILS'], ['L-1042', 'LOOP DIAGRAM FT-1042']]
+    .forEach(([d, t], i) => { tx(d, 10.3, 11.7 + i, 0.3); tx(t, 13.8, 11.7 + i, 0.3); });
+}
+function drawColour() {
+  G.lineWidth = LW * 6; G.strokeStyle = col('#2e9d4f'); box(4, 4, 22, 13);
+  fbox(4.3, 14.1, 21.4, 2.6, '#ffe066'); tx('OPERATOR ACCESS', 15, 15.7, 0.42, { a:'center', w:700, c:'#7a5d00' });
+  for (const [x, n] of [[9.5, 'TK-201'], [19.5, 'TK-202']]) { fcirc(x, 8.4, 2.7, '#a8d4f5'); G.lineWidth = LW * 3; G.strokeStyle = col('#1f5fbf'); circ(x, 8.4, 2.7); tx(n, x, 8.6, 0.5, { a:'center', w:700, c:'#1f5fbf' }); }
+  for (const [x, n] of [[7.5, 'P-201A'], [17.5, 'P-201B']]) { fbox(x, 12, 2.2, 1.4, '#f39c3d'); G.lineWidth = LW * 2; G.strokeStyle = col('#a3540e'); box(x, 12, 2.2, 1.4); tx(n, x, 13.9, 0.32, { w:600, c:'#a3540e' }); }
+  G.lineWidth = LW * 3; G.strokeStyle = col('#7a3fbf'); poly([[9.5, 11.1], [9.5, 12.7], [8.6, 12.7]]); poly([[19.5, 11.1], [19.5, 12.7], [18.6, 12.7]]); poly([[9.7, 12.7], [17.5, 12.7]]); poly([[19.7, 12.7], [27.5, 12.7]]);
+  G.lineWidth = LW * 2.2; G.strokeStyle = col('#d6342c'); poly(cloudPts(18.6, 12.7, 4.2, 2.8)); tx('REV B', 20.6, 11.2, 0.36, { w:700, c:'#d6342c' });
+  const L = [['#a8d4f5', 'TANKS'], ['#f39c3d', 'PUMPS'], ['#7a3fbf', 'CHEMICAL LINE'], ['#2e9d4f', 'SKID FRAME'], ['#ffe066', 'ACCESS ZONE']];
+  tx('LEGEND', 28.5, 3.2, 0.4, { w:700 }); L.forEach(([c, t], i) => { fbox(28.5, 3.8 + i * 1.1, 0.8, 0.6, c); tx(t, 29.6, 4.3 + i * 1.1, 0.3); });
+  tx('CHEMICAL FEED SKID  GENERAL ARRANGEMENT', 4, 19.4, 0.42, { w:700 }); tx(`SCALE: 1/4" = 1'-0"   VENDOR DWG (EXAMPLE)`, 4, 20.0, 0.28);
+}
+const loopPage = (num, tag) => ({ num, title:'Loop diagram ' + tag, tag, pw:17, ph:11, scaleText:'NTS', k:0, draw:drawLoop,
+  dims:[{ a:[6.5, 7.2], b:[9.5, 7.2], label:'JB-12 box width', text:'3.00"', val:3, nts:true }], snaps:[[6.5, 1.2], [9.5, 1.2], [1, 1.2], [4.5, 1.2], [11.5, 1.2], [15.5, 1.2]] });
+const PAGES = {
+  'G-001': { num:'G-001', title:'Cover sheet and drawing list', pw:36, ph:24, scaleText:'NONE', k:null, draw:drawCover },
+  'M-101': { num:'M-101', title:'Boiler house plan', pw:36, ph:24, scaleText:`1/4" = 1'-0"`, k:48, draw:drawPlan,
+    dims:[{ a:[3, 2.7], b:[13, 2.7], label:'Grid A to B', text:`40'-0"`, val:480 }, { a:[13, 2.7], b:[23, 2.7], label:'Grid B to C', text:`40'-0"`, val:480 },
+          { a:[23, 2.7], b:[28, 2.7], label:'Grid C to D', text:`20'-0"`, val:240 }, { a:[1.8, 4], b:[1.8, 10.25], label:'Grid 1 to 2', text:`25'-0"`, val:300 }],
+    snaps:[3, 13, 23, 28].flatMap(x => [4, 10.25, 16.5].map(y => [x, y])) },
+  'M-102': { num:'M-102', title:'Boiler house sections', pw:36, ph:24, scaleText:`1/2" = 1'-0"`, k:24, draw:drawSections,
+    dims:[{ a:[2.6, 4], b:[2.6, 19], label:'Floor to roof', text:`30'-0"`, val:360 }, { a:[4, 20.6], b:[24, 20.6], label:'Column to column', text:`40'-0"`, val:480 }] },
+  'D-501': { num:'D-501', title:'Instrument details', pw:17, ph:11, scaleText:'AS NOTED', k:null, draw:drawDetails,
+    details:[{ n:1, name:'Instrument stand', rect:[0.5, 0.5, 5.3, 10.5], k:12, at:[1.75, 9.05] }, { n:2, name:'Pipe support', rect:[5.7, 0.5, 11.3, 8.3], k:8, at:[6.75, 8.05] },
+             { n:3, name:'Tubing schematic', rect:[11.7, 0.5, 16.5, 8.1], k:0, at:[12.75, 7.65] }],
+    dims:[{ a:[4.4, 2.4], b:[4.4, 6.4], label:'Detail 1 stand height', text:`4'-0"`, val:48 }, { a:[6.6, 1.6], b:[9.6, 1.6], label:'Detail 2 support width', text:`2'-0"`, val:24 },
+          { a:[10.2, 3.0], b:[10.2, 6.75], label:'Detail 2 support height', text:`2'-6"`, val:30 }] },
+  'L-1042': loopPage('L-1042', 'FT-1042'), 'L-1043': loopPage('L-1043', 'PT-1043'), 'L-1044': loopPage('L-1044', 'LT-1044'), 'L-1045': loopPage('L-1045', 'FV-1045'),
+  'M-001': { num:'M-001', title:'Boiler house plan 1978', planTitle:'BOILER HOUSE PLAN (1978)', pw:36, ph:24, scaleText:`1/4" = 1'-0"`, k:null, scan:true, paper:'#f0e9d4', ink:'#4b4b4b', draw:drawPlan,
+    bad:'it is a scan (one image, no linework)' },
+  'SK-200': { num:'SK-200', title:'Chemical feed skid GA', pw:36, ph:24, scaleText:`1/4" = 1'-0"`, k:48, draw:drawColour, tbFill:'#1f5fbf', ink:'#1b2a4a', bad:'it has coloured fills' },
+};
+for (const p of Object.values(PAGES)) p.snapsAll = [...(p.snaps || []), ...(p.dims || []).flatMap(d => [d.a, d.b])];
+function paintThumb(cv, page, mode, bg, crop) { // a page preview into a canvas element, fitted with a margin
+  const w = cv.clientWidth || 160, h = cv.clientHeight || 107, R = devicePixelRatio || 1;
+  cv.width = Math.round(w * R); cv.height = Math.round(h * R);
+  const g = cv.getContext('2d'); g.setTransform(R, 0, 0, R, 0, 0); g.fillStyle = bg || 'transparent'; g.clearRect(0, 0, w, h); if (bg) g.fillRect(0, 0, w, h);
+  const c = crop || [0, 0, page.pw, page.ph], cw = c[2] - c[0], ch = c[3] - c[1];
+  const sc = Math.min((w - 8) / cw, (h - 8) / ch), ox = (w - cw * sc) / 2, oy = (h - ch * sc) / 2;
+  g.setTransform(R * sc, 0, 0, R * sc, R * (ox - c[0] * sc), R * (oy - c[1] * sc));
+  g.save(); g.shadowColor = 'rgba(0,0,0,.25)'; g.shadowBlur = 4 * R; g.fillStyle = mapHex(page.paper || '#ffffff', mode); g.fillRect(c[0], c[1], cw, ch); g.restore();
+  g.save(); g.beginPath(); g.rect(c[0], c[1], cw, ch); g.clip();
+  G = g; PM = mode; PZ = sc; LW = Math.max(0.01, 0.7 / sc); drawPage(page); g.restore();
+  return { sc, ox, oy };
+}
+
+// ---------- sheets on a canvas (world units are real inches) ----------
+let sid = 0;
+const newSheet = (page, k, extra = {}) => ({ id:++sid, page, k:k === 0 ? 1 : k, nts:k === 0, x:0, y:0, ...extra });
+const cropOf = s => s.crop || [0, 0, s.page.pw, s.page.ph];
+const sw = s => (cropOf(s)[2] - cropOf(s)[0]) * s.k, sh = s => (cropOf(s)[3] - cropOf(s)[1]) * s.k;
+const inSheet = (s, p) => p[0] >= s.x && p[0] <= s.x + sw(s) && p[1] >= s.y && p[1] <= s.y + sh(s);
+const toPaper = (s, p) => { const c = cropOf(s); return [c[0] + (p[0] - s.x) / s.k, c[1] + (p[1] - s.y) / s.k]; };
+const fromPaper = (s, q) => { const c = cropOf(s); return [s.x + (q[0] - c[0]) * s.k, s.y + (q[1] - c[1]) * s.k]; };
+const inRect = (q, r) => q[0] >= r[0] - 1e-6 && q[0] <= r[2] + 1e-6 && q[1] >= r[1] - 1e-6 && q[1] <= r[3] + 1e-6;
+const nearQ = (a, b) => Math.abs(a[0] - b[0]) < 0.06 && Math.abs(a[1] - b[1]) < 0.06;
+const COLORS = { red:'#d6342c', blue:'#2563eb', sketch:'#3a3a3a' }, BRIGHT = { red:'#ff5a4f', blue:'#5b8dff', sketch:'#e6e6e6' };
+const INSET = { l:62, r:10, t:54, b:52 };
+
+function readLen(st, a, b, force) { // what Measure would show between two world points
+  const len = dist(a, b);
+  const s = force || [...st.sheets].reverse().find(s => inSheet(s, a) && inSheet(s, b));
+  if (!s) return { txt:fmt(len), val:len, nts:false, note:' on the canvas' };
+  const pa = toPaper(s, a), pb = toPaper(s, b), plen = len / s.k;
+  let txt, val, nts = false, note = '';
+  const ar = (s.areas || []).find(r => inRect(pa, r.rect) && inRect(pb, r.rect));
+  if (ar) { if (ar.k === 0) { val = plen; txt = fmtNTS(plen); nts = true; } else { val = plen * ar.k; txt = fmt(val); } note = ` in ${ar.name}'s ${scaleLabel(ar.k)} area`; }
+  else if (s.nts) { val = plen; txt = fmtNTS(plen); nts = true; }
+  else { val = len; txt = fmt(len); }
+  const d = (s.page.dims || []).find(d => (nearQ(pa, d.a) && nearQ(pb, d.b)) || (nearQ(pa, d.b) && nearQ(pb, d.a)));
+  return { s, txt, val, nts, note, dim:d, ok:d ? (Math.abs(d.val - val) < 0.6 && !!d.nts === nts) : null };
+}
+
+// ---------- the stage: one mini canvas screen ----------
+const TOOLNAME = { hand:'Hand: drag to pan', measure:'Measure' };
+function makeStage(host, ctrl) {
+  host.classList.add('stage');
+  host.innerHTML = `<canvas class="cv"></canvas>
+    <div class="rail panel">${['hand', 'measure'].map(t => `<button type="button" data-act="tool" data-t="${t}" aria-label="${TOOLNAME[t]}" title="${TOOLNAME[t]}">${svg(t)}</button>`).join('')}</div>
+    <div class="tbar panel"><b>Boiler 4 walkdown</b><span class="units">ft-in</span>${ctrl.localTheme ? `<button type="button" data-act="stheme" class="sth"></button>` : ''}</div>
+    <div class="tact"><button type="button" class="ghost" data-act="add">${svg('plus', 16)} Add sheet</button></div>
+    <div class="sbar panel"><span class="pr"></span><span class="cnt"></span>
+      <button type="button" data-act="zout" aria-label="Zoom out" title="Zoom out">${svg('minus', 18)}</button><button type="button" data-act="zin" aria-label="Zoom in" title="Zoom in">${svg('plus', 18)}</button>
+      <button type="button" data-act="extents" aria-label="Zoom to everything" title="Zoom to everything">${svg('extents', 18)}</button></div>
+    <div class="pills"></div><div class="toasts"></div><div class="layer"></div>`;
+  const st = { host, ctrl, cv:host.querySelector('.cv'), layer:host.querySelector('.layer'), pills:host.querySelector('.pills'), toasts:host.querySelector('.toasts'),
+    pr:host.querySelector('.pr'), cnt:host.querySelector('.cnt'), view:{ cx:0, cy:0, z:0.1 }, sheets:[], ink:[], tool:'hand', measure:null, W:0, H:0, R:1, raf:0, ready:false, dlg:null };
+  st.ctx = st.cv.getContext('2d');
+  st.isDark = () => ctrl.isDark ? ctrl.isDark(st) : pageDark();
+  st.modeOf = s => !st.isDark() ? 'asPrinted' : (ctrl.dimmed && ctrl.dimmed(st, s)) ? 'dimmed' : 'inverted';
+  st.render = () => { if (!st.raf) st.raf = requestAnimationFrame(() => { st.raf = 0; drawStage(st); }); };
+  st.toWorld = (x, y) => [(x - st.W / 2) / st.view.z + st.view.cx, (y - st.H / 2) / st.view.z + st.view.cy];
+  st.toScreen = (x, y) => [(x - st.view.cx) * st.view.z + st.W / 2, (y - st.view.cy) * st.view.z + st.H / 2];
+  st.centre = () => st.toWorld(INSET.l + (st.W - INSET.l - INSET.r) / 2, INSET.t + (st.H - INSET.t - INSET.b) / 2);
+  st.zoomTo = (x0, y0, x1, y1, pad = 0.88) => {
+    const aw = st.W - INSET.l - INSET.r, ah = st.H - INSET.t - INSET.b;
+    st.view.z = Math.min(aw / Math.max(1, x1 - x0), ah / Math.max(1, y1 - y0)) * pad;
+    st.view.cx = (x0 + x1) / 2 - ((INSET.l - INSET.r) / 2) / st.view.z; st.view.cy = (y0 + y1) / 2 - ((INSET.t - INSET.b) / 2) / st.view.z; st.render();
+  };
+  st.zoomSheet = (s, pad = 0.8) => st.zoomTo(s.x, s.y, s.x + sw(s), s.y + sh(s), pad);
+  st.zoomAt = (p, f) => { const [wx, wy] = st.toWorld(p[0], p[1]); st.view.z = Math.min(400, Math.max(0.0005, st.view.z * f)); st.view.cx = wx - (p[0] - st.W / 2) / st.view.z; st.view.cy = wy - (p[1] - st.H / 2) / st.view.z; st.render(); };
+  st.panBy = (dx, dy) => { st.view.cx -= dx / st.view.z; st.view.cy -= dy / st.view.z; st.render(); };
+  st.bbox = (list = st.sheets) => { const a = [Infinity, Infinity, -Infinity, -Infinity]; for (const s of list) { a[0] = Math.min(a[0], s.x); a[1] = Math.min(a[1], s.y); a[2] = Math.max(a[2], s.x + sw(s)); a[3] = Math.max(a[3], s.y + sh(s)); } return isFinite(a[0]) ? a : [-500, -500, 500, 500]; };
+  st.extents = () => { const b = st.bbox(); st.zoomTo(b[0], b[1], b[2], b[3]); };
+  st.placeBeside = s => { // what the canvas prototype did: right of everything, top edges lined up
+    if (!st.sheets.length) { s.x = 0; s.y = 0; return; }
+    const b = st.bbox(); s.x = b[2] + Math.max(12, 0.1 * Math.max(sw(s), sh(s))); s.y = b[1];
+  };
+  st.snap = p => { // ends snap to dimension ticks and grid points within 16 px
+    let best = null, bd = 16;
+    for (const s of st.sheets) { const c = cropOf(s); for (const q of s.page.snapsAll) { if (!inRect(q, c)) continue; const w = fromPaper(s, q), sp = st.toScreen(w[0], w[1]); const d = dist(sp, p); if (d < bd) { bd = d; best = w; } } }
+    return best || st.toWorld(p[0], p[1]);
+  };
+  st.toast = (msg, ms = 2600) => { st.toasts.innerHTML = `<div class="toast">${msg}</div>`; const t = st.toasts.firstChild; clearTimeout(st._tt); st._tt = setTimeout(() => { t.style.opacity = 0; }, ms); };
+  st.setPrompt = html => { st.pr.innerHTML = html != null ? html : (ctrl.prompt ? ctrl.prompt(st) : ''); };
+  st.chrome = () => {
+    host.querySelectorAll('[data-act=tool]').forEach(b => b.classList.toggle('on', b.dataset.t === st.tool));
+    st.cnt.textContent = `${st.sheets.length} sheet${st.sheets.length === 1 ? '' : 's'}`;
+    if (ctrl.localTheme) { host.classList.toggle('th-dark', st.isDark()); host.classList.toggle('th-light', !st.isDark()); const b = host.querySelector('.sth'); b.innerHTML = svg(st.isDark() ? 'sun' : 'moon', 19); b.title = b.ariaLabel = st.isDark() ? 'Show this canvas in light mode' : 'Show this canvas in dark mode'; }
+  };
+  st.renderDlg = () => {
+    const old = st.layer.querySelector('.modal'), top = old ? old.scrollTop : 0, same = st.dlg && st._view === st.dlg.view;
+    st.layer.innerHTML = st.dlg ? ctrl.dlgHTML(st) : '';
+    const m = st.layer.querySelector('.modal'); if (m && same) m.scrollTop = top; st._view = st.dlg && st.dlg.view;
+    if (st.dlg && ctrl.afterDlg) ctrl.afterDlg(st);
+  };
+  st.showReading = () => {
+    const m = st.measure; if (!m) return;
+    const r = readLen(st, m.a, m.b);
+    let h = `Measured <b>${r.txt}</b>${r.note || (r.s ? ' on ' + r.s.page.num : '')}`;
+    if (r.dim) h += ` · printed ${r.dim.text} · ${r.ok ? '<span class="ok">matches</span>' : '<span class="bad">reads wrong</span>'}`;
+    if (r.nts && r.s && r.s.nts) h += ' (sheet is not to scale)';
+    st.setPrompt(h);
+  };
+  st.reset = () => { st.sheets = []; st.ink = []; st.measure = null; st.dlg = null; st.moving = null; st.placing = null; st.pop = null; st.pills.innerHTML = ''; st.toasts.innerHTML = '';
+    ctrl.init(st); st.chrome(); st.setPrompt(); st.renderDlg(); st.render(); };
+
+  host.addEventListener('click', e => {
+    const el = e.target.closest('[data-act]'); if (!el || !host.contains(el)) return;
+    const a = el.dataset.act;
+    if (a === 'scrim') { if (e.target === el) { st.dlg = null; st.renderDlg(); } return; }
+    if (a === 'close') { st.dlg = null; st.renderDlg(); return; }
+    if (a === 'tool') { st.tool = el.dataset.t; if (ctrl.onTool) ctrl.onTool(st); st.chrome(); st.setPrompt(); return; }
+    if (a === 'zin') return st.zoomAt([st.W / 2, st.H / 2], 1.6);
+    if (a === 'zout') return st.zoomAt([st.W / 2, st.H / 2], 1 / 1.6);
+    if (a === 'extents') return st.extents();
+    if (a === 'add') return ctrl.onAdd(st);
+    if (a === 'stheme') { st.ldark = !st.ldark; st.chrome(); st.render(); if (st.dlg) st.renderDlg(); return; }
+    if (ctrl.act) ctrl.act(st, a, el, e);
+  });
+  host.addEventListener('change', e => { const el = e.target.closest('[data-act]'); if (el && ctrl.change) ctrl.change(st, el.dataset.act, el); });
+  host.addEventListener('gesturestart', e => e.preventDefault());
+  bindPointers(st);
+  new ResizeObserver(() => {
+    const W = host.clientWidth, H = host.clientHeight; if (!W || !H) return;
+    const first = !st.ready; st.W = W; st.H = H; st.R = devicePixelRatio || 1;
+    st.cv.width = Math.round(W * st.R); st.cv.height = Math.round(H * st.R);
+    if (first) { st.ready = true; st.reset(); } else st.render();
+  }).observe(host);
+  return st;
+}
+
+function bindPointers(st) {
+  const cv = st.cv, P = new Map(); let op = null;
+  const loc = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  cv.addEventListener('pointerdown', e => {
+    e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    const p = loc(e); P.set(e.pointerId, { p, type:e.pointerType });
+    if (st.pop) { st.pop = null; st.ctrl.renderPills && st.ctrl.renderPills(st); }
+    if (P.size === 2) { // two fingers: pinch and pan, and whatever one finger started is dropped
+      if (op && op.kind === 'measure') { st.measure = op.prev; st.setPrompt(); }
+      const [a, b] = [...P.values()].map(v => v.p); op = { kind:'pinch', d:dist(a, b), m:mid(a, b) }; st.render(); return;
+    }
+    if (P.size > 2) return;
+    const w = st.toWorld(p[0], p[1]); st.hover = w;
+    const base = { start:p, t:performance.now(), last:p };
+    if (e.pointerType === 'mouse' && e.button !== 0) { op = { kind:'pan', ...base }; return; }
+    if (st.moving && inSheet(st.moving, w)) { op = { kind:'move', s:st.moving, lastW:w, ...base }; return; }
+    if (st.tool === 'measure' && !st.placing) { const a = st.snap(p); op = { kind:'measure', prev:st.measure, ...base }; st.measure = { a, b:a }; st.render(); return; }
+    op = { kind:'pan', ...base }; if (st.placing) st.render();
+  });
+  cv.addEventListener('pointermove', e => {
+    const p = loc(e);
+    if (!P.has(e.pointerId)) { if (e.pointerType !== 'touch' && st.placing) { st.hover = st.toWorld(p[0], p[1]); st.render(); } return; }
+    P.get(e.pointerId).p = p; if (!op) return;
+    if (op.kind === 'pinch') { if (P.size < 2) return; const [a, b] = [...P.values()].map(v => v.p); const d = dist(a, b), m = mid(a, b); st.zoomAt(m, d / op.d); st.panBy(m[0] - op.m[0], m[1] - op.m[1]); op.d = d; op.m = m; return; }
+    if (op.kind === 'pan') { st.panBy(p[0] - op.last[0], p[1] - op.last[1]); op.last = p; return; }
+    if (op.kind === 'move') { const w = st.toWorld(p[0], p[1]); op.s.x += w[0] - op.lastW[0]; op.s.y += w[1] - op.lastW[1]; op.lastW = w; st.render(); return; }
+    if (op.kind === 'measure') { st.measure.b = st.snap(p); st.render(); st.showReading(); }
+  });
+  const up = e => {
+    if (!P.has(e.pointerId)) return; const v = P.get(e.pointerId); P.delete(e.pointerId);
+    if (!op) return;
+    if (op.kind === 'pinch') { if (!P.size) op = null; else op = { kind:'idle' }; return; }
+    if (op.kind === 'idle') { if (!P.size) op = null; return; }
+    const tap = dist(v.p, op.start) < 8 && performance.now() - op.t < 500 && e.type === 'pointerup';
+    if (op.kind === 'measure') { if (tap) { st.measure = op.prev; st.setPrompt(); } else st.showReading(); }
+    if (tap && st.ctrl.onTap) st.ctrl.onTap(st, st.toWorld(v.p[0], v.p[1]), v.p);
+    op = null; st.render();
+  };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+  cv.addEventListener('wheel', e => { if (!(e.ctrlKey || e.metaKey)) return; e.preventDefault(); st.zoomAt(loc(e), Math.exp(-Math.max(-60, Math.min(60, e.deltaY)) * 0.01)); }, { passive:false });
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+function niceStep(st) { const target = 26 / st.view.z; for (const v of [1, 2, 6, 12, 24, 60, 120, 240, 600, 1200, 2400, 6000, 12000, 24000, 60000]) if (v >= target) return v; return 60000; }
+function drawStage(st) {
+  const c = st.ctx, { W, H, R } = st, z = st.view.z, dark = st.isDark();
+  c.setTransform(R, 0, 0, R, 0, 0); c.fillStyle = dark ? '#1c1d20' : '#f3efe6'; c.fillRect(0, 0, W, H);
+  c.setTransform(R * z, 0, 0, R * z, R * (W / 2 - st.view.cx * z), R * (H / 2 - st.view.cy * z));
+  // grid
+  const step = niceStep(st), major = step * (step < 12 ? 12 / step : 10), [x0, y0] = st.toWorld(0, 0), [x1, y1] = st.toWorld(W, H);
+  c.lineWidth = 1 / z;
+  for (const [sp, cl] of [[step, dark ? 'rgba(255,255,255,.045)' : 'rgba(120,110,90,.09)'], [major, dark ? 'rgba(255,255,255,.09)' : 'rgba(120,110,90,.18)']]) {
+    if (sp * z < 6) continue; c.strokeStyle = cl; c.beginPath();
+    for (let x = Math.floor(x0 / sp) * sp; x < x1; x += sp) { c.moveTo(x, y0); c.lineTo(x, y1); }
+    for (let y = Math.floor(y0 / sp) * sp; y < y1; y += sp) { c.moveTo(x0, y); c.lineTo(x1, y); }
+    c.stroke();
+  }
+  for (const s of st.sheets) drawSheet(st, s);
+  for (const k of st.ink) drawInk(st, k);
+  const acc = dark ? '#9cc4ec' : '#2f5d8a';
+  if (st.moving) { const s = st.moving; c.save(); c.setLineDash([6 / z, 4 / z]); c.strokeStyle = acc; c.lineWidth = 2 / z; c.strokeRect(s.x - 4 / z, s.y - 4 / z, sw(s) + 8 / z, sh(s) + 8 / z); c.setLineDash([]); c.fillStyle = acc;
+    for (const [hx, hy] of [[s.x, s.y], [s.x + sw(s), s.y], [s.x, s.y + sh(s)], [s.x + sw(s), s.y + sh(s)]]) c.fillRect(hx - 5 / z, hy - 5 / z, 10 / z, 10 / z); c.restore(); }
+  if (st.placing) { const s = st.placing, at = st.hover || st.centre(); const gx = at[0] - sw(s) / 2, gy = at[1] - sh(s) / 2;
+    c.save(); c.fillStyle = dark ? 'rgba(156,196,236,.10)' : 'rgba(47,93,138,.08)'; c.fillRect(gx, gy, sw(s), sh(s)); c.setLineDash([7 / z, 5 / z]); c.strokeStyle = acc; c.lineWidth = 1.6 / z; c.strokeRect(gx, gy, sw(s), sh(s));
+    c.beginPath(); c.moveTo(at[0] - 10 / z, at[1]); c.lineTo(at[0] + 10 / z, at[1]); c.moveTo(at[0], at[1] - 10 / z); c.lineTo(at[0], at[1] + 10 / z); c.setLineDash([]); c.stroke(); c.restore(); }
+  if (st.measure && dist(st.measure.a, st.measure.b) > 0) { const { a, b } = st.measure; c.save(); c.strokeStyle = acc; c.lineWidth = 2 / z; c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
+    c.fillStyle = acc; for (const q of [a, b]) c.fillRect(q[0] - 3.5 / z, q[1] - 3.5 / z, 7 / z, 7 / z); c.restore(); }
+  // screen-space labels on top
+  c.setTransform(R, 0, 0, R, 0, 0); c.font = '600 11px system-ui,-apple-system,sans-serif'; c.textBaseline = 'alphabetic';
+  const used = [];
+  for (const s of st.sheets) {
+    const [sx, sy] = st.toScreen(s.x, s.y); if (sx > W || sy > H + 14 || sx + sw(s) * z < 0 || sy < -2) continue;
+    const kind = s.nts ? 'nts' : s.warn ? 'warn' : 'n';
+    c.fillStyle = { nts:dark ? '#e0b45c' : '#8a5a00', warn:dark ? '#f0a868' : '#9a3412', n:dark ? '#8fbbe6' : '#2f5d8a' }[kind];
+    let t = s.label || `${s.page.num}  ·  ${s.nts ? 'NTS · printed size' : scaleLabel(s.k)}`; if (st.ctrl.labelExtra) t += st.ctrl.labelExtra(st, s);
+    const lx = Math.max(sx, 4), lw = c.measureText(t).width; let ly = sy - 6, n = 0;
+    while (n++ < 6 && used.some(r => lx < r[0] + r[2] + 8 && lx + lw + 8 > r[0] && Math.abs(ly - r[1]) < 13)) ly -= 14;
+    used.push([lx, ly, lw]); c.fillText(t, lx, ly);
+    for (const ar of (s.areas || [])) { const p0 = st.toScreen(...fromPaper(s, [ar.rect[0], ar.rect[1]])); c.fillStyle = dark ? '#c4a2f0' : '#6b3fa8'; c.fillText(`${ar.k === 0 ? 'NTS' : scaleLabel(ar.k)} area`, p0[0] + 4, p0[1] + 14); }
+  }
+  if (st.measure && dist(st.measure.a, st.measure.b) > 0) {
+    const r = readLen(st, st.measure.a, st.measure.b), m = st.toScreen(...mid(st.measure.a, st.measure.b));
+    c.font = '600 12px system-ui,-apple-system,sans-serif'; const w = c.measureText(r.txt).width + 14;
+    c.fillStyle = dark ? 'rgba(20,21,24,.92)' : 'rgba(255,253,249,.95)'; c.strokeStyle = acc; c.lineWidth = 1;
+    const bx = Math.min(Math.max(m[0] - w / 2, 4), W - w - 4), by = Math.min(Math.max(m[1] - 30, 4), H - 26);
+    c.beginPath(); if (c.roundRect) c.roundRect(bx, by, w, 22, 6); else c.rect(bx, by, w, 22); c.fill(); c.stroke();
+    c.fillStyle = r.ok === false ? (dark ? '#ff7b72' : '#b42318') : dark ? '#e8e6e1' : '#1d1d1f'; c.fillText(r.txt, bx + 7, by + 15);
+  }
+}
+function drawSheet(st, s) {
+  const c = st.ctx, z = st.view.z, k = s.k, cr = cropOf(s), mode = st.modeOf(s), pz = z * k;
+  const [sx, sy] = st.toScreen(s.x, s.y); if (sx > st.W || sy > st.H || sx + sw(s) * z < 0 || sy + sh(s) * z < 0) return;
+  c.save(); c.translate(s.x, s.y); c.scale(k, k); c.translate(-cr[0], -cr[1]);
+  c.save(); c.shadowColor = 'rgba(0,0,0,.22)'; c.shadowBlur = 8 * st.R; c.fillStyle = mapHex(s.page.paper || '#ffffff', mode); c.fillRect(cr[0], cr[1], cr[2] - cr[0], cr[3] - cr[1]); c.restore();
+  c.save(); c.beginPath(); c.rect(cr[0], cr[1], cr[2] - cr[0], cr[3] - cr[1]); c.clip();
+  G = c; PM = mode; PZ = pz; LW = Math.max(0.006, 0.75 / pz); drawPage(s.page); c.restore();
+  if (s.crop) { c.strokeStyle = mode === 'inverted' ? 'rgba(255,255,255,.25)' : 'rgba(0,0,0,.25)'; c.lineWidth = 1 / pz; c.strokeRect(cr[0], cr[1], cr[2] - cr[0], cr[3] - cr[1]); }
+  for (const ar of (s.areas || [])) { c.save(); c.setLineDash([6 / pz, 4 / pz]); c.strokeStyle = st.isDark() ? '#c4a2f0' : '#6b3fa8'; c.lineWidth = 1.6 / pz; const r = ar.rect; c.strokeRect(r[0], r[1], r[2] - r[0], r[3] - r[1]); c.restore(); }
+  c.restore();
+}
+function drawInk(st, k) {
+  const c = st.ctx, z = st.view.z, s = [...st.sheets].reverse().find(s => inSheet(s, k.pts[0]));
+  const light = !st.isDark() || (s && st.modeOf(s) !== 'inverted');
+  c.save(); c.strokeStyle = light ? COLORS[k.c] : BRIGHT[k.c]; c.lineWidth = Math.max(k.w, 1.6 / z); c.lineCap = 'round'; c.lineJoin = 'round';
+  c.beginPath(); k.pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])); c.stroke(); c.restore();
+}
+
+// ---------- shared dialog pieces (the settled confirm step) ----------
+function scaleChips(sel, list = SCALES.slice(0, 9)) { return `<div class="chips">${list.map(s => `<button type="button" class="ghost ${sel === s[1] ? 'sel' : ''}" data-act="pickscale" data-k="${s[1]}">${s[0]}</button>`).join('')}</div>`; }
+function confirmBody(page, d) {
+  const k = page.k;
+  if (k === 0) return `<p>The title block says <b>NTS</b>. It goes on at its printed size (${paperName(page)}), and lengths on it read as printed inches marked NTS.</p>`;
+  if (k > 0 && !d.change) return `<p>The title block says <b>SCALE: ${page.scaleText}</b>. On the canvas it will cover ${fmt(page.pw * k)} × ${fmt(page.ph * k)}.</p>`;
+  const lead = k > 0 ? `<p>Pick the scale to use instead of ${page.scaleText}:</p>`
+    : page.scan ? `<p>This page is a scan, so Vellum can't read its title block. Type the scale or pick one:</p>`
+    : page.scaleText === 'NONE' ? `<p>Vellum found no SCALE in this title block. Type one or pick one:</p>`
+    : `<p>The title block says <b>${page.scaleText}</b>, so Vellum can't tell the scale. Type it or pick one:</p>`;
+  return lead + scaleChips(d.k);
+}
+const effK = (page, d) => d.k != null ? d.k : page.k;
+function confirmFoot(page, d, placeLabel = 'Place sheet') {
+  const ready = effK(page, d) != null;
+  return `<div class="row end"><button type="button" class="ghost" data-act="close">Cancel</button>${page.k > 0 && !d.change ? '<button type="button" class="ghost" data-act="change">Change scale</button>' : ''}<button type="button" class="primary" data-act="place" ${ready ? '' : 'disabled'}>${placeLabel}</button></div>`;
+}
+function tagFor(page) { const c = page.k === 0 ? 'nts' : page.k == null ? 'warn' : ''; return `<span class="tag ${c}">${page.k == null && page.scaleText === 'NONE' ? 'no scale read' : page.scaleText}</span>`; }
+function pickedText(page, k) { return `${page.num} placed at ${k === 0 ? 'printed size (NTS)' : scaleLabel(k)}`; }
+function cloudInk(cx, cy, w, h, c = 'red', width = 6) { return { c, w:width, pts:cloudPts(cx, cy, w, h, 26) }; }
+
+// ---------- Q1: picking the page of a multi-page PDF ----------
+const Q1FILES = [
+  { name:'Superseded', folder:true },
+  { name:'IFC set, Riverside boiler house (example).pdf', pages:['G-001', 'M-101', 'M-102', 'D-501', 'L-1042'], size:'4.2 MB' },
+  { name:'Loop drawings L-1042 to L-1045 (example).pdf', pages:['L-1042', 'L-1043', 'L-1044', 'L-1045'], size:'1.1 MB' },
+  { name:'M-102 Boiler house sections (example).pdf', pages:['M-102'], size:'0.7 MB' },
+];
+const Q1 = {
+  id:'q1', short:'Pages of a PDF', title:'A PDF with several pages: how do you pick the page?',
+  why:'#11 says pick a PDF and a page. The canvas prototype only had one-page drawings, and plant PDFs are often whole sets of 5 to 60 pages.',
+  choices:{
+    A:['Page grid', 'Tapping the PDF opens a grid of page thumbnails, each captioned with the sheet number and scale Vellum read. Tap one to get the confirm step.'],
+    B:['Pages as rows', 'The PDF opens like a folder: one row per page with its number, title and scale, the way index search rows look. No thumbnails.'],
+    C:['Step in confirm', 'The PDF opens straight into the confirm step on page 1, with a large preview, arrows and page numbers. The scale line follows the page.'],
+  },
+  hint:'Try: tap the IFC set (5 pages), pick M-102, then Place sheet. The new sheet lands the way the canvas prototype did (question 3 asks about that).',
+  init(st) { st.loaded = new Set(); const s = newSheet(PAGES['M-101'], 48); st.sheets.push(s); st.dlg = { view:'browse' }; st.extents(); },
+  prompt:st => st.tool === 'measure' ? 'Measure: drag across a dimension; ends snap to its ticks' : 'Drag to pan · pinch or Ctrl + wheel to zoom',
+  onAdd(st) { st.dlg = { view:'browse' }; st.renderDlg(); },
+  dlgHTML(st) {
+    const d = st.dlg, v = picks.q1;
+    if (d.view === 'browse') {
+      const rows = Q1FILES.map((f, i) => {
+        if (f.folder) return `<button type="button" data-act="folder"><span class="fi">${svg('folder')}</span><span class="nm">${f.name}</span><span class="chev">${svg('chev', 16)}</span></button>`;
+        const multi = f.pages.length > 1, open = v === 'B' && d.open === i && st.loaded.has(i), loading = d.loading === i;
+        let h = `<button type="button" data-act="file" data-f="${i}"><span class="fi">${svg(multi ? 'pdfs' : 'pdf')}</span><span class="nm">${esc(f.name)}<span class="meta">${loading ? `Downloading ${f.size}…` : `${f.pages.length} page${multi ? 's' : ''} · ${f.size}`}</span>${loading ? '<div class="bar"><i></i></div>' : ''}</span>${multi ? `<span class="chev ${open ? 'open' : ''}">${svg('chev', 16)}</span>` : (() => tagFor(PAGES[f.pages[0]]))()}</button>`;
+        if (open) h += f.pages.map((pid, j) => { const p = PAGES[pid]; return `<button type="button" class="prow" data-act="page" data-f="${i}" data-p="${j}"><span class="pno">p${j + 1}</span><span class="nm"><b>${p.num}</b> ${p.title}</span>${tagFor(p)}</button>`; }).join('');
+        return h;
+      }).join('');
+      return `<div class="scrim" data-act="scrim"><div class="modal"><h2>Add a sheet</h2>
+        <div class="crumb">Dropbox › Projects › Riverside Plant (example) › <b>Drawings</b></div><div class="list">${rows}</div>
+        <div class="row"><span class="note">Search across all drawings arrives with the drawing index (milestone 2).</span><button type="button" class="ghost" data-act="close">Cancel</button></div></div></div>`;
+    }
+    const f = Q1FILES[d.f];
+    if (d.view === 'grid') {
+      return `<div class="scrim" data-act="scrim"><div class="modal"><button type="button" class="backbtn" data-act="back">${svg('back', 18)} Drawings</button><h2>${esc(f.name)}</h2>
+        <div class="crumb">${f.pages.length} pages · tap one to place it</div>
+        <div class="grid">${f.pages.map((pid, j) => { const p = PAGES[pid]; return `<button type="button" class="pcard" data-act="page" data-f="${d.f}" data-p="${j}"><canvas data-thumb="${pid}"></canvas><span class="cap"><b>${p.num}</b> <span class="meta">p${j + 1}</span><br>${tagFor(p)}</span></button>`; }).join('')}</div>
+        <div class="row end"><button type="button" class="ghost" data-act="close">Cancel</button></div></div></div>`;
+    }
+    // confirm (the settled step); in C it carries the page stepper
+    const page = PAGES[f.pages[d.p]], multi = f.pages.length > 1;
+    const wide = st.W >= 700;
+    const stepper = v === 'C' && multi ? `<div class="pv"><canvas data-preview="${page.num}" style="height:${wide ? Math.max(130, Math.min(230, st.H - 175)) : 150}px"></canvas></div>
+      <div class="stepper"><button type="button" class="ghost" data-act="pg" data-d="-1" aria-label="Previous page" ${d.p === 0 ? 'disabled style="opacity:.4"' : ''}>‹</button><span>Page ${d.p + 1} of ${f.pages.length} · <b>${page.num}</b> ${page.title}</span><button type="button" class="ghost" data-act="pg" data-d="1" aria-label="Next page" ${d.p === f.pages.length - 1 ? 'disabled style="opacity:.4"' : ''}>›</button></div>
+      <div class="pnums">${f.pages.map((pid, j) => `<button type="button" class="${j === d.p ? 'sel' : ''}" data-act="pn" data-p="${j}">${j + 1}</button>`).join('')}</div>` : '';
+    const back = multi && v !== 'C' ? `<button type="button" class="backbtn" data-act="back">${svg('back', 18)} ${v === 'A' ? 'Pages' : 'Drawings'}</button>` : `<button type="button" class="backbtn" data-act="back">${svg('back', 18)} Drawings</button>`;
+    if (stepper && wide) return `<div class="scrim" data-act="scrim"><div class="modal" style="width:min(780px,100%)">${back}<div class="cols"><div>${stepper}</div><div><h2>${page.num} ${page.title}</h2>${confirmBody(page, d)}${confirmFoot(page, d)}</div></div></div></div>`;
+    return `<div class="scrim" data-act="scrim"><div class="modal">${back}<h2>${page.num} ${page.title}</h2>${stepper}${confirmBody(page, d)}${confirmFoot(page, d)}</div></div>`;
+  },
+  afterDlg(st) {
+    st.layer.querySelectorAll('canvas[data-thumb]').forEach(cv => paintThumb(cv, PAGES[cv.dataset.thumb], 'asPrinted'));
+    st.layer.querySelectorAll('canvas[data-preview]').forEach(cv => paintThumb(cv, PAGES[cv.dataset.preview], 'asPrinted'));
+  },
+  act(st, a, el) {
+    const d = st.dlg, v = picks.q1;
+    if (a === 'folder') return st.toast('Folders open in place, as in the Drawings tab');
+    if (a === 'file') {
+      const i = +el.dataset.f, f = Q1FILES[i];
+      if (f.pages.length === 1) { st.dlg = { view:'confirm', f:i, p:0, k:null }; return st.renderDlg(); }
+      if (v === 'B' && d.open === i && st.loaded.has(i)) { d.open = null; return st.renderDlg(); }
+      const go = () => { if (v === 'A') st.dlg = { view:'grid', f:i }; else if (v === 'B') st.dlg = { view:'browse', open:i }; else st.dlg = { view:'confirm', f:i, p:0, k:null }; st.renderDlg(); };
+      if (st.loaded.has(i)) return go();
+      d.loading = i; st.renderDlg(); setTimeout(() => { st.loaded.add(i); if (st.dlg && st.dlg.loading === i) go(); }, 650); return;
+    }
+    if (a === 'page') { st.dlg = { view:'confirm', f:+el.dataset.f, p:+el.dataset.p, k:null }; return st.renderDlg(); }
+    if (a === 'back') { const f = Q1FILES[d.f]; st.dlg = d.view === 'confirm' && v === 'A' && f.pages.length > 1 ? { view:'grid', f:d.f } : { view:'browse', open:v === 'B' ? d.f : null }; return st.renderDlg(); }
+    if (a === 'pg' || a === 'pn') { const f = Q1FILES[d.f]; const p = a === 'pg' ? d.p + +el.dataset.d : +el.dataset.p; if (p < 0 || p >= f.pages.length) return; st.dlg = { ...d, p, k:null, change:false }; return st.renderDlg(); }
+    if (a === 'pickscale') { d.k = +el.dataset.k; return st.renderDlg(); }
+    if (a === 'change') { d.change = true; return st.renderDlg(); }
+    if (a === 'place') {
+      const page = PAGES[Q1FILES[d.f].pages[d.p]], k = effK(page, d); if (k == null) return;
+      const s = newSheet(page, k); st.placeBeside(s); st.sheets.push(s); st.dlg = null; st.renderDlg(); st.chrome(); st.zoomSheet(s); st.toast(pickedText(page, k));
+    }
+  },
+};
+
+// ---------- Q2: AS NOTED with details at different scales ----------
+const D501 = PAGES['D-501'];
+const Q2 = {
+  id:'q2', short:'AS NOTED details', title:'AS NOTED, with details at different scales: how do they go on?',
+  why:'Settled: for AS NOTED Vellum asks for a scale and offers common ones. Open: a detail sheet where each detail says its own SCALE, like D-501 here (1" = 1\'-0", 1-1/2" = 1\'-0" and NTS on one page).',
+  choices:{
+    A:['One scale', 'Pick one scale for the whole sheet. Vellum offers the scales it found under the details first. Details drawn at another scale measure wrong.'],
+    B:['Each detail', 'Vellum outlines the details it found. Tick the ones you want and each goes on as its own sheet at its own scale. Drag a window for one it missed.'],
+    C:['Scale areas', 'The sheet goes on once at one scale. Each detail with another scale becomes an area where Measure reads that scale, but the detail is not drawn at real size.'],
+  },
+  hint:'Try: place D-501, then drag across a printed dimension (ends snap to the ticks), or tap a row in the list under the canvas.',
+  tools:'measure',
+  init(st) {
+    st.tool = 'measure';
+    const a = newSheet(PAGES['M-101'], 48); a.x = 0; a.y = 0; const b = newSheet(PAGES['L-1042'], 0); b.x = 1800; b.y = 0;
+    st.sheets.push(a, b); st.dlg = Q2.fresh(); st.extents(); Q2.check(st);
+  },
+  fresh:() => ({ view:'confirm', k:null, items:D501.details.map(d => ({ ...d, on:true })) }),
+  prompt:st => st.tool === 'measure' ? 'Measure: drag across a printed dimension; ends snap to its ticks' : 'Drag to pan · pinch or Ctrl + wheel to zoom',
+  onAdd(st) { st.dlg = Q2.fresh(); st.renderDlg(); },
+  dlgHTML(st) {
+    const d = st.dlg, v = picks.q2;
+    const found = D501.details.map(x => [x.k, `${scaleLabel(x.k)} <small>Detail ${x.n}</small>`]);
+    const foundChips = `<div class="chips">${found.map(([k, t]) => `<button type="button" class="ghost ${d.k === k ? 'sel' : ''}" data-act="pickscale" data-k="${k}">${t}</button>`).join('')}</div>`;
+    const common = scaleChips(d.k, SCALES.slice(0, 9).filter(s => !D501.details.some(x => x.k === s[1])));
+    let body, label = 'Place sheet', ready = d.k != null, mw = 560; const wide = st.W >= 700, pvh = wide ? Math.max(150, Math.min(250, st.H - 150)) : null;
+    if (v === 'A') {
+      body = `<p>The title block says <b>AS NOTED</b>, so Vellum can't tell the scale. It found these under the details:</p>${foundChips}
+        <div class="lbl">Or a common scale</div>${common}
+        <p class="note" style="margin-top:6px">The whole sheet goes on at the one you pick. Details drawn at another scale will measure wrong.</p>`;
+    } else if (v === 'B') {
+      const on = d.items.filter(x => x.on).length; ready = on > 0; label = `Place ${on} detail${on === 1 ? '' : 's'}`;
+      const pv = `<div class="pv"><canvas data-q2pv style="height:${pvh || (st.W < 520 ? 170 : 230)}px"></canvas></div>`;
+      const lead = `<p>The title block says <b>AS NOTED</b>. Vellum found ${D501.details.length} details, each with its own SCALE. Tick the ones to place; each goes on as its own sheet at its scale.</p>`;
+      const tip = `<div class="lbl">Tap a detail to tick it. Drag on the page to add a window around one Vellum missed.</div>`;
+      const rows = `<div>${d.items.map((x, i) => `<div class="drow" data-act="dtoggle" data-i="${i}"><span class="cb ${x.on ? 'on' : ''}">${x.on ? svg('check', 14) : ''}</span><span class="dn">${x.custom ? `Window ${i - D501.details.length + 1}` : `Detail ${x.n} · ${x.name}`}</span>${x.custom ? `<select data-act="cscale" data-i="${i}">${[...SCALES.slice(0, 9), ['NTS', 0]].map(s => `<option value="${s[1]}" ${s[1] === x.k ? 'selected' : ''}>${s[0]}</option>`).join('')}</select>` : `<span class="tag ${x.k === 0 ? 'nts' : ''}">${x.k === 0 ? 'NTS · printed size' : scaleLabel(x.k)}</span>`}</div>`).join('')}</div>`;
+      if (wide) { mw = 800; body = `<div class="cols"><div>${pv}${tip}</div><div>${lead}${rows}</div></div>`; } else body = lead + pv + tip + rows;
+    } else {
+      const areas = d.k == null ? [] : D501.details.filter(x => x.k !== d.k);
+      const left = `<p>The title block says <b>AS NOTED</b>. Pick the scale the sheet goes on at. Each detail that says another scale becomes an area where Measure reads its own scale.</p>
+        ${foundChips}<div class="lbl">Or a common scale</div>${common}`;
+      body = `<div class="pv"><canvas data-q2pv style="height:${pvh || (st.W < 520 ? 150 : 200)}px"></canvas></div>
+        <div class="lbl">${d.k == null ? 'Pick a scale to see the areas.' : areas.length ? 'Areas: ' + areas.map(x => `Detail ${x.n} at ${scaleLabel(x.k)}`).join(', ') + '. Ink and other sheets over an area are not at real size.' : 'No areas: every detail is at this scale.'}</div>`;
+      if (wide) { mw = 800; body = `<div class="cols"><div>${left}</div><div>${body}</div></div>`; } else body = left + body;
+    }
+    return `<div class="scrim" data-act="scrim"><div class="modal" style="width:min(${mw}px,100%)"><h2>D-501 Instrument details</h2>${body}
+      <div class="row end"><button type="button" class="ghost" data-act="close">Cancel</button><button type="button" class="primary" data-act="place" ${ready ? '' : 'disabled'}>${label}</button></div></div></div>`;
+  },
+  afterDlg(st) {
+    const cv = st.layer.querySelector('canvas[data-q2pv]'); if (!cv) return;
+    const paint = () => {
+      const d = st.dlg; if (!d) return; const m = paintThumb(cv, D501, 'asPrinted', st.isDark() ? '#1c1d20' : '#f3efe6'); cv._m = m;
+      const g = cv.getContext('2d'), R = devicePixelRatio || 1; g.setTransform(R, 0, 0, R, 0, 0);
+      const toS = q => [m.ox + q[0] * m.sc, m.oy + q[1] * m.sc];
+      const list = picks.q2 === 'B' ? d.items : (d.k == null ? [] : D501.details.filter(x => x.k !== d.k));
+      list.forEach((x, i) => {
+        const [ax, ay] = toS([x.rect[0], x.rect[1]]), [bx, by] = toS([x.rect[2], x.rect[3]]), on = picks.q2 === 'B' ? x.on : true;
+        const cl = picks.q2 === 'C' ? '#6b3fa8' : '#2f5d8a';
+        g.save(); if (x.custom || picks.q2 === 'C') g.setLineDash([5, 3]); g.lineWidth = on ? 2 : 1.2; g.strokeStyle = on ? cl : 'rgba(120,120,120,.8)';
+        if (on) { g.fillStyle = picks.q2 === 'C' ? 'rgba(107,63,168,.08)' : 'rgba(47,93,138,.09)'; g.fillRect(ax, ay, bx - ax, by - ay); }
+        g.strokeRect(ax, ay, bx - ax, by - ay); g.setLineDash([]);
+        const t = (x.custom ? 'Window' : 'Detail ' + x.n) + ' · ' + (x.k === 0 ? 'NTS' : scaleLabel(x.k));
+        g.font = '600 11px system-ui,-apple-system,sans-serif'; const tw = g.measureText(t).width + 10; g.fillStyle = on ? cl : 'rgba(120,120,120,.9)';
+        g.fillRect(ax, ay, Math.min(tw, Math.max(30, bx - ax)), 17); g.fillStyle = '#fff'; g.save(); g.beginPath(); g.rect(ax, ay, bx - ax, 17); g.clip(); g.fillText(t, ax + 5, ay + 12.5); g.restore(); g.restore();
+      });
+      if (d.drag) { const [ax, ay] = d.drag.a, [bx, by] = d.drag.b; g.save(); g.setLineDash([5, 3]); g.strokeStyle = '#2f5d8a'; g.lineWidth = 1.5; g.strokeRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay)); g.restore(); }
+    };
+    paint(); cv._paint = paint;
+    if (picks.q2 !== 'B') return;
+    let down = null;
+    const loc = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    const toQ = p => [(p[0] - cv._m.ox) / cv._m.sc, (p[1] - cv._m.oy) / cv._m.sc];
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); try { cv.setPointerCapture(e.pointerId); } catch (_) {} down = loc(e); });
+    cv.addEventListener('pointermove', e => { if (!down) return; const p = loc(e); if (dist(p, down) > 8) { st.dlg.drag = { a:down, b:p }; paint(); } });
+    const up = e => {
+      if (!down) return; const d = st.dlg, p = loc(e), a = down; down = null;
+      if (d.drag) {
+        d.drag = null; const qa = toQ(a), qb = toQ(p);
+        const r = [Math.max(0, Math.min(qa[0], qb[0])), Math.max(0, Math.min(qa[1], qb[1])), Math.min(D501.pw, Math.max(qa[0], qb[0])), Math.min(D501.ph, Math.max(qa[1], qb[1]))];
+        if (r[2] - r[0] > 0.4 && r[3] - r[1] > 0.4) { const hit = D501.details.find(x => inRect(x.at, r)); d.items.push({ custom:true, rect:r, k:hit ? hit.k : 12, on:true }); }
+        st.renderDlg(); return;
+      }
+      const q = toQ(p); const i = d.items.map((x, j) => [x, j]).reverse().find(([x]) => inRect(q, x.rect)); if (i) { i[0].on = !i[0].on; st.renderDlg(); }
+    };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', () => { down = null; if (st.dlg) { st.dlg.drag = null; paint(); } });
+  },
+  act(st, a, el) {
+    const d = st.dlg, v = picks.q2;
+    if (a === 'pickscale') { d.k = +el.dataset.k; return st.renderDlg(); }
+    if (a === 'dtoggle') { const x = d.items[+el.dataset.i]; x.on = !x.on; return st.renderDlg(); }
+    if (a === 'place') {
+      let placed = [];
+      if (v === 'A') { if (d.k == null) return; const s = newSheet(D501, d.k, { warn:true, label:`D-501  ·  AS NOTED  ·  placed at ${d.k === 0 ? 'NTS (printed size)' : scaleLabel(d.k)}` }); st.placeBeside(s); st.sheets.push(s); placed = [s]; st.toast(pickedText(D501, d.k)); }
+      if (v === 'B') {
+        for (const x of d.items.filter(x => x.on)) { const name = x.custom ? 'Window' : 'Detail ' + x.n;
+          const s = newSheet(D501, x.k, { crop:x.rect, label:`D-501 / ${x.custom ? 'W' : x.n}  ·  ${x.k === 0 ? 'NTS · printed size' : scaleLabel(x.k)}`, cropName:name }); st.placeBeside(s); st.sheets.push(s); placed.push(s); }
+        if (!placed.length) return; st.toast(`${placed.length} detail${placed.length === 1 ? '' : 's'} of D-501 placed, each at its own scale`);
+      }
+      if (v === 'C') { if (d.k == null) return; const areas = D501.details.filter(x => x.k !== d.k).map(x => ({ rect:x.rect, k:x.k, name:'Detail ' + x.n }));
+        const s = newSheet(D501, d.k, { areas, label:`D-501  ·  AS NOTED  ·  ${d.k === 0 ? 'NTS' : scaleLabel(d.k)}${areas.length ? ` + ${areas.length} scale area${areas.length === 1 ? '' : 's'}` : ''}` }); st.placeBeside(s); st.sheets.push(s); placed = [s]; st.toast(pickedText(D501, d.k)); }
+      st.dlg = null; st.renderDlg(); st.chrome(); const b = st.bbox(placed); st.zoomTo(b[0], b[1], b[2], b[3], 0.8); Q2.check(st);
+    }
+    if (a === 'crow') { const r = st._rows[+el.dataset.i]; st.measure = { a:r.a, b:r.b }; const s = r.s; st.zoomSheet(s, 0.85); st.showReading(); }
+  },
+  change(st, a, el) { if (a === 'cscale') { st.dlg.items[+el.dataset.i].k = +el.value; st.renderDlg(); } },
+  check(st) { // prototype aid: every printed dimension on the canvas, as Vellum would measure it
+    const out = document.getElementById('check-q2'); if (!out) return;
+    const rows = []; for (const s of st.sheets) for (const dm of (s.page.dims || [])) { const c = cropOf(s); if (!inRect(dm.a, c) || !inRect(dm.b, c)) continue; const a = fromPaper(s, dm.a), b = fromPaper(s, dm.b); rows.push({ s, dm, a, b, r:readLen(st, a, b, s) }); }
+    st._rows = rows;
+    out.innerHTML = `<div class="ch">Printed dimensions on this canvas, as Measure reads them <small>(prototype aid: tap a row to see it)</small></div>` + rows.map((x, i) =>
+      `<button type="button" class="crow" data-act="crow" data-i="${i}"><span class="w"><b>${x.s.page.num}${x.s.cropName ? ' / ' + x.s.cropName : ''}</b> · ${x.dm.label}</span><span class="v">printed ${x.dm.text} · reads <b>${x.r.txt}</b>${x.r.note ? '<small>' + x.r.note + '</small>' : ''}</span><span class="${x.r.ok ? 'ok' : 'bad'}">${x.r.ok ? 'matches' : 'reads wrong'}</span></button>`).join('');
+  },
+};
+
+// ---------- Q3: where a new sheet lands ----------
+const Q3QUEUE = ['M-102', 'L-1043', 'M-102', 'L-1044'];
+const Q3 = {
+  id:'q3', short:'Where a sheet lands', title:'Where does a new sheet land on the canvas?',
+  why:'The canvas prototype put each new sheet to the right of everything and zoomed to it. Sheets at different scales differ hugely in size, and lining a sheet up with ink or another sheet means moving it.',
+  choices:{
+    A:['Beside the others', 'Lands to the right of everything, top edges lined up, and the view zooms to it. Nothing to do; moving it is for later.'],
+    B:['Where you look', 'Lands centred where you are looking, zooming out if it is bigger than the view, and stays movable until you tap Done.'],
+    C:['Tap to place', 'The view zooms out and a true-size outline waits. Tap where the sheet goes, the way the Frame tool works.'],
+  },
+  hint:'Try: pan to an empty spot or over your red cloud, then Add sheet. Add a few; M-102 is 1/2" = 1\'-0", the loop drawings go on at printed size.',
+  init(st) {
+    st.qi = 0; st.tool = 'hand';
+    const a = newSheet(PAGES['M-101'], 48); const b = newSheet(PAGES['L-1042'], 0); b.x = 1800; b.y = 0; st.sheets.push(a, b);
+    st.ink.push(cloudInk(864, 360, 400, 210, 'red', 7), { c:'red', w:7, pts:[[1180, 240], [1080, 300], [1030, 330]] }, { c:'sketch', w:5, pts:[[300, 620], [520, 600], [700, 640], [960, 610]] });
+    st.zoomTo(0, 0, 1728, 1152, 0.92); Q3.renderPills(st);
+  },
+  prompt:st => st.placing ? `Tap where <b>${st.placing.page.num}</b> goes` : st.moving ? `Drag <b>${st.moving.page.num}</b> to line it up, then Done` : 'Drag to pan · pinch or Ctrl + wheel to zoom',
+  onAdd(st) {
+    if (st.moving) Q3.done(st); if (st.placing) { st.placing = null; Q3.renderPills(st); }
+    const page = PAGES[Q3QUEUE[st.qi % Q3QUEUE.length]]; st.dlg = { view:'confirm', page, k:null }; st.renderDlg();
+  },
+  dlgHTML(st) { const d = st.dlg, p = d.page; return `<div class="scrim" data-act="scrim"><div class="modal" style="width:min(470px,100%)"><div class="crumb">Picked from Dropbox (the browse step is skipped in this demo)</div><h2>${p.num} ${p.title}</h2>${confirmBody(p, d)}${confirmFoot(p, d)}</div></div>`; },
+  renderPills(st) {
+    if (st.moving) st.pills.innerHTML = `<div class="pill panel"><span>Moving <b>${st.moving.page.num}</b> · drag it to line it up</span><button type="button" class="primary" data-act="done">Done</button></div>`;
+    else if (st.placing) st.pills.innerHTML = `<div class="pill panel"><span>Tap where <b>${st.placing.page.num}</b> goes</span><button type="button" class="ghost" data-act="cancelplace">Cancel</button></div>`;
+    else st.pills.innerHTML = '';
+    st.setPrompt();
+  },
+  done(st) { const s = st.moving; st.moving = null; Q3.renderPills(st); st.render(); if (s) st.toast(`${s.page.num} stays here`); },
+  onTool(st) { if (st.moving) Q3.done(st); },
+  onTap(st, w) {
+    if (st.placing) { const s = st.placing; s.x = w[0] - sw(s) / 2; s.y = w[1] - sh(s) / 2; st.sheets.push(s); st.placing = null; st.hover = null; Q3.renderPills(st); st.chrome(); st.toast(pickedText(s.page, s.nts ? 0 : s.k)); return; }
+    if (st.moving && !inSheet(st.moving, w)) Q3.done(st);
+  },
+  act(st, a, el) {
+    const d = st.dlg;
+    if (a === 'pickscale') { d.k = +el.dataset.k; return st.renderDlg(); }
+    if (a === 'change') { d.change = true; return st.renderDlg(); }
+    if (a === 'done') return Q3.done(st);
+    if (a === 'cancelplace') { st.placing = null; Q3.renderPills(st); st.render(); return; }
+    if (a === 'place') {
+      const page = d.page, k = effK(page, d); if (k == null) return; st.qi++;
+      const s = newSheet(page, k); st.dlg = null; st.renderDlg(); const v = picks.q3;
+      if (v === 'A') { st.placeBeside(s); st.sheets.push(s); st.chrome(); st.zoomSheet(s); st.toast(pickedText(page, k)); }
+      if (v === 'B') {
+        const c = st.centre(); s.x = c[0] - sw(s) / 2; s.y = c[1] - sh(s) / 2; st.sheets.push(s); st.moving = s; st.chrome();
+        const aw = st.W - INSET.l - INSET.r, ah = st.H - INSET.t - INSET.b;
+        if (sw(s) * st.view.z > aw * 0.9 || sh(s) * st.view.z > ah * 0.9) st.zoomTo(s.x, s.y, s.x + sw(s), s.y + sh(s), 0.75);
+        Q3.renderPills(st); st.render(); st.toast(pickedText(page, k));
+      }
+      if (v === 'C') {
+        st.placing = s; const b = st.bbox(); st.zoomTo(b[0] - sw(s) * 0.3, b[1] - sh(s) * 0.3, b[2] + sw(s) * 1.3, b[3] + sh(s) * 1.3, 0.92); st.hover = null; Q3.renderPills(st);
+      }
+    }
+  },
+};
+
+// ---------- Q4: who dims a scanned or coloured sheet in dark mode ----------
+const Q4FILES = [
+  { name:'M-001 Boiler house plan 1978, scanned (example).pdf', page:'M-001' },
+  { name:'SK-200 Chemical feed skid GA, vendor colour (example).pdf', page:'SK-200' },
+  { name:'M-101 Boiler house plan (example).pdf', page:'M-101' },
+];
+const Q4 = {
+  id:'q4', short:'Dimmed in dark mode', title:'In dark mode, who decides a sheet shows dimmed?',
+  why:'Settled (ADR-0011): sheets invert in dark mode, and a sheet that inverts badly (a scan, a coloured PDF) shows dimmed instead. Open: who decides that a sheet inverts badly.',
+  choices:{
+    A:['Vellum decides', 'Vellum dims pages that are scans or have coloured fills, when it places them. Nothing to set and nothing to override.'],
+    B:['Chosen when placing', 'The confirm step shows the page inverted and dimmed side by side, with Vellum\'s guess picked. Nothing to change later.'],
+    C:['Fixed on the sheet', 'Every sheet inverts. Tap a placed sheet and switch it to Dimmed if it looks wrong.'],
+  },
+  hint:'This canvas starts dark whatever the page theme; the sun button in its top bar flips it. Tap a sheet. Add sheet offers the scan and the coloured GA.',
+  localTheme:true,
+  isDark:st => st.ldark !== false,
+  dimmed(st, s) { return picks.q4 === 'A' ? !!s.page.bad : !!s.dim; },
+  labelExtra(st, s) { return st.isDark() ? `  ·  ${st.modeOf(s)}` : ''; },
+  init(st) {
+    st.ldark = true; st.tool = 'hand';
+    const ids = picks.q4 === 'B' ? ['M-101'] : ['M-101', 'M-001', 'SK-200'], portrait = st.W < st.H * 1.1;
+    ids.forEach((id, i) => { const s = newSheet(PAGES[id], 48); if (portrait) { s.x = 0; s.y = i * 1350; } else { s.x = i * 1900; s.y = 0; } st.sheets.push(s); Q4.inkOn(st, s); });
+    st.extents();
+  },
+  inkOn(st, s) { const o = [s.x, s.y]; st.ink.push(cloudInk(o[0] + 7.6 * 48, o[1] + 12.9 * 48, 4.6 * 48, 2.6 * 48, 'red', 7), { c:'sketch', w:6, pts:[[o[0] + 480, o[1] + 700], [o[0] + 620, o[1] + 740], [o[0] + 760, o[1] + 720], [o[0] + 900, o[1] + 760]] }); },
+  prompt:st => 'Tap a sheet · drag to pan · pinch or Ctrl + wheel to zoom',
+  onAdd(st) { st.dlg = { view:'browse' }; st.renderDlg(); },
+  dlgHTML(st) {
+    const d = st.dlg, v = picks.q4;
+    if (d.view === 'browse') return `<div class="scrim" data-act="scrim"><div class="modal"><h2>Add a sheet</h2><div class="crumb">Dropbox › Projects › Riverside Plant (example) › <b>Drawings</b></div>
+      <div class="list">${Q4FILES.map((f, i) => `<button type="button" data-act="file" data-f="${i}"><span class="fi">${svg('pdf')}</span><span class="nm">${esc(f.name)}<span class="meta">1 page</span></span>${tagFor(PAGES[f.page])}</button>`).join('')}</div>
+      <div class="row end"><button type="button" class="ghost" data-act="close">Cancel</button></div></div></div>`;
+    const p = PAGES[d.page];
+    let extra = '';
+    if (v === 'A') extra = `<p class="note" style="margin:4px 0 0">${p.bad ? `Vellum sees ${p.bad}, so in dark mode it will show <b>dimmed</b>.` : 'Plain black linework, so in dark mode it will show <b>inverted</b>.'}</p>`;
+    if (v === 'B') extra = `<div class="lbl">In dark mode</div><div class="dmrow">
+        <button type="button" class="dmc ${d.dm === 'inv' ? 'sel' : ''}" data-act="dm" data-v="inv"><canvas data-dm="inverted"></canvas><span>Inverted</span></button>
+        <button type="button" class="dmc ${d.dm === 'dim' ? 'sel' : ''}" data-act="dm" data-v="dim"><canvas data-dm="dimmed"></canvas><span>Dimmed</span></button></div>
+        <p class="note" style="margin:2px 0 0">Vellum suggests <b>${p.bad ? 'Dimmed' : 'Inverted'}</b>: ${p.bad || 'it is plain black linework'}.</p>`;
+    if (v === 'B' && st.W >= 700) return `<div class="scrim" data-act="scrim"><div class="modal" style="width:min(800px,100%)"><button type="button" class="backbtn" data-act="back">${svg('back', 18)} Drawings</button><h2>${p.num} ${p.title}</h2><div class="cols"><div>${confirmBody(p, d)}</div><div>${extra}</div></div>${confirmFoot(p, d)}</div></div>`;
+    return `<div class="scrim" data-act="scrim"><div class="modal"><button type="button" class="backbtn" data-act="back">${svg('back', 18)} Drawings</button><h2>${p.num} ${p.title}</h2>${confirmBody(p, d)}${extra}${confirmFoot(p, d)}</div></div>`;
+  },
+  afterDlg(st) { const p = st.dlg && PAGES[st.dlg.page]; st.layer.querySelectorAll('canvas[data-dm]').forEach(cv => paintThumb(cv, p, cv.dataset.dm, '#1c1d20')); },
+  renderPills(st) {
+    if (!st.pop) { st.pills.innerHTML = ''; return; }
+    const s = st.pop.s, [x, y] = st.pop.p, left = Math.max(8, Math.min(st.W - 270, x - 120)), top = Math.max(52, Math.min(st.H - 100, y + 14));
+    st.pills.innerHTML = `<div class="pop" style="left:${left}px;top:${top}px"><span class="t">${s.page.num} in dark mode</span><button type="button" data-act="sdim" data-v="0" class="${s.dim ? '' : 'on'}">Inverted</button><button type="button" data-act="sdim" data-v="1" class="${s.dim ? 'on' : ''}">Dimmed</button></div>`;
+  },
+  onTap(st, w, p) {
+    const s = [...st.sheets].reverse().find(s => inSheet(s, w)); const v = picks.q4;
+    if (!s) { st.pop = null; Q4.renderPills(st); return; }
+    if (v === 'A') st.toast(s.page.bad ? `${s.page.num} shows dimmed: Vellum saw ${s.page.bad}` : `${s.page.num} shows inverted: plain black linework`, 3200);
+    if (v === 'B') st.toast(`${s.page.num} shows ${s.dim ? 'dimmed' : 'inverted'}, as chosen when it was placed`, 3200);
+    if (v === 'C') { st.pop = { s, p }; Q4.renderPills(st); }
+  },
+  act(st, a, el) {
+    const d = st.dlg;
+    if (a === 'sdim') { st.pop.s.dim = el.dataset.v === '1'; Q4.renderPills(st); st.render(); return; }
+    if (a === 'file') { const f = Q4FILES[+el.dataset.f], p = PAGES[f.page]; st.dlg = { view:'confirm', page:f.page, k:null, dm:p.bad ? 'dim' : 'inv' }; return st.renderDlg(); }
+    if (a === 'back') { st.dlg = { view:'browse' }; return st.renderDlg(); }
+    if (a === 'dm') { d.dm = el.dataset.v; return st.renderDlg(); }
+    if (a === 'pickscale') { d.k = +el.dataset.k; return st.renderDlg(); }
+    if (a === 'change') { d.change = true; return st.renderDlg(); }
+    if (a === 'place') {
+      const p = PAGES[d.page], k = effK(p, d); if (k == null) return;
+      const s = newSheet(p, k, { dim:picks.q4 === 'B' ? d.dm === 'dim' : false }); st.placeBeside(s); st.sheets.push(s); Q4.inkOn(st, s);
+      st.dlg = null; st.renderDlg(); st.chrome(); st.zoomSheet(s); st.toast(pickedText(p, k));
+    }
+  },
+};
+
+// ---------- page: sections, choices in the URL, theme ----------
+const CTRLS = [Q1, Q2, Q3, Q4];
+const picks = {}; for (const q of CTRLS) picks[q.id] = q.choices[params.get(q.id)] ? params.get(q.id) : 'A';
+const stages = {};
+function writeURL() {
+  const u = new URL(location); for (const q of CTRLS) u.searchParams.set(q.id, picks[q.id]);
+  if (themePin) u.searchParams.set('theme', themePin); else u.searchParams.delete('theme');
+  history.replaceState(null, '', u); renderPicks();
+}
+function renderPicks() {
+  document.getElementById('picks').innerHTML = `<span>Picks</span>${CTRLS.map((q, i) => `<a href="#${q.id}">${i + 1}·<b>${picks[q.id]}</b></a>`).join('')}<button type="button" id="copyLink">Copy link</button>`;
+  document.getElementById('copyLink').onclick = async e => { const b = e.currentTarget; try { await navigator.clipboard.writeText(location.href); b.textContent = 'Copied'; } catch (_) { prompt('Copy this link', location.href); } setTimeout(() => { b.textContent = 'Copy link'; }, 1500); };
+}
+function renderSeg(q) {
+  const seg = document.querySelector(`#${q.id} .seg`); const keys = Object.keys(q.choices);
+  seg.style.gridTemplateColumns = `repeat(${keys.length},1fr)`;
+  seg.innerHTML = keys.map(k => `<button type="button" role="radio" aria-checked="${picks[q.id] === k}" data-k="${k}"><span class="k">${k}</span><span>${q.choices[k][0]}</span></button>`).join('');
+  document.querySelector(`#${q.id} .desc`).innerHTML = `<b>${picks[q.id]}: ${q.choices[picks[q.id]][0]}.</b> ${q.choices[picks[q.id]][1]}`;
+}
+const main = document.getElementById('qs');
+document.getElementById('toc').innerHTML = CTRLS.map((q, i) => `<a href="#${q.id}">${i + 1} · ${q.short}</a>`).join('');
+CTRLS.forEach((q, i) => {
+  const sec = document.createElement('section'); sec.className = 'q'; sec.id = q.id;
+  sec.innerHTML = `<h2><span class="n">${i + 1}</span> · ${q.title}</h2><p class="why">${q.why}</p><div class="seg" role="radiogroup" aria-label="${esc(q.title)}"></div><p class="desc"></p>
+    <div class="host"></div><div class="hint"><span>${q.hint}</span><button type="button" data-reset>Reset</button></div>${q.id === 'q2' ? '<div class="check" id="check-q2"></div>' : ''}`;
+  main.appendChild(sec); renderSeg(q);
+  sec.querySelector('.seg').addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (!b) return; picks[q.id] = b.dataset.k; renderSeg(q); writeURL(); stages[q.id].reset(); });
+  sec.querySelector('[data-reset]').addEventListener('click', () => stages[q.id].reset());
+  const chk = sec.querySelector('.check'); if (chk) chk.addEventListener('click', e => { const b = e.target.closest('[data-act=crow]'); if (b) q.act(stages[q.id], 'crow', b); });
+  stages[q.id] = makeStage(sec.querySelector('.host'), q);
+});
+function applyTheme() {
+  document.body.classList.toggle('dark', pageDark());
+  document.getElementById('themeBtn').innerHTML = `${svg(pageDark() ? 'sun' : 'moon', 16)} ${pageDark() ? 'Light' : 'Dark'}${themePin ? '' : ' <small>(now following the system)</small>'}`;
+  document.getElementById('themeBtn').title = pageDark() ? 'Switch to light' : 'Switch to dark';
+  for (const st of Object.values(stages)) { if (!st.ready) continue; st.chrome(); st.render(); if (st.dlg) st.renderDlg(); }
+}
+document.getElementById('themeBtn').addEventListener('click', () => { themePin = pageDark() ? 'light' : 'dark'; applyTheme(); writeURL(); });
+mq.addEventListener('change', () => { if (!themePin) applyTheme(); });
+applyTheme(); writeURL();
+</script>
+</body>
+</html>

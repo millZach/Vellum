@@ -467,10 +467,10 @@ extension AppearanceSetting {
         }
     }
 
-    /// The colour scheme SwiftUI is pinned to; nil follows the Duo.
-    var colorScheme: ColorScheme? {
+    /// The style the window is pinned to; unspecified follows the Duo.
+    var interfaceStyle: UIUserInterfaceStyle {
         switch self {
-        case .system: nil
+        case .system: .unspecified
         case .light: .light
         case .dark: .dark
         }

@@ -140,6 +140,16 @@ for appearance in light dark; do
   capture canvas-settings --ui-tab canvases --ui-reset --ui-new-canvas --ui-canvas-settings
 done
 
+# Appearance after Light (#26): the Debug-only `--ui-appearance-steps` sets the appearance setting in turn, a second
+# apart, as the top bar's menu does. Both captures must show the dark canvas: Light then Dark with the simulator light,
+# and Light then System with the simulator dark. The second leaves the setting on System.
+appearance=light
+xcrun simctl ui "$udid" appearance light
+capture appearance-light-then-dark --ui-tab canvases --ui-reset --ui-new-canvas --ui-appearance-steps light,dark
+appearance=dark
+xcrun simctl ui "$udid" appearance dark
+capture appearance-light-then-system --ui-tab canvases --ui-reset --ui-new-canvas --ui-appearance-steps light,system
+
 # Frame timing on the 10,000-stroke canvas (#21): the benchmark pans, pinches, draws and erases through the canvas
 # view's input paths and writes benchmark.txt and benchmark.json to the app's Documents folder. Simulator numbers are
 # indicative. benchmark <suffix>: runs the installed app's benchmark and keeps benchmark<suffix>.txt and .json.

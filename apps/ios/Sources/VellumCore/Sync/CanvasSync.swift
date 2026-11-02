@@ -369,7 +369,7 @@ public actor CanvasSync {
         retry = Task {
             await self.sleep(delay)
             guard !Task.isCancelled else { return }
-            await self.retryFired()
+            self.retryFired()
         }
         publish()
     }

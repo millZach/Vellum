@@ -345,6 +345,16 @@ public struct Ink: Hashable, Sendable {
         work.strokesMoved += moved
     }
 
+    /// Replaces strokes in place by id, keeping their places: for a move or a resize, which keeps every stroke's id.
+    /// Each is found by binary search; nothing else moves. A stroke whose id is not on the canvas is left out.
+    mutating func replace(_ replacements: [InkStroke]) {
+        let found = replacements.compactMap { stroke in index(of: stroke.id).map { ($0, stroke) } }
+        guard !found.isEmpty else { return }
+        withUniqueStrokes { strokes in
+            for (i, stroke) in found { strokes[i] = stroke }
+        }
+    }
+
     public static func == (lhs: Ink, rhs: Ink) -> Bool {
         lhs.storage === rhs.storage || lhs.storage.strokes == rhs.storage.strokes
     }
@@ -352,40 +362,61 @@ public struct Ink: Hashable, Sendable {
     public func hash(into hasher: inout Hasher) { hasher.combine(storage.strokes) }
 }
 
-/// What one change did to the ink: the strokes it added and the ids of the strokes it took away. The canvas screen
-/// passes it on to whatever keeps state in step with the ink, so nothing has to diff or copy the whole canvas to
-/// follow a change.
+/// What one change did to the canvas: the strokes it added and the ids of the strokes it took away, and the same for
+/// text boxes. A move or a resize takes its strokes away and adds them back, under the same ids, where they went. The
+/// canvas screen passes it on to whatever keeps state in step with the ink, so nothing has to diff or copy the whole
+/// canvas to follow a change.
 public struct InkChange: Hashable, Sendable {
     public var added: [InkStroke] = []
     public var removed: [StrokeID] = []
+    public var addedTexts: [TextBox] = []
+    public var removedTexts: [TextBoxID] = []
 
-    public init(added: [InkStroke] = [], removed: [StrokeID] = []) {
+    public init(added: [InkStroke] = [], removed: [StrokeID] = [], addedTexts: [TextBox] = [],
+                removedTexts: [TextBoxID] = []) {
         self.added = added
         self.removed = removed
+        self.addedTexts = addedTexts
+        self.removedTexts = removedTexts
     }
 
     public static let none = InkChange()
-    public var isEmpty: Bool { added.isEmpty && removed.isEmpty }
+    public var isEmpty: Bool { added.isEmpty && removed.isEmpty && addedTexts.isEmpty && removedTexts.isEmpty }
+    /// Whether text boxes changed.
+    public var touchesText: Bool { !addedTexts.isEmpty || !removedTexts.isEmpty }
 }
 
-/// One change to a canvas's ink, as it is written to the Duo (ADR-0014): a stroke drawn, strokes erased, an undo or a
-/// redo. Replaying a canvas's events in order through `InkSession.apply` rebuilds its ink and its undo history exactly.
+/// One change to a canvas, as it is written to the Duo (ADR-0014): a stroke drawn, strokes erased, an undo or a redo;
+/// since #7, a selection moved or resized, duplicated or deleted, and a text box placed or edited. Replaying a canvas's
+/// events in order through `InkSession.apply` rebuilds its ink, its text boxes and its undo history exactly.
 public enum InkEvent: Hashable, Sendable {
-    /// A stroke drawn, added on top of the ink.
+    /// A stroke drawn, added on top of the ink. A snapped line or shape is a stroke like any other.
     case draw(InkStroke)
     /// Strokes the eraser took, whole, in the order it took them. `continuingSweep` is true when they join the undo
     /// step of the sweep in progress rather than starting a new one.
     case erase([StrokeID], continuingSweep: Bool)
     case undo
     case redo
+    /// A selection moved or resized: the ids and the transform, never the moved strokes' points.
+    case transform(CanvasSelection, CanvasTransform)
+    /// A selection duplicated: copies of its strokes and text boxes, moved by the transform, numbered in order from
+    /// `firstStroke` and `firstText`.
+    case duplicate(CanvasSelection, CanvasTransform, firstStroke: StrokeID, firstText: TextBoxID)
+    /// A selection deleted, its strokes and text boxes whole.
+    case delete(CanvasSelection)
+    /// A text box placed, with its text.
+    case addText(TextBox)
+    /// A text box's text (and the height it needs) changed.
+    case editText(TextBox)
 }
 
-/// Drawing and erasing ink with undo and redo on a canvas. Every change it makes is also kept as an `InkEvent` until
-/// `takeEvents` hands it to be saved, so what is written to the Duo is exactly what was done.
+/// The ink and text boxes on a canvas, with undo and redo: drawing, erasing, and since #7 moving, resizing,
+/// duplicating and deleting a selection, and placing and editing text boxes. Every change it makes is also kept as an
+/// `InkEvent` until `takeEvents` hands it to be saved, so what is written to the Duo is exactly what was done.
 ///
 /// The undo history keeps the last `undoLimit` steps, and no more of them than keep the geometry only the history
-/// holds (erased strokes, undone strokes) under `historyPointBudget` points; the newest step is always kept, however
-/// big. It is saved with the ink (ADR-0014), so undo and redo survive a relaunch.
+/// holds (erased strokes, undone strokes, strokes as they were before a move) under `historyPointBudget` points; the
+/// newest step is always kept, however big. It is saved with the ink (ADR-0014), so undo and redo survive a relaunch.
 public struct InkSession: Hashable, Sendable {
     /// How many undo steps are kept. Older steps are dropped, oldest first.
     public static let undoLimit = 500
@@ -394,9 +425,12 @@ public struct InkSession: Hashable, Sendable {
     public static let historyPointBudget = 1_000_000
 
     public private(set) var ink: Ink
+    /// The text boxes, in the order placed (ascending id).
+    public private(set) var texts: [TextBox]
     private(set) var undoStack: [Edit] = []
     private(set) var redoStack: [Edit] = []
     private(set) var nextID: Int
+    private(set) var nextTextID: Int
     /// Points held only by the history: erased strokes in undo steps, undone strokes in redo steps.
     public private(set) var historyPoints = 0
     /// Whether the top undo step belongs to the eraser sweep in progress, so the sweep's next hit joins it.
@@ -405,25 +439,46 @@ public struct InkSession: Hashable, Sendable {
     public private(set) var unsavedEvents: [InkEvent] = []
     /// What the last change did to the ink.
     public private(set) var lastChange = InkChange.none
+    /// What should be selected after the last change, when it was a selection's: the moved or deleted things, the
+    /// copies a duplicate made, or the originals again when one is undone. Nil after any other change, which leaves
+    /// the selection to the canvas screen.
+    public private(set) var selectionAfterLastChange: CanvasSelection?
 
-    /// One undoable step: a stroke drawn, or every stroke one eraser sweep took. Strokes keep their ids, and the ink
-    /// is in id order, so undo and redo put each back exactly where it was without remembering positions.
+    /// One undoable step. Strokes keep their ids, and the ink is in id order, so undo and redo put each back exactly
+    /// where it was without remembering positions.
     enum Edit: Hashable, Sendable {
+        /// A stroke drawn.
         case draw(InkStroke)
+        /// Every stroke one eraser sweep took.
         case erase([InkStroke])
+        /// A selection moved or resized: its strokes and text boxes as they were before, and the transform. Redoing
+        /// works the moved ones out again from these, exactly as the first time.
+        case transform([InkStroke], [TextBox], CanvasTransform)
+        /// A selection duplicated: the copies, and what they were copied from.
+        case duplicate([InkStroke], [TextBox], sources: CanvasSelection)
+        /// A selection deleted: its strokes and text boxes.
+        case delete([InkStroke], [TextBox])
+        /// A text box placed.
+        case addText(TextBox)
+        /// A text box edited: as it was, and as it is.
+        case editText(before: TextBox, after: TextBox)
     }
 
-    public init(ink: Ink = Ink()) {
+    public init(ink: Ink = Ink(), texts: [TextBox] = []) {
         self.ink = ink
+        self.texts = texts.sorted { $0.id < $1.id }
         nextID = (ink.strokes.last?.id.value ?? 0) + 1
+        nextTextID = (self.texts.last?.id.value ?? 0) + 1
     }
 
     /// A session restored from a snapshot, with its undo history.
-    init(ink: Ink, undoStack: [Edit], redoStack: [Edit], nextID: Int) {
+    init(ink: Ink, texts: [TextBox], undoStack: [Edit], redoStack: [Edit], nextID: Int, nextTextID: Int) {
         self.ink = ink
+        self.texts = texts.sorted { $0.id < $1.id }
         self.undoStack = undoStack
         self.redoStack = redoStack
         self.nextID = max(nextID, (ink.strokes.last?.id.value ?? 0) + 1)
+        self.nextTextID = max(nextTextID, (self.texts.last?.id.value ?? 0) + 1)
         historyPoints = undoStack.reduce(0) { $0 + Self.heldPoints($1, inUndo: true) }
             + redoStack.reduce(0) { $0 + Self.heldPoints($1, inUndo: false) }
     }
@@ -431,6 +486,11 @@ public struct InkSession: Hashable, Sendable {
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
     public var undoSteps: Int { undoStack.count }
+
+    /// The text box with this id, if it is on the canvas.
+    public func text(_ id: TextBoxID) -> TextBox? {
+        textIndex(id).map { texts[$0] }
+    }
 
     /// Hands over the changes made since the last call, for saving, and forgets them.
     public mutating func takeEvents() -> [InkEvent] {
@@ -473,6 +533,65 @@ public struct InkSession: Hashable, Sendable {
         return hit.filter { removed.contains($0.id) }
     }
 
+    // MARK: A selection
+
+    /// Moves or resizes a selection as one undo step. False when it names nothing on the canvas or the transform
+    /// changes nothing.
+    @discardableResult
+    public mutating func transform(_ selection: CanvasSelection, by transform: CanvasTransform) -> Bool {
+        guard !transform.isIdentity, holdsAny(of: selection) else { return false }
+        perform(.transform(selection, transform))
+        return !lastChange.isEmpty
+    }
+
+    /// Duplicates a selection as one undo step, the copies moved by `transform`, and returns the copies' selection.
+    @discardableResult
+    public mutating func duplicate(_ selection: CanvasSelection, by transform: CanvasTransform) -> CanvasSelection {
+        guard holdsAny(of: selection) else { return .empty }
+        perform(.duplicate(selection, transform, firstStroke: StrokeID(nextID), firstText: TextBoxID(nextTextID)))
+        return selectionAfterLastChange ?? .empty
+    }
+
+    /// Deletes a selection's strokes and text boxes as one undo step.
+    public mutating func delete(_ selection: CanvasSelection) {
+        guard holdsAny(of: selection) else { return }
+        perform(.delete(selection))
+    }
+
+    /// Whether any of a selection's strokes or text boxes is on the canvas, so a change to it is a step worth saving.
+    private func holdsAny(of selection: CanvasSelection) -> Bool {
+        selection.strokes.contains { ink.contains($0) } || selection.texts.contains { text($0) != nil }
+    }
+
+    // MARK: Text boxes
+
+    /// Places a text box with its text, as one undo step, and returns it with its id. Empty text places nothing.
+    @discardableResult
+    public mutating func addText(_ text: String, at origin: CanvasPoint, size: CanvasSize, fontSize: Length,
+                                 colour: MarkupColour) -> TextBox? {
+        guard !text.isEmpty else { return nil }
+        let box = TextBox(id: TextBoxID(nextTextID), origin: origin, size: size, fontSize: fontSize, colour: colour,
+                          text: text)
+        perform(.addText(box))
+        return box
+    }
+
+    /// Changes a text box's text and the height it needs, as one undo step. Emptied, it is deleted. False when nothing
+    /// changed.
+    @discardableResult
+    public mutating func editText(_ id: TextBoxID, text: String, height: Length? = nil) -> Bool {
+        guard var box = self.text(id) else { return false }
+        if text.isEmpty {
+            perform(.delete(CanvasSelection(texts: [id])))
+            return true
+        }
+        box.text = text
+        if let height { box.size.height = height }
+        guard box != self.text(id) else { return false }
+        perform(.editText(box))
+        return true
+    }
+
     public mutating func undo() {
         guard canUndo else { return }
         perform(.undo)
@@ -493,6 +612,7 @@ public struct InkSession: Hashable, Sendable {
     /// erase of strokes not there) does nothing rather than fail, so a damaged history never stops a canvas opening.
     @discardableResult
     public mutating func apply(_ event: InkEvent) -> InkChange {
+        selectionAfterLastChange = nil
         let change = applying(event)
         lastChange = change
         return change
@@ -522,36 +642,172 @@ public struct InkSession: Hashable, Sendable {
             }
             sweepHasEntry = true
             return InkChange(removed: removed.map(\.id))
+        case .transform(let selection, let transform):
+            guard !transform.isIdentity else { return .none }
+            let strokes = selection.strokes.compactMap { id in ink.index(of: id).map { ink.strokes[$0] } }
+            let boxes = selection.texts.compactMap(text)
+            guard !strokes.isEmpty || !boxes.isEmpty else { return .none }
+            record(.transform(strokes, boxes, transform))
+            selectionAfterLastChange = Self.selection(strokes, boxes)
+            return place(strokes.map { $0.transformed(by: transform) }, boxes.map { $0.transformed(by: transform) })
+        case .duplicate(let selection, let transform, let firstStroke, let firstText):
+            let sources = selection.strokes.compactMap { id in ink.index(of: id).map { ink.strokes[$0] } }
+            let sourceBoxes = selection.texts.compactMap(text)
+            guard !sources.isEmpty || !sourceBoxes.isEmpty,
+                  firstStroke.value >= nextID || sources.isEmpty,
+                  firstText.value >= nextTextID || sourceBoxes.isEmpty else { return .none }
+            let copies = sources.enumerated().map { i, stroke in
+                stroke.transformed(by: transform, id: StrokeID(firstStroke.value + i))
+            }
+            let boxCopies = sourceBoxes.enumerated().map { i, box in
+                box.transformed(by: transform).withID(TextBoxID(firstText.value + i))
+            }
+            if let last = copies.last { nextID = last.id.value + 1 }
+            if let last = boxCopies.last { nextTextID = last.id.value + 1 }
+            ink.restore(copies)
+            insertTexts(boxCopies)
+            record(.duplicate(copies, boxCopies, sources: Self.selection(sources, sourceBoxes)))
+            selectionAfterLastChange = Self.selection(copies, boxCopies)
+            return InkChange(added: copies, addedTexts: boxCopies)
+        case .delete(let selection):
+            let removed = ink.remove(selection.strokes)
+            let removedBoxes = removeTexts(selection.texts)
+            guard !removed.isEmpty || !removedBoxes.isEmpty else { return .none }
+            record(.delete(removed, removedBoxes))
+            selectionAfterLastChange = .empty
+            return InkChange(removed: removed.map(\.id), removedTexts: removedBoxes.map(\.id))
+        case .addText(let box):
+            guard text(box.id) == nil, !box.text.isEmpty else { return .none }
+            nextTextID = max(nextTextID, box.id.value + 1)
+            insertTexts([box])
+            record(.addText(box))
+            return InkChange(addedTexts: [box])
+        case .editText(let box):
+            guard let before = text(box.id), before != box else { return .none }
+            replaceTexts([box])
+            record(.editText(before: before, after: box))
+            return InkChange(addedTexts: [box], removedTexts: [box.id])
         case .undo:
             guard let edit = undoStack.popLast() else { return .none }
             sweepHasEntry = false
             historyPoints += Self.heldPoints(edit, inUndo: false) - Self.heldPoints(edit, inUndo: true)
             redoStack.append(edit)
             trimHistory()
-            switch edit {
-            case .draw(let stroke):
-                ink.remove([stroke.id])
-                return InkChange(removed: [stroke.id])
-            case .erase(let strokes):
-                ink.restore(strokes)
-                return InkChange(added: strokes)
-            }
+            return undoing(edit)
         case .redo:
             guard let edit = redoStack.popLast() else { return .none }
             sweepHasEntry = false
             historyPoints += Self.heldPoints(edit, inUndo: true) - Self.heldPoints(edit, inUndo: false)
             undoStack.append(edit)
             trimHistory()
-            switch edit {
-            case .draw(let stroke):
-                ink.restore([stroke])
-                return InkChange(added: [stroke])
-            case .erase(let strokes):
-                ink.remove(strokes.map(\.id))
-                return InkChange(removed: strokes.map(\.id))
-            }
+            return redoing(edit)
         }
     }
+
+    private mutating func undoing(_ edit: Edit) -> InkChange {
+        switch edit {
+        case .draw(let stroke):
+            ink.remove([stroke.id])
+            return InkChange(removed: [stroke.id])
+        case .erase(let strokes):
+            ink.restore(strokes)
+            return InkChange(added: strokes)
+        case .transform(let strokes, let boxes, _):
+            selectionAfterLastChange = Self.selection(strokes, boxes)
+            return place(strokes, boxes)
+        case .duplicate(let copies, let boxes, let sources):
+            ink.remove(copies.map(\.id))
+            removeTexts(boxes.map(\.id))
+            selectionAfterLastChange = sources
+            return InkChange(removed: copies.map(\.id), removedTexts: boxes.map(\.id))
+        case .delete(let strokes, let boxes):
+            ink.restore(strokes)
+            insertTexts(boxes)
+            selectionAfterLastChange = Self.selection(strokes, boxes)
+            return InkChange(added: strokes, addedTexts: boxes)
+        case .addText(let box):
+            removeTexts([box.id])
+            return InkChange(removedTexts: [box.id])
+        case .editText(let before, _):
+            replaceTexts([before])
+            return InkChange(addedTexts: [before], removedTexts: [before.id])
+        }
+    }
+
+    private mutating func redoing(_ edit: Edit) -> InkChange {
+        switch edit {
+        case .draw(let stroke):
+            ink.restore([stroke])
+            return InkChange(added: [stroke])
+        case .erase(let strokes):
+            ink.remove(strokes.map(\.id))
+            return InkChange(removed: strokes.map(\.id))
+        case .transform(let strokes, let boxes, let transform):
+            selectionAfterLastChange = Self.selection(strokes, boxes)
+            return place(strokes.map { $0.transformed(by: transform) }, boxes.map { $0.transformed(by: transform) })
+        case .duplicate(let copies, let boxes, _):
+            ink.restore(copies)
+            insertTexts(boxes)
+            selectionAfterLastChange = Self.selection(copies, boxes)
+            return InkChange(added: copies, addedTexts: boxes)
+        case .delete(let strokes, let boxes):
+            ink.remove(strokes.map(\.id))
+            removeTexts(boxes.map(\.id))
+            selectionAfterLastChange = .empty
+            return InkChange(removed: strokes.map(\.id), removedTexts: boxes.map(\.id))
+        case .addText(let box):
+            insertTexts([box])
+            return InkChange(addedTexts: [box])
+        case .editText(_, let after):
+            replaceTexts([after])
+            return InkChange(addedTexts: [after], removedTexts: [after.id])
+        }
+    }
+
+    /// Puts strokes and text boxes in place of the ones with their ids: a move, a resize, or undoing one.
+    private mutating func place(_ strokes: [InkStroke], _ boxes: [TextBox]) -> InkChange {
+        ink.replace(strokes)
+        replaceTexts(boxes)
+        return InkChange(added: strokes, removed: strokes.map(\.id), addedTexts: boxes, removedTexts: boxes.map(\.id))
+    }
+
+    private static func selection(_ strokes: [InkStroke], _ boxes: [TextBox]) -> CanvasSelection {
+        CanvasSelection(strokes: strokes.map(\.id), texts: boxes.map(\.id))
+    }
+
+    // MARK: The text boxes, in id order
+
+    private func textIndex(_ id: TextBoxID) -> Int? {
+        var low = 0, high = texts.count
+        while low < high {
+            let mid = (low + high) / 2
+            if texts[mid].id < id { low = mid + 1 } else { high = mid }
+        }
+        return low < texts.count && texts[low].id == id ? low : nil
+    }
+
+    private mutating func insertTexts(_ boxes: [TextBox]) {
+        guard !boxes.isEmpty else { return }
+        for box in boxes where textIndex(box.id) == nil { texts.append(box) }
+        if zip(texts, texts.dropFirst()).contains(where: { $0.id > $1.id }) { texts.sort { $0.id < $1.id } }
+    }
+
+    @discardableResult
+    private mutating func removeTexts(_ ids: [TextBoxID]) -> [TextBox] {
+        guard !ids.isEmpty else { return [] }
+        let gone = Set(ids)
+        let removed = texts.filter { gone.contains($0.id) }
+        if !removed.isEmpty { texts.removeAll { gone.contains($0.id) } }
+        return removed
+    }
+
+    private mutating func replaceTexts(_ boxes: [TextBox]) {
+        for box in boxes {
+            if let i = textIndex(box.id) { texts[i] = box }
+        }
+    }
+
+    // MARK: The history
 
     private mutating func record(_ edit: Edit) {
         clearRedo()
@@ -591,11 +847,13 @@ public struct InkSession: Hashable, Sendable {
         historyPoints = held
     }
 
-    /// The points of an edit's strokes that only the history holds: an undo step's erased strokes, and a redo step's
-    /// undone stroke. A drawn stroke in an undo step, or erased strokes in a redo step, are on the canvas.
+    /// The points of an edit's strokes that only the history holds: an undo step's erased or deleted strokes, or its
+    /// strokes as they were before a move; a redo step's undone stroke or copies. The rest are on the canvas.
     static func heldPoints(_ edit: Edit, inUndo: Bool) -> Int {
         switch (edit, inUndo) {
-        case (.erase(let strokes), true): points(strokes)
+        case (.erase(let strokes), true), (.delete(let strokes, _), true), (.transform(let strokes, _, _), true):
+            points(strokes)
+        case (.duplicate(let strokes, _, _), false): points(strokes)
         case (.draw(let stroke), false): stroke.points.count
         default: 0
         }
@@ -603,14 +861,16 @@ public struct InkSession: Hashable, Sendable {
 
     private static func points(_ strokes: [InkStroke]) -> Int { strokes.reduce(0) { $0 + $1.points.count } }
 
-    /// Two sessions are equal when their ink and undo history are; unsaved events and the sweep in progress are not
-    /// part of what is saved.
+    /// Two sessions are equal when their ink, text boxes and undo history are; unsaved events and the sweep in
+    /// progress are not part of what is saved.
     public static func == (lhs: InkSession, rhs: InkSession) -> Bool {
-        lhs.ink == rhs.ink && lhs.undoStack == rhs.undoStack && lhs.redoStack == rhs.redoStack && lhs.nextID == rhs.nextID
+        lhs.ink == rhs.ink && lhs.texts == rhs.texts && lhs.undoStack == rhs.undoStack
+            && lhs.redoStack == rhs.redoStack && lhs.nextID == rhs.nextID && lhs.nextTextID == rhs.nextTextID
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(ink)
+        hasher.combine(texts)
         hasher.combine(nextID)
     }
 }

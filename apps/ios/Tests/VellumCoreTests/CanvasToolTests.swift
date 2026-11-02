@@ -16,19 +16,32 @@ final class CanvasToolTests: XCTestCase {
         ])
     }
 
-    func testOnlyThePenHighlighterAndEraserWorkYetAndTheRestSaySo() {
-        XCTAssertEqual(CanvasTool.allCases.filter(\.isAvailable), [.pen, .highlighter, .eraser])
+    func testTheInkSelectionAndTextToolsWorkAndTheRestSaySo() {
+        XCTAssertEqual(CanvasTool.allCases.filter(\.isAvailable),
+                       [.pen, .highlighter, .eraser, .lineAndShape, .lasso, .textBox])
         for tool in CanvasTool.allCases where !tool.isAvailable {
             XCTAssertTrue(tool.hint.hasPrefix("Not available yet"), tool.title)
         }
-        XCTAssertEqual(CanvasTool.lasso.comingIn, 7)
+        XCTAssertNil(CanvasTool.lasso.comingIn)
         XCTAssertEqual(CanvasTool.measure.comingIn, 8)
     }
 
-    func testOnlyThePenAndHighlighterLeaveInk() {
+    /// The pen, the highlighter and the line and shape tool (#7) leave ink; the line tool's is the pen's.
+    func testThePensAndTheLineToolLeaveInk() {
         XCTAssertEqual(CanvasTool.pen.inkTool, .pen)
         XCTAssertEqual(CanvasTool.highlighter.inkTool, .highlighter)
+        XCTAssertEqual(CanvasTool.lineAndShape.inkTool, .pen)
         XCTAssertNil(CanvasTool.eraser.inkTool)
+        XCTAssertNil(CanvasTool.lasso.inkTool)
+        XCTAssertNil(CanvasTool.textBox.inkTool)
+    }
+
+    /// The new tools' hints say how they work (#7): the pen's names the hold that snaps, the text box's the Pencil.
+    func testTheNewToolsHintsSayHowTheyWork() {
+        XCTAssertTrue(CanvasTool.pen.hint.contains("Hold still"), CanvasTool.pen.hint)
+        XCTAssertTrue(CanvasTool.lasso.hint.contains("move, resize, duplicate or delete"), CanvasTool.lasso.hint)
+        XCTAssertTrue(CanvasTool.textBox.hint.contains("write with the Pencil"), CanvasTool.textBox.hint)
+        XCTAssertTrue(CanvasTool.lineAndShape.hint.contains("rectangle"), CanvasTool.lineAndShape.hint)
     }
 
     func testEveryToolSaysWhatItExpectsNext() {
@@ -75,10 +88,19 @@ final class CanvasToolPromptTests: XCTestCase {
     func testTheWorkingToolsPromptsFitTheStatusBar() {
         for tool in CanvasTool.allCases where tool.isAvailable {
             for fingerDraws in [false, true] {
-                let prompt = tool.prompt(fingerDraws: fingerDraws)
-                XCTAssertLessThanOrEqual(prompt.count, 28, prompt)
+                for hasSelection in [false, true] {
+                    let prompt = tool.prompt(fingerDraws: fingerDraws, hasSelection: hasSelection)
+                    XCTAssertLessThanOrEqual(prompt.count, 28, prompt)
+                }
             }
         }
+    }
+
+    /// With something selected, the lasso's prompt says to drag it (#7); the other tools ignore a selection.
+    func testTheLassoPromptSaysToDragASelection() {
+        XCTAssertEqual(CanvasTool.lasso.prompt(fingerDraws: false, hasSelection: true), "Drag the selection to move")
+        XCTAssertEqual(CanvasTool.lasso.prompt(fingerDraws: false, hasSelection: false), "Loop ink or text to select")
+        XCTAssertEqual(CanvasTool.pen.prompt(fingerDraws: false, hasSelection: true), "Draw with the Pencil")
     }
 
     /// Draw with finger (#24): with the switch on, the pen and highlighter don't tell Zach to use the Pencil only.

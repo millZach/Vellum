@@ -20,6 +20,18 @@ _Avoid_: line (a line is the line tool's), path, mark
 How heavy a pen draws, chosen on the pen (fine, medium or bold), never from how hard the Pencil presses. A stroke keeps the weight it was drawn at as a real-world width, so it zooms with what it marks.
 _Avoid_: thickness, pressure, size
 
+**Snap**:
+A stroke straightened into a line, a rectangle or a circle (or an ellipse): the pen snaps one when the Pencil holds still at its end for half a second, and the line and shape tool snaps every stroke when it lifts. A snapped stroke is ink like any other, with the shape's points.
+_Avoid_: shape recognition, auto-shape, perfect shape
+
+**Lasso**:
+The tool that selects by drawing a loop: it takes every stroke with at least half its points inside the loop and every text box whose centre is inside.
+_Avoid_: marquee, selection tool, window (a window is a dragged rectangle)
+
+**Selection**:
+The strokes and text boxes the lasso has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner, duplicated or deleted, each as one undo step. It is not saved, and it stays selected through undo and redo.
+_Avoid_: group, highlight
+
 **Draw with finger**:
 The switch in Settings, off by default and kept on the Duo, that lets one finger draw, erase or use the selected tool as the Pencil does, with two fingers left to pan and pinch. A finger stroke is ink only once it is clearly one finger: a second finger landing within 130 ms of the first cancels it and becomes a pan or pinch, with nothing saved.
 _Avoid_: finger mode, touch drawing, palm rejection (the Pencil needs none of this)
@@ -29,7 +41,7 @@ What a colour of ink means to an agent: red is something to add, green is someth
 _Avoid_: pen colour, highlight
 
 **Ink log**:
-The record on the Duo of every change to a canvas's ink since its last snapshot (a stroke drawn, strokes erased, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
+The record on the Duo of every change to a canvas's ink and text boxes since its last snapshot (a stroke drawn, strokes erased, a selection moved, resized, duplicated or deleted, a text box placed or edited, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
 _Avoid_: journal, history file, autosave
 
 **Canvas saver**:
@@ -41,7 +53,7 @@ The folder on the Duo that holds one canvas: its name and canvas units (`canvas.
 _Avoid_: document, package, bundle
 
 **Text box**:
-Typed text placed on the canvas, with a position and a size.
+Typed text placed on the canvas, with a position and a size, its letters a real-world height so it zooms with the ink, and a markup colour. It is typed with the keyboard or written with the Pencil, which turns the handwriting into its text.
 _Avoid_: label, note
 
 **Sheet**:

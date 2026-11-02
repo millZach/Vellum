@@ -80,8 +80,10 @@ final class CanvasEditor {
     /// True during an eraser sweep, which bumps `inkRevision` once, when it ends (`endEraserSweep`).
     @ObservationIgnored private var sweeping = false
 
-    /// The rectangle everything on the canvas covers, its ink included.
-    var extents: CanvasRect? { CanvasRect.union([canvas.extents, session.ink.bounds].compactMap { $0 }) }
+    /// The rectangle everything on the canvas covers, its ink and text boxes included.
+    var extents: CanvasRect? {
+        CanvasRect.union([canvas.extents, session.ink.bounds].compactMap { $0 } + session.texts.map(\.rect))
+    }
 
     /// The canvas units, saved with the canvas's name when they change.
     var units: CanvasUnits {
@@ -94,9 +96,13 @@ final class CanvasEditor {
         }
     }
 
+    /// The tool in hand. Putting the lasso down lets go of its selection.
     var tool: CanvasTool {
         get { pen.tool }
-        set { pen.tool = newValue }
+        set {
+            pen.tool = newValue
+            if newValue != .lasso { select(.empty) }
+        }
     }
 
     var colour: MarkupColour {
@@ -165,14 +171,121 @@ final class CanvasEditor {
     }
 
     func undo() {
+        willChangeHistory?()
         endEraserSweep()
+        cancelLift()
         session.undo()
         syncInk()
     }
 
     func redo() {
+        willChangeHistory?()
         endEraserSweep()
+        cancelLift()
         session.redo()
+        syncInk()
+    }
+
+    /// Told just before an undo or redo, so a text box being typed in is finished first and its edit is the step
+    /// undone.
+    @ObservationIgnored var willChangeHistory: (@MainActor () -> Void)?
+    /// Told to finish typing in a text box: when the canvas closes or the app leaves the screen.
+    @ObservationIgnored var onFinishTextEditing: (@MainActor () -> Void)?
+
+    /// Finishes a text box being typed in, saving its text.
+    func finishTextEditing() { onFinishTextEditing?() }
+
+    // MARK: The selection (#7)
+
+    /// What the lasso has selected: not saved, and kept through undo and redo. The status bar's prompt follows it;
+    /// the canvas view hears through `onSelectionChange`.
+    private(set) var selection = CanvasSelection.empty
+    @ObservationIgnored var onSelectionChange: (@MainActor () -> Void)?
+    /// Told what each change did to the text boxes, so the canvas view shows them.
+    @ObservationIgnored var onTextsChange: (@MainActor (InkChange) -> Void)?
+    /// The selection's strokes while they are lifted out of the index to be dragged, and their bounds then.
+    @ObservationIgnored private var lifted: [InkStroke]?
+    @ObservationIgnored private var liftedBounds: CanvasRect?
+
+    /// The text boxes on the canvas, in the order placed.
+    var texts: [TextBox] { session.texts }
+    func text(_ id: TextBoxID) -> TextBox? { session.text(id) }
+
+    func select(_ new: CanvasSelection) {
+        guard new != selection else { return }
+        selection = new
+        onSelectionChange?()
+    }
+
+    /// Selects what a lasso loop takes (`Lasso`): looked up in the index, never the whole canvas.
+    func selectInLoop(_ points: [CanvasPoint]) {
+        guard let lasso = Lasso(points) else { return select(.empty) }
+        select(lasso.select(in: inkIndex, texts: session.texts))
+    }
+
+    /// The rectangle the selection covers, from the index's cached bounds and the text boxes; nil with nothing
+    /// selected.
+    var selectionBounds: CanvasRect? {
+        if let liftedBounds { return liftedBounds }
+        var rects: [CanvasRect] = []
+        if let box = inkIndex.bounds(of: selection.strokes) { rects.append(box.rect) }
+        for id in selection.texts { if let box = session.text(id) { rects.append(box.rect) } }
+        return CanvasRect.union(rects)
+    }
+
+    /// Takes the selection's strokes out of the index, so the tiles redraw without them, and returns them to be
+    /// dragged on a layer of their own. `dropSelection` puts them back, moved or not.
+    func liftSelection() -> [InkStroke] {
+        cancelLift()
+        let bounds = selectionBounds
+        let strokes = selection.strokes.compactMap { inkIndex.stroke($0) }
+        liftedBounds = bounds
+        lifted = strokes
+        if !strokes.isEmpty { onInkChange?(inkIndex.apply(InkChange(removed: strokes.map(\.id)))) }
+        return strokes
+    }
+
+    /// Ends a drag: the selection moved or resized by `transform` as one undo step, saved as its ids and the
+    /// transform; an identity transform puts the strokes back as they were.
+    func dropSelection(_ transform: CanvasTransform) {
+        guard let strokes = lifted else { return }
+        lifted = nil
+        liftedBounds = nil
+        if !transform.isIdentity, session.transform(selection, by: transform) {
+            syncInk()
+        } else if !strokes.isEmpty {
+            onInkChange?(inkIndex.apply(InkChange(added: strokes)))
+        }
+    }
+
+    private func cancelLift() { dropSelection(.identity) }
+
+    /// Duplicates the selection, the copies 30 points down and right at this zoom, and selects the copies.
+    func duplicateSelection() {
+        let offset = viewport.canvasLength(ofScreen: 30)
+        session.duplicate(selection, by: .translation(dx: offset, dy: offset))
+        syncInk()
+    }
+
+    func deleteSelection() {
+        session.delete(selection)
+        syncInk()
+    }
+
+    // MARK: Text boxes (#7)
+
+    /// Places a text box with its text, in the markup colour in hand. Empty text places nothing.
+    @discardableResult
+    func addText(_ text: String, at origin: CanvasPoint, width: Length, height: Length, fontSize: Length) -> TextBox? {
+        let box = session.addText(text, at: origin, size: CanvasSize(width: width, height: height), fontSize: fontSize,
+                                  colour: pen.colour)
+        syncInk()
+        return box
+    }
+
+    /// Changes a text box's text and height; emptied, it is deleted.
+    func editText(_ id: TextBoxID, text: String, height: Length) {
+        session.editText(id, text: text, height: height)
         syncInk()
     }
 
@@ -206,6 +319,14 @@ final class CanvasEditor {
         let change = session.lastChange
         inkDidChange?(change)
         onInkChange?(inkIndex.apply(change))
+        if change.touchesText { onTextsChange?(change) }
+        if let after = session.selectionAfterLastChange {
+            select(after)
+        } else if !selection.isEmpty, !change.removed.isEmpty || !change.removedTexts.isEmpty {
+            // Whatever a change took away is no longer selected.
+            select(CanvasSelection(strokes: selection.strokes.filter { inkIndex.contains($0) },
+                                   texts: selection.texts.filter { session.text($0) != nil }))
+        }
         if !sweeping { inkRevision += 1 }
         if canUndo != session.canUndo { canUndo = session.canUndo }
         if canRedo != session.canRedo { canRedo = session.canRedo }

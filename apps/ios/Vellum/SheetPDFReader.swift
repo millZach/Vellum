@@ -93,39 +93,50 @@ actor SheetPDFReader {
         return drew ? pixels : []
     }
 
-    /// The page's text in lines, each with where it is on the paper. PDFKit gives the page's text and each
-    /// character's box; characters are joined while they sit on one line with no wide gap, so two labels side by side
-    /// stay two lines, the way they read on the sheet.
+    /// The page's text in lines, each with where it is on the paper. Each character and its box are read by PDFKit's
+    /// own character index (`numberOfCharacters`, a one-character selection, `characterBounds(at:)`), so they always
+    /// belong together (`page.string`'s indices can drift from the boxes'). Characters are joined while they sit on
+    /// one line with no wide gap, so two labels side by side stay two lines, the way they read on the sheet. A page
+    /// with more than `characterLimit` characters is read by PDFKit's own lines instead, which is quicker.
     static func lines(of page: PDFPage, paper: PaperSize) -> [PageText] {
-        guard let text = page.string, !text.isEmpty else { return [] }
+        let count = page.numberOfCharacters
+        guard count > 0 else { return [] }
         let toDisplay = page.pageRef?.getDrawingTransform(.cropBox, rect: CGRect(x: 0, y: 0,
                                                                                 width: paper.width.inches * 72,
                                                                                 height: paper.height.inches * 72),
                                                           rotate: 0, preserveAspectRatio: true) ?? .identity
         let height = paper.height.inches
-        let string = text as NSString
+        func paperRect(_ rect: CGRect) -> PaperRect {
+            .inches(x: Double(rect.minX) / 72, y: height - Double(rect.maxY) / 72, width: Double(rect.width) / 72,
+                    height: Double(rect.height) / 72)
+        }
+        if count > characterLimit {
+            let lines = page.selection(for: page.bounds(for: .cropBox))?.selectionsByLine() ?? []
+            return lines.compactMap { line in
+                guard let text = line.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+                    return nil
+                }
+                return PageText(text, paperRect(line.bounds(for: page).applying(toDisplay)))
+            }
+        }
         var lines: [PageText] = []
         var current = ""
         var rect = CGRect.null
         func flush() {
             let trimmed = current.trimmingCharacters(in: .whitespaces)
-            if !trimmed.isEmpty, !rect.isNull {
-                lines.append(PageText(trimmed, .inches(x: Double(rect.minX) / 72, y: height - Double(rect.maxY) / 72,
-                                                       width: Double(rect.width) / 72,
-                                                       height: Double(rect.height) / 72)))
-            }
+            if !trimmed.isEmpty, !rect.isNull { lines.append(PageText(trimmed, paperRect(rect))) }
             current = ""
             rect = .null
         }
-        for i in 0..<string.length {
-            let character = string.substring(with: NSRange(location: i, length: 1))
-            if character == "\n" || character == "\r" {
+        for i in 0..<count {
+            let character = page.selection(for: NSRange(location: i, length: 1))?.string ?? ""
+            if character.contains(where: \.isNewline) {
                 flush()
                 continue
             }
             let box = page.characterBounds(at: i).applying(toDisplay)
-            if box.width <= 0 || box.height <= 0 {
-                if !current.isEmpty { current += character }
+            if character.allSatisfy(\.isWhitespace) || box.width <= 0 || box.height <= 0 {
+                if !current.isEmpty { current += " " }
                 continue
             }
             if !rect.isNull {
@@ -140,6 +151,9 @@ actor SheetPDFReader {
         flush()
         return lines
     }
+
+    /// Past this many characters a page is read by PDFKit's lines rather than character by character.
+    static let characterLimit = 20_000
 }
 
 /// A page's thumbnail handed back from the reader.

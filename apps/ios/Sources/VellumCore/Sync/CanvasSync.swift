@@ -95,8 +95,8 @@ public struct SyncReport: Hashable, Sendable {
 ///   on the laptop) is replaced: the whole canvas goes up again, Dropbox keeps the replaced version in its history, and
 ///   the ledger notes it (`CanvasSyncRecord.replaced`).
 /// - **A folder deleted on the laptop** (or a file deleted from one) is found by one folder check (`SyncFolderCheck`)
-///   when the engine starts, when the connection returns and when the app comes back to the foreground, made before
-///   the next upload; the canvas is then uploaded whole, as for a changed file. A sync between checks asks nothing more.
+///   when the engine starts, when the connection returns and when the app comes back to the foreground, made by
+///   the next sync with something to upload; the canvas is then uploaded whole, as for a changed file. A sync between checks asks nothing more.
 ///
 /// Sync only ever reads the canvas's files: a failed or half-done sync changes nothing on the Duo, and every step
 /// leaves Dropbox's copy whole.
@@ -338,14 +338,6 @@ public actor CanvasSync {
             let waiting = ledger.pending.filter { inBackground || $0 != onScreen }
                 .sorted { $0.uuidString < $1.uuidString }
             guard let id = waiting.first(where: { !failed.contains($0) }) ?? waiting.first else { return }
-            if folderCheckDue {
-                do {
-                    try await checkFolders(session)
-                } catch {
-                    return didFail(error, nil)
-                }
-                continue
-            }
             current = id
             publish()
             do {
@@ -493,7 +485,13 @@ public actor CanvasSync {
         } catch {
             throw SyncFailure.failed
         }
-        for step in SyncPlan.steps(for: capture, record: record) {
+        let steps = SyncPlan.steps(for: capture, record: record)
+        // Only a sync with something to upload pays for the check: leaving a canvas unchanged still asks nothing.
+        if folderCheckDue, !steps.isEmpty {
+            try await checkFolders(session)
+            if ledger[id]?.replaceAll == true, !record.replaceAll { throw SyncFailure.restart }
+        }
+        for step in steps {
             guard ledger[id] != nil else { return }  // deleted meanwhile; the delete moves what is there
             try await perform(step, capture, id, session)
             persist()

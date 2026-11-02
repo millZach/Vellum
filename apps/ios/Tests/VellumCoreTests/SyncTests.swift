@@ -588,6 +588,9 @@ final class SyncTests: XCTestCase {
         await backAndForth(sync)
         await sync.settled()
         XCTAssertEqual(dropbox.requests.count, 1, "back in the foreground with nothing to upload: nothing asked")
+        await sync.canvasLeft(kept)
+        await sync.settled()
+        XCTAssertEqual(dropbox.requests.count, 1, "leaving a canvas unchanged with the check due: still nothing asked")
 
         // The laptop deletes one canvas's canvas.json. The next check asks only what changed since, and that canvas
         // goes up whole while the one Zach drew on sends its tail.

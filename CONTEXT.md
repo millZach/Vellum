@@ -57,7 +57,7 @@ The folder in `Dropbox/Vellum` a canvas folder is mirrored to, named `<name> <sh
 _Avoid_: remote copy, cloud copy, backup
 
 **Folder check**:
-One request asking Dropbox whether any canvas's Dropbox folder is missing a file the sync ledger says it holds (deleted on the laptop), made before the next upload after the app starts, comes back to the foreground or gets its connection back. A canvas it finds incomplete is uploaded whole once (ADR-0003).
+One request asking Dropbox whether any canvas's Dropbox folder is missing a file the sync ledger says it holds (deleted on the laptop), made by the first sync with something to upload after the app starts, comes back to the foreground or gets its connection back. A canvas it finds incomplete is uploaded whole once (ADR-0003).
 _Avoid_: scan, poll, health check
 
 **Log part**:

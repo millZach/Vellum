@@ -25,7 +25,7 @@
     "note": "Never again: the ledger remembers each PDF uploaded, by name." },
   { "metric": "requests-folder-check", "kind": "count", "value": 1, "unit": "requests", "tolerance": 0,
     "measured": "PR for #37 2026-11-02 VellumCore made-up Dropbox",
-    "note": "The folder check, before the first upload after the engine starts, the app comes back to the foreground or the connection returns: one list_folder/continue of Vellum/ since the cursor kept in the ledger (the first ever, or after a reset, is one recursive list_folder). None at all when nothing is waiting to upload, and none on the syncs between." },
+    "note": "The folder check, made by the first sync with something to upload after the engine starts, the app comes back to the foreground or the connection returns, so that one sync costs one request over its own budget: one list_folder/continue of Vellum/ since the cursor kept in the ledger (the first ever, or after a reset, is a recursive list_folder, one request per page). None when a sync has nothing to upload, and none on the syncs between." },
   { "metric": "requests-sync-after-folder-deleted", "kind": "count", "value": 4, "unit": "requests", "tolerance": 0,
     "measured": "PR for #37 2026-11-02 VellumCore made-up Dropbox",
     "note": "The sync after a canvas's folder was deleted on the laptop, for a canvas with one sheet and no snapshot: the folder check, then the whole canvas once (the sheet's PDF, canvas.json, the log as one part). A canvas with a snapshot adds one upload, each further sheet one." },

@@ -103,7 +103,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     public var isAvailable: Bool { comingIn == nil }
 
     /// The status bar's prompt for the lasso while something is selected.
-    public static let selectionPrompt = "Drag the selection to move"
+    public static let selectionPrompt = "Drag the selection"
 
     /// The status bar's prompt, given whether the lasso has a selection: with one, it says to drag it.
     public func prompt(fingerDraws: Bool, hasSelection: Bool) -> String {

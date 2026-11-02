@@ -98,7 +98,7 @@ final class CanvasToolPromptTests: XCTestCase {
 
     /// With something selected, the lasso's prompt says to drag it (#7); the other tools ignore a selection.
     func testTheLassoPromptSaysToDragASelection() {
-        XCTAssertEqual(CanvasTool.lasso.prompt(fingerDraws: false, hasSelection: true), "Drag the selection to move")
+        XCTAssertEqual(CanvasTool.lasso.prompt(fingerDraws: false, hasSelection: true), "Drag the selection")
         XCTAssertEqual(CanvasTool.lasso.prompt(fingerDraws: false, hasSelection: false), "Loop ink or text to select")
         XCTAssertEqual(CanvasTool.pen.prompt(fingerDraws: false, hasSelection: true), "Draw with the Pencil")
     }

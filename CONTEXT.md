@@ -25,7 +25,7 @@ A stroke straightened into a line, a rectangle or a circle (or an ellipse): the 
 _Avoid_: shape recognition, auto-shape, perfect shape
 
 **Lasso**:
-The tool that selects by drawing a loop: it takes every stroke with at least half its points inside the loop and every text box whose centre is inside.
+The tool that selects by drawing a loop: it takes every stroke at least half inside the loop and every text box whose centre is inside.
 _Avoid_: marquee, selection tool, window (a window is a dragged rectangle)
 
 **Selection**:

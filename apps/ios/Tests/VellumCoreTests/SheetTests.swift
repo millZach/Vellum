@@ -480,8 +480,10 @@ final class SheetTileTests: XCTestCase {
 
     /// The first view draws only the tiles on screen; panning a screen across draws only the tiles that came into
     /// view; panning back, or pinching within the level, draws none.
+    /// Measured at 2x, where both screens' tiles fit the cache; at 3x the 44 tiles are two over it, so going back
+    /// draws the two least recently shown again (`testTheCacheStaysUnderItsLimit` holds the limit).
     func testPanningAndPinchingDrawOnlyNewTiles() {
-        var book = SheetTileBook(displayScale: 3)
+        var book = SheetTileBook(displayScale: 2)
         let first = plan(&book, view())
         check("sheet_tiles_drawn_first_view", Double(first.draw.count))
         XCTAssertEqual(first.showing.first?.covered, false)

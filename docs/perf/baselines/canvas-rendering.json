@@ -153,21 +153,21 @@
     {
       "metric": "point_snap_strokes_visited_per_tap",
       "kind": "count",
-      "value": 2000,
+      "value": 303,
       "before": 10000,
       "unit": "strokes",
       "tolerance": 0,
-      "measured": "feat/measure-frame 2026-11-02 placeholder, set from the first CI run",
+      "measured": "feat/measure-frame 2ac6670 2026-11-02 CI run 41399368174 (deterministic; checked by CI VellumCore tests)",
       "note": "A measure or dimension tap (#8) snapping to the nearest ink end, corner or circle centre within 20 screen points: strokes whose cached bounds the index compares, the worst of ten taps across the middle of the made-up 10,000-stroke canvas at the zoom that fits it all. Through InkIndex, never the whole canvas (before: every stroke). New with #8."
     },
     {
       "metric": "point_snap_points_inspected_per_tap",
       "kind": "count",
-      "value": 100000,
-      "before": 0,
+      "value": 9485,
+      "before": 794528,
       "unit": "points",
       "tolerance": 0,
-      "measured": "feat/measure-frame 2026-11-02 placeholder, set from the first CI run",
+      "measured": "feat/measure-frame 2ac6670 2026-11-02 CI run 41399368174 (deterministic; checked by CI VellumCore tests)",
       "note": "The same taps: points read from the strokes near the tip (each such stroke's points once, for its ends, corners and centre). Before: every point on the canvas. New with #8."
     },
     {

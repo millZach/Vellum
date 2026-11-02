@@ -326,7 +326,8 @@ final class MeasureFrameTests: XCTestCase {
             a.redo(); b.redo()
             XCTAssertEqual(a, b)
         }
-        XCTAssertEqual(a.dimensions, session.dimensions)
+        // Redoing everything takes the delete that was undone last again.
+        XCTAssertEqual(a.dimensions.map(\.id), [DimensionID(1), DimensionID(3)])
     }
 
     /// Placing a dimension or a frame is one undo step each; undo takes it away and redo puts it back the same. A

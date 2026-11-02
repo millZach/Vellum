@@ -65,7 +65,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             scribble?.isActive = tool == .textBox
             if oldValue == .textBox { textOverlay.finishEditing() }
             // A measure, a dimension half placed, a window: each belongs to its tool and goes when it is put down.
-            resetLengthsAndRegions(keepingMeasure: false)
+            // SwiftUI hands the tool over a moment after the editor took it, so state the new tool already started
+            // stays.
+            if let owner = regionTool, owner != tool { resetLengthsAndRegions(keepingMeasure: false) }
         }
     }
 
@@ -182,6 +184,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private var secondPoint: CanvasPoint?
     /// The window chosen, waiting for what to do with it.
     private var chosenWindow: CanvasRect?
+    /// The tool whose measure, points, dimension or window is showing; nil when none is.
+    private var regionTool: CanvasTool?
 
     /// What the Pencil is doing with the measure, dimension, frame or window tool while it is down.
     private enum RegionInput {
@@ -1130,6 +1134,8 @@ extension InkCanvasUIView {
 
     /// The Pencil touched down with the measure, dimension, frame or window tool.
     private func beginRegionInput(at location: CGPoint, point: CanvasPoint) {
+        if let owner = regionTool, owner != editor.tool { resetLengthsAndRegions(keepingMeasure: false) }
+        regionTool = editor.tool
         regionTip = location
         switch editor.tool {
         case .measure, .dimension:
@@ -1244,6 +1250,7 @@ extension InkCanvasUIView {
         }
         if editor.tool == .measure {
             resetLengthsAndRegions(keepingMeasure: false)
+            regionTool = .measure
             annotationOverlay.tool.measure = (first.point, target.point)
             announce("Measured \(editor.measureText(from: first.point, to: target.point))")
         } else {
@@ -1266,6 +1273,7 @@ extension InkCanvasUIView {
         var state = AnnotationOverlay.ToolState()
         if keepingMeasure { state.measure = annotationOverlay.tool.measure }
         annotationOverlay.tool = state
+        regionTool = state.measure == nil ? nil : .measure
         chosenWindow = nil
         windowMenu.isHidden = true
         if editor.toolStep != .start { editor.toolStep = .start }

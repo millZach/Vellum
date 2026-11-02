@@ -6,7 +6,7 @@ import XCTest
 final class SheetLabelTests: XCTestCase {
     private let detail = MadeUpSheets.detailSheet
     private lazy var reading = SheetReading.read(detail.texts, paper: detail.paper)
-    private let name = LabelSize(width: 38, height: 12)
+    private let nameText = LabelSize(width: 38, height: 12)
 
     private func scaleSize(_ scale: Sheet.Scale) -> LabelSize {
         switch scale.description {
@@ -21,7 +21,7 @@ final class SheetLabelTests: XCTestCase {
         reading.areas(placedAt: main).map { area in
             SheetLabelLayout.Area(rect: LabelRect(x: area.rect.minX * k, y: area.rect.minY * k,
                                                   width: area.rect.width.inches * k, height: area.rect.height.inches * k),
-                                  name: name, scale: scaleSize(area.scale))
+                                  name: nameText, scale: scaleSize(area.scale))
         }
     }
 
@@ -35,19 +35,19 @@ final class SheetLabelTests: XCTestCase {
 
     func testTwoLinesThenTheScaleAloneThenOnlyTheOutline() {
         let scale = LabelSize(width: 22, height: 12)
-        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 46, height: 28), name: name, scale: scale), .twoLines)
-        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 45.9, height: 28), name: name, scale: scale), .scaleAlone)
-        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 46, height: 27.9), name: name, scale: scale), .scaleAlone)
-        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 30, height: 16), name: name, scale: scale), .scaleAlone)
-        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 29.9, height: 16), name: name, scale: scale), .outlineOnly)
-        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 30, height: 15.9), name: name, scale: scale), .outlineOnly)
+        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 46, height: 28), name: nameText, scale: scale), .twoLines)
+        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 45.9, height: 28), name: nameText, scale: scale), .scaleAlone)
+        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 46, height: 27.9), name: nameText, scale: scale), .scaleAlone)
+        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 30, height: 16), name: nameText, scale: scale), .scaleAlone)
+        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 29.9, height: 16), name: nameText, scale: scale), .outlineOnly)
+        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 30, height: 15.9), name: nameText, scale: scale), .outlineOnly)
     }
 
     /// A scale wider than the name goes straight from two lines to the outline: part of it never shows.
     func testAWideScaleNeverFallsBackToPartOfItself() {
         let scale = LabelSize(width: 66, height: 12)
-        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 74, height: 100), name: name, scale: scale), .twoLines)
-        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 73, height: 100), name: name, scale: scale), .outlineOnly)
+        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 74, height: 100), name: nameText, scale: scale), .twoLines)
+        XCTAssertEqual(SheetLabelLayout.fit(area: LabelSize(width: 73, height: 100), name: nameText, scale: scale), .outlineOnly)
     }
 
     func testTheD501AtTheZoomsWhereEachApplies() {
@@ -106,7 +106,7 @@ final class SheetLabelTests: XCTestCase {
 
     /// A scale area starting in the sheet's corner: its label drops below the sheet's name, and they never overlap.
     func testAnAreaInTheSheetsCornerGoesBelowTheSheetsName() {
-        let area = SheetLabelLayout.Area(rect: LabelRect(x: 0, y: 0, width: 200, height: 100), name: name,
+        let area = SheetLabelLayout.Area(rect: LabelRect(x: 0, y: 0, width: 200, height: 100), name: nameText,
                                          scale: LabelSize(width: 66, height: 12))
         let laid = SheetLabelLayout.lay(sheet: LabelRect(x: 0, y: 0, width: 400, height: 300),
                                         sheetName: LabelSize(width: 100, height: 17), areas: [area])
@@ -118,7 +118,7 @@ final class SheetLabelTests: XCTestCase {
     /// With only room for one line under the name, the scale alone; with none, the outline.
     func testAnAreaUnderTheSheetsNameFallsBackWhenTheRoomRunsOut() {
         func fit(height: Double) -> ScaleAreaLabelFit {
-            let area = SheetLabelLayout.Area(rect: LabelRect(x: 0, y: 0, width: 200, height: height), name: name,
+            let area = SheetLabelLayout.Area(rect: LabelRect(x: 0, y: 0, width: 200, height: height), name: nameText,
                                              scale: LabelSize(width: 66, height: 12))
             return SheetLabelLayout.lay(sheet: LabelRect(x: 0, y: 0, width: 400, height: 300),
                                         sheetName: LabelSize(width: 100, height: 17), areas: [area]).areas[0].fit
@@ -131,8 +131,8 @@ final class SheetLabelTests: XCTestCase {
     func testOneAreasLabelNeverCoversAnothers() {
         let wide = LabelSize(width: 66, height: 12)
         let overlapping = [
-            SheetLabelLayout.Area(rect: LabelRect(x: 0, y: 0, width: 200, height: 100), name: name, scale: wide),
-            SheetLabelLayout.Area(rect: LabelRect(x: 10, y: 5, width: 200, height: 100), name: name, scale: wide),
+            SheetLabelLayout.Area(rect: LabelRect(x: 0, y: 0, width: 200, height: 100), name: nameText, scale: wide),
+            SheetLabelLayout.Area(rect: LabelRect(x: 10, y: 5, width: 200, height: 100), name: nameText, scale: wide),
         ]
         let laid = SheetLabelLayout.lay(sheet: LabelRect(x: 0, y: 0, width: 400, height: 300), sheetName: nil, areas: overlapping)
         XCTAssertFalse(laid.areas[0].box!.intersects(laid.areas[1].box!))

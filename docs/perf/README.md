@@ -17,7 +17,7 @@ One JSON file per area, so work on different areas never conflicts:
 | Saving ink on the Duo | `baselines/storage.json` | #9 |
 | Dropbox | `baselines/dropbox.json` | #20, #10 |
 | Placed sheets: tiles drawn and kept, PDF downloads | `baselines/sheets.json` | #11 |
-| Syncing canvases to Dropbox: requests and bytes per sync, leaving a canvas | `baselines/sync.json` | #12 |
+| Syncing canvases to Dropbox: requests and bytes per sync, the folder check and re-upload after a deleted folder, leaving a canvas | `baselines/sync.json` | #12, #37 |
 
 Later areas (`jobs`) add their own file the same way. The pan, pinch and draw frame times over a placed sheet are timings in `canvas-rendering.json` (`sheet_pan_*`, `sheet_pinch_*`, `sheet_draw_*`), since the same benchmark records them.
 

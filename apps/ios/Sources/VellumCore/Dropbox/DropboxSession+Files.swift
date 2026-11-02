@@ -25,8 +25,31 @@ public enum DropboxPathResult: Sendable, Hashable {
     case notFound
 }
 
-/// The three calls syncing a canvas needs (#12, ADR-0013's amendment): upload a file, move a folder, delete one. Each
-/// is one request, renewed on a 401 as every call is, and signing out wins every race as it does for listing.
+/// One entry of a recursive listing or of what changed since one (#37), its path lower-cased as Dropbox gives it.
+public struct DropboxTreeEntry: Sendable, Hashable {
+    public enum Kind: Sendable, Hashable {
+        case file, folder
+        /// Something used to be at the path and is gone; for a folder, everything in it went too.
+        case deleted
+    }
+
+    public var path: String
+    public var kind: Kind
+
+    public init(path: String, kind: Kind) {
+        self.path = path
+        self.kind = kind
+    }
+}
+
+/// A recursive listing, or what changed since an earlier one, and the cursor to ask from next time.
+public struct DropboxTree: Sendable, Hashable {
+    public var entries: [DropboxTreeEntry]
+    public var cursor: String
+}
+
+/// The calls syncing a canvas needs (#12, ADR-0013's amendments): upload a file, move a folder, delete one, and (#37)
+/// list `Vellum/` or what changed in it. Each is one request (a listing follows Dropbox's paging), renewed on a 401 as every call is, and signing out wins every race as it does for listing.
 extension DropboxSession {
     /// Writes `bytes` to `path` in one request (`files/upload`, up to 150 MB, far more than any canvas file).
     public func upload(_ bytes: Data, to path: String, mode: DropboxWriteMode) async throws(DropboxError)
@@ -39,8 +62,13 @@ extension DropboxSession {
         case .overwrite: modeArgument = "overwrite"
         case .update(let rev): modeArgument = [".tag": "update", "update": rev]
         }
+        // `strict_conflict` with `update`: without it Dropbox writes a file that has been removed (WriteMode: "if
+        // the target path doesn't refer to anything, the file is always written"), so a `canvas.json` deleted on the
+        // laptop would come back alone instead of being noticed (#37).
+        var strict = false
+        if case .update = mode { strict = true }
         guard let header = Self.apiArgument(["path": path, "mode": modeArgument, "autorename": false, "mute": true,
-                                             "strict_conflict": false]) else { throw .unexpectedReply }
+                                             "strict_conflict": strict]) else { throw .unexpectedReply }
         let response = try await authorized(started: started, acceptingConflict: true) { tokens in
             DropboxHTTPRequest(url: DropboxEndpoint.upload, headers: [
                 "Authorization": "Bearer \(tokens.accessToken)",
@@ -83,6 +111,86 @@ extension DropboxSession {
             return .notFound
         }
         return .done
+    }
+
+    /// Every file and folder under `path` at any depth (`files/list_folder`, recursive, following its paging), and
+    /// the cursor that asks later for what changed since; nil when nothing is at `path` (#37).
+    public func tree(under path: String) async throws(DropboxError) -> DropboxTree? {
+        let started = generation
+        guard isSignedIn else { throw .notSignedIn }
+        let first = try await authorizedJSON(DropboxEndpoint.listFolder, [
+            "path": path, "recursive": true, "include_deleted": false,
+        ], started: started, acceptingConflict: true)
+        if first.status == 409 {
+            guard Self.summary(first).contains("not_found") else { throw .unexpectedReply }
+            return nil
+        }
+        var page = try Self.treePage(first)
+        var entries = page.entries
+        while page.hasMore {
+            guard let next = try await treePage(after: page.cursor, started: started) else { throw .unexpectedReply }
+            page = next
+            entries += page.entries
+        }
+        return DropboxTree(entries: entries, cursor: page.cursor)
+    }
+
+    /// What changed under the listed folder since `cursor` (`files/list_folder/continue`, following its paging), in
+    /// Dropbox's order, deletions included; nil when Dropbox can't say (the cursor was reset, or the folder is gone),
+    /// so the folder has to be listed again (#37).
+    public func treeChanges(since cursor: String) async throws(DropboxError) -> DropboxTree? {
+        let started = generation
+        guard isSignedIn else { throw .notSignedIn }
+        var entries: [DropboxTreeEntry] = []
+        var cursor = cursor
+        while true {
+            guard let page = try await treePage(after: cursor, started: started) else { return nil }
+            entries += page.entries
+            cursor = page.cursor
+            if !page.hasMore { return DropboxTree(entries: entries, cursor: cursor) }
+        }
+    }
+
+    private struct TreePage {
+        var entries: [DropboxTreeEntry]
+        var cursor: String
+        var hasMore: Bool
+    }
+
+    private func treePage(after cursor: String, started: Int) async throws(DropboxError) -> TreePage? {
+        let response = try await authorizedJSON(DropboxEndpoint.listFolderContinue, ["cursor": cursor],
+                                                started: started, acceptingConflict: true)
+        if response.status == 409 {
+            let summary = Self.summary(response)
+            guard summary.contains("reset") || summary.contains("not_found") else { throw .unexpectedReply }
+            return nil
+        }
+        return try Self.treePage(response)
+    }
+
+    private static func treePage(_ response: DropboxHTTPResponse) throws(DropboxError) -> TreePage {
+        struct Reply: Decodable {
+            struct Entry: Decodable {
+                let tag: String
+                let name: String
+                let path_lower: String?
+                enum CodingKeys: String, CodingKey { case tag = ".tag", name, path_lower }
+            }
+            let entries: [Entry]
+            let cursor: String
+            let has_more: Bool
+        }
+        guard let reply = try? JSONDecoder().decode(Reply.self, from: response.body) else { throw .unexpectedReply }
+        let entries = reply.entries.compactMap { entry -> DropboxTreeEntry? in
+            guard let path = entry.path_lower else { return nil }
+            switch entry.tag {
+            case "file": return DropboxTreeEntry(path: path, kind: .file)
+            case "folder": return DropboxTreeEntry(path: path, kind: .folder)
+            case "deleted": return DropboxTreeEntry(path: path, kind: .deleted)
+            default: return nil
+            }
+        }
+        return TreePage(entries: entries, cursor: reply.cursor, hasMore: reply.has_more)
     }
 
     private static func summary(_ response: DropboxHTTPResponse) -> String {

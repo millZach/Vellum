@@ -94,6 +94,9 @@ public struct SyncReport: Hashable, Sendable {
 /// - **The Duo is the only writer**, so a file Dropbox holds that isn't the one the Duo last wrote (changed or removed
 ///   on the laptop) is replaced: the whole canvas goes up again, Dropbox keeps the replaced version in its history, and
 ///   the ledger notes it (`CanvasSyncRecord.replaced`).
+/// - **A folder deleted on the laptop** (or a file deleted from one) is found by one folder check (`SyncFolderCheck`)
+///   when the engine starts, when the connection returns and when the app comes back to the foreground, made by
+///   the next sync with something to upload; the canvas is then uploaded whole, as for a changed file. A sync between checks asks nothing more.
 ///
 /// Sync only ever reads the canvas's files: a failed or half-done sync changes nothing on the Duo, and every step
 /// leaves Dropbox's copy whole.
@@ -124,6 +127,8 @@ public actor CanvasSync {
     private var failed: Set<UUID> = []
     private var lastFailureWasOffline = false
     private var failures = 0
+    /// Whether the folder check is due before the next upload.
+    private var folderCheckDue = false
     private var draining: Task<Void, Never>?
     private var retry: Task<Void, Never>?
     /// The delays the engine has waited before retrying, for the tests.
@@ -152,6 +157,7 @@ public actor CanvasSync {
         guard let session else { return publish() }
         signedOut = !(await session.isSignedIn)
         if signedOut { forgetUploads() }
+        folderCheckDue = true
         for entry in source.canvasesOnDuo() where ledger[entry.id] == nil { queue(entry.id, entry: entry) }
         persist()
         publish()
@@ -202,6 +208,7 @@ public actor CanvasSync {
         guard isOnline != online else { return }
         online = isOnline
         if isOnline {
+            folderCheckDue = true
             failures = 0
             lastFailureWasOffline = false
             retry?.cancel()
@@ -214,7 +221,7 @@ public actor CanvasSync {
     /// The app went to the background (or came back): in the background the canvas on screen uploads too.
     public func setInBackground(_ background: Bool) {
         inBackground = background
-        if background { kick() }
+        if background { kick() } else { folderCheckDue = true }
     }
 
     /// Retry: try the outbox now rather than after the wait.
@@ -298,6 +305,7 @@ public actor CanvasSync {
             record.replaceAll = true
             ledger.canvases[key] = record
         }
+        ledger.dropboxCursor = nil
     }
 
     private func persist() {
@@ -403,6 +411,50 @@ public actor CanvasSync {
         }
     }
 
+    /// Asks Dropbox once whether any canvas folder is missing something the ledger says it holds (`SyncFolderCheck`),
+    /// and queues each such canvas to upload whole. Nothing is asked when no canvas has anything uploaded.
+    private func checkFolders(_ session: DropboxSession) async throws {
+        let records = SyncFolderCheck.checked(ledger)
+        guard !records.isEmpty else {
+            folderCheckDue = false
+            return
+        }
+        let incomplete: Set<UUID>
+        let cursor: String?
+        do {
+            if let kept = ledger.dropboxCursor, let changes = try await session.treeChanges(since: kept) {
+                incomplete = SyncFolderCheck.incomplete(afterChanges: changes.entries, records)
+                cursor = changes.cursor
+            } else if let tree = try await session.tree(under: SyncPaths.root) {
+                incomplete = SyncFolderCheck.incomplete(inTree: tree.entries, records)
+                cursor = tree.cursor
+            } else {
+                // No `Vellum/` at all.
+                incomplete = Set(records.keys)
+                cursor = nil
+            }
+        } catch DropboxError.unexpectedReply {
+            // A reply this Vellum can't read never holds up the uploads: they go as before, and the check is tried
+            // again next time it is due.
+            folderCheckDue = false
+            return
+        } catch let error as DropboxError {
+            throw Self.failure(error)
+        }
+        folderCheckDue = false
+        for id in incomplete {
+            guard var record = ledger[id], record.folder == records[id]?.folder, !record.replaceAll else { continue }
+            record.replaced.append(SyncReplacement(file: SyncFolderCheck.folderMissing, at: now()))
+            record.replaceAll = true
+            record.pending = true
+            record.queued += 1
+            ledger[id] = record
+        }
+        ledger.dropboxCursor = cursor
+        persist()
+        publish()
+    }
+
     private func sync(_ id: UUID, _ session: DropboxSession) async throws {
         for _ in 0..<2 {
             do {
@@ -433,7 +485,13 @@ public actor CanvasSync {
         } catch {
             throw SyncFailure.failed
         }
-        for step in SyncPlan.steps(for: capture, record: record) {
+        let steps = SyncPlan.steps(for: capture, record: record)
+        // Only a sync with something to upload pays for the check: leaving a canvas unchanged still asks nothing.
+        if folderCheckDue, !steps.isEmpty {
+            try await checkFolders(session)
+            if ledger[id]?.replaceAll == true, !record.replaceAll { throw SyncFailure.restart }
+        }
+        for step in steps {
             guard ledger[id] != nil else { return }  // deleted meanwhile; the delete moves what is there
             try await perform(step, capture, id, session)
             persist()

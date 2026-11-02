@@ -476,6 +476,264 @@ final class SyncTests: XCTestCase {
         for (metric, value) in timings.sorted(by: { $0.key < $1.key }) { SyncBudget.time(metric, value, unit: "µs") }
         XCTAssertEqual(reports.state(id), .synced, "and every round synced once it was left")
     }
+
+    // MARK: A folder deleted on the laptop (#37)
+
+    /// A made-up sheet's PDF kept on a canvas.
+    private func keepSheet(on id: UUID, named name: String) throws -> [UInt8] {
+        let pdf = root.appendingPathComponent("\(name).pdf")
+        try Data("%PDF-1.7 made-up sheet \(name) for the test".utf8).write(to: pdf)
+        try library.keepSheetPDF(from: pdf, named: name, in: id)
+        return [UInt8](try Data(contentsOf: pdf))
+    }
+
+    /// The app goes to the background and comes back, as it does when Zach switches to the laptop and back.
+    private func backAndForth(_ sync: CanvasSync) async {
+        await sync.setInBackground(true)
+        await sync.settled()
+        await sync.setInBackground(false)
+    }
+
+    /// The whole canvas on the Duo, in bytes: what a re-upload sends.
+    private func wholeCanvasBytes(_ id: UUID) throws -> Int {
+        var total = try XCTUnwrap(duoFile(id, CanvasManifest.fileName)).count + XCTUnwrap(duoFile(id, InkStore.logName)).count
+        total += try duoFile(id, InkStore.snapshotName)?.count ?? 0
+        let sheets = library.folder(for: id).appendingPathComponent(CanvasLibrary.sheetsFolderName)
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: sheets.path)) ?? [] where name.hasSuffix(".pdf") {
+            total += try Data(contentsOf: sheets.appendingPathComponent(name)).count
+        }
+        return total
+    }
+
+    func testAFolderDeletedOnTheLaptopIsUploadedWholeThenOnlyTheTail() async throws {
+        let id = try library.create(name: "Deleted on the laptop").id
+        let sheet = try keepSheet(on: id, named: "madeupdeleted01")
+        try await draw(0..<12, on: id)
+        let (sync, _) = engine()
+        await sync.start()
+        await sync.settled()
+        let name = await self.folder(sync, id)
+        let folder = SyncPaths.folder(name)
+
+        // Zach deletes the folder on the laptop, comes back to the Duo and draws.
+        await sync.setInBackground(true)
+        await sync.settled()
+        dropbox.removeOnTheLaptop(folder)
+        XCTAssertEqual(dropbox.files(in: folder), [:])
+        await sync.setInBackground(false)
+        try await draw(12..<20, on: id)
+        dropbox.resetCounts()
+        await sync.canvasLeft(id)
+        await sync.settled()
+        XCTAssertEqual(dropbox.requests, ["list /Vellum",
+                                          "upload \(folder)/sheets/madeupdeleted01.pdf",
+                                          "upload \(folder)/canvas.json",
+                                          "upload \(folder)/ink.log.parts/0/000000000000.part"],
+                       "one folder check, then the whole canvas once")
+        SyncBudget.check("requests-sync-after-folder-deleted", dropbox.requests.count)
+        let whole = try wholeCanvasBytes(id)
+        SyncBudget.check("bytes-beyond-whole-canvas-after-folder-deleted", dropbox.bytesUploaded - whole)
+        try await assertDropboxRebuildsTheDuosCanvas(sync, id)
+        XCTAssertEqual(try SyncedCanvasFolder.rebuild(dropbox.files(in: folder)).sheets, ["madeupdeleted01": sheet],
+                       "the sheet's PDF is back, byte for byte")
+        let replaced = await sync.ledgerNow[id]?.replaced.map(\.file)
+        XCTAssertEqual(replaced, [SyncFolderCheck.folderMissing], "noted")
+        XCTAssertEqual(reports.state(id), .synced)
+
+        // Back to the deltas: the next sync is the log's tail alone, and asks nothing more.
+        let before = try XCTUnwrap(duoFile(id, InkStore.logName)).count
+        try await draw(20..<30, on: id)
+        let after = try XCTUnwrap(duoFile(id, InkStore.logName)).count
+        dropbox.resetCounts()
+        await sync.canvasLeft(id)
+        await sync.settled()
+        XCTAssertEqual(dropbox.requests, ["upload \(folder)/\(SyncPlan.logPartFile(generation: 0, offset: before))"])
+        SyncBudget.check("requests-after-reupload", dropbox.requests.count)
+        SyncBudget.check("requests-after-new-strokes", dropbox.requests.count)
+        SyncBudget.check("bytes-beyond-log-tail-after-new-strokes", dropbox.bytesUploaded - (after - before))
+        try await assertDropboxRebuildsTheDuosCanvas(sync, id)
+    }
+
+    func testTheFolderCheckAsksOnlyWhatChangedAndANormalSyncAsksNothingMore() async throws {
+        let kept = try library.create(name: "Kept on the laptop").id
+        let other = try library.create(name: "Its canvas.json deleted").id
+        try await draw(0..<6, on: kept)
+        try await draw(0..<6, on: other)
+        dropbox.pageSize = 2  // so every listing pages
+        let (sync, _) = engine()
+        await sync.start()
+        await sync.settled()
+        let keptFolder = SyncPaths.folder(await self.folder(sync, kept))
+        let otherFolder = SyncPaths.folder(await self.folder(sync, other))
+
+        // The first check lists Vellum/ once, pages and all; nothing is missing, so only the new tail goes.
+        await backAndForth(sync)
+        try await draw(6..<8, on: kept)
+        dropbox.resetCounts()
+        await sync.canvasLeft(kept)
+        await sync.settled()
+        XCTAssertEqual(dropbox.requests.filter { !$0.hasPrefix("list") }.count, 1)
+        XCTAssertEqual(dropbox.requests.first, "list /Vellum")
+        let cursor = await sync.ledgerNow.dropboxCursor
+        XCTAssertNotNil(cursor, "the cursor is kept for next time")
+        dropbox.pageSize = 2000
+
+        // A normal sync between checks makes no extra request, and a check with nothing to upload asks nothing.
+        try await draw(8..<10, on: kept)
+        dropbox.resetCounts()
+        await sync.canvasLeft(kept)
+        await sync.settled()
+        XCTAssertEqual(dropbox.requests.count, 1)
+        XCTAssertFalse(dropbox.requests.contains { $0.hasPrefix("list") })
+        await backAndForth(sync)
+        await sync.settled()
+        XCTAssertEqual(dropbox.requests.count, 1, "back in the foreground with nothing to upload: nothing asked")
+        await sync.canvasLeft(kept)
+        await sync.settled()
+        XCTAssertEqual(dropbox.requests.count, 1, "leaving a canvas unchanged with the check due: still nothing asked")
+
+        // The laptop deletes one canvas's canvas.json. The next check asks only what changed since, and that canvas
+        // goes up whole while the one Zach drew on sends its tail.
+        dropbox.removeOnTheLaptop("\(otherFolder)/canvas.json")
+        try await draw(10..<12, on: kept)
+        dropbox.resetCounts()
+        await sync.canvasLeft(kept)
+        await sync.settled()
+        XCTAssertEqual(dropbox.requests.filter { $0.hasPrefix("list") }, ["list/continue"],
+                       "only what changed since the last check")
+        SyncBudget.check("requests-folder-check", dropbox.requests.filter { $0.hasPrefix("list") }.count)
+        XCTAssertEqual(dropbox.requests.filter { $0.hasPrefix("upload \(keptFolder)/") }.count, 1)
+        XCTAssertTrue(dropbox.requests.contains("upload \(otherFolder)/canvas.json"))
+        try await assertDropboxRebuildsTheDuosCanvas(sync, kept)
+        try await assertDropboxRebuildsTheDuosCanvas(sync, other)
+
+        // A cursor Dropbox has reset: the folder is listed again.
+        dropbox.resetCursors()
+        await backAndForth(sync)
+        try await draw(12..<14, on: kept)
+        dropbox.resetCounts()
+        await sync.canvasLeft(kept)
+        await sync.settled()
+        XCTAssertEqual(dropbox.requests.filter { $0.hasPrefix("list") }.prefix(2), ["list/continue", "list /Vellum"])
+        XCTAssertEqual(dropbox.requests.filter { !$0.hasPrefix("list") }.count, 1)
+        try await assertDropboxRebuildsTheDuosCanvas(sync, kept)
+    }
+
+    func testAFolderDeletedMidSyncEndsWhole() async throws {
+        let id = try library.create(name: "Deleted mid-sync").id
+        _ = try keepSheet(on: id, named: "madeupmidsync01")
+        try await draw(0..<6, on: id)
+        let (sync, _) = engine()
+        await sync.start()
+        await sync.settled()
+        let folder = SyncPaths.folder(await self.folder(sync, id))
+        await backAndForth(sync)
+        try await draw(6..<8, on: id)
+        await sync.canvasLeft(id)
+        await sync.settled()
+
+        // A rename and new strokes: canvas.json, then the tail. The laptop deletes the folder between the two, so the
+        // tail makes a folder holding only itself.
+        _ = try library.rename(id, to: "Renamed mid-sync")
+        try await draw(8..<12, on: id)
+        dropbox.removeOnTheLaptop(folder, afterRequests: 1)
+        await sync.canvasLeft(id)
+        await sync.settled()
+        XCTAssertNil(dropbox.files(in: folder)["canvas.json"], "the laptop's copy is incomplete for now")
+
+        // The next check finds it and the whole canvas goes up.
+        await backAndForth(sync)
+        try await draw(12..<14, on: id)
+        await sync.canvasLeft(id)
+        await sync.settled()
+        try await assertDropboxRebuildsTheDuosCanvas(sync, id)
+        XCTAssertEqual(try SyncedCanvasFolder.rebuild(dropbox.files(in: folder)).sheets.keys.sorted(), ["madeupmidsync01"])
+    }
+
+    func testAFolderDeletedWhileOfflineEndsWholeWhenTheConnectionReturns() async throws {
+        let id = try library.create(name: "Deleted while offline").id
+        try await draw(0..<6, on: id)
+        let ledgerFile = SyncLedgerFile(url: root.appendingPathComponent("Sync/ledger.json"))
+        let (sync, _) = engine(ledger: ledgerFile)
+        await sync.start()
+        await sync.settled()
+        let folder = SyncPaths.folder(await self.folder(sync, id))
+
+        dropbox.offline = true
+        await sync.setOnline(false)
+        dropbox.removeOnTheLaptop(folder)
+        try await draw(6..<10, on: id)
+        await sync.canvasLeft(id)
+        await sync.settled()
+        XCTAssertEqual(reports.state(id), .waitingForConnection)
+        let logBefore = try duoFile(id, InkStore.logName)
+
+        dropbox.offline = false
+        await sync.setOnline(true)
+        await sync.settled()
+        XCTAssertEqual(reports.state(id), .synced)
+        try await assertDropboxRebuildsTheDuosCanvas(sync, id)
+        XCTAssertEqual(try duoFile(id, InkStore.logName), logBefore, "sync never changes the canvas's files on the Duo")
+
+        // And across a relaunch: the folder deleted while the app was gone is found when it starts.
+        dropbox.removeOnTheLaptop(folder)
+        savers = CanvasSavers(library: library, clock: VirtualClock())
+        let (relaunched, _) = engine(ledger: ledgerFile)
+        await relaunched.start()
+        try await draw(10..<12, on: id)
+        await relaunched.canvasLeft(id)
+        await relaunched.settled()
+        try await assertDropboxRebuildsTheDuosCanvas(relaunched, id)
+    }
+
+    func testACanvasJSONRemovedOnTheLaptopIsAConflictNotWrittenAlone() async throws {
+        let id = try library.create(name: "Only canvas.json removed").id
+        try await draw(0..<4, on: id)
+        let (sync, _) = engine()
+        await sync.start()
+        await sync.settled()
+        let folder = SyncPaths.folder(await self.folder(sync, id))
+        dropbox.removeOnTheLaptop("\(folder)/canvas.json")
+        dropbox.removeOnTheLaptop("\(folder)/ink.log.parts")
+        _ = try library.rename(id, to: "Renamed after the laptop removed it")
+        await sync.canvasChanged(id)
+        await sync.settled()
+        let replaced = await sync.ledgerNow[id]?.replaced.map(\.file)
+        XCTAssertEqual(replaced, ["canvas.json"], "update with strict_conflict: a removed file is a conflict")
+        try await assertDropboxRebuildsTheDuosCanvas(sync, id)
+    }
+
+    func testTheCheckIgnoresTheDuosOwnDeletesAndFindsAMissingPart() {
+        var record = CanvasSyncRecord(folder: "Check 0000")
+        record.uploaded = SyncedPosition(snapshotGeneration: 2, logGeneration: 2, logOffset: 400,
+                                         manifestDigest: "d", sheets: ["s1"])
+        let id = UUID()
+        let base = "/vellum/check 0000"
+        let records = [id: record]
+        let full: [DropboxTreeEntry] = ["canvas.json", "ink.snapshot", "sheets/s1.pdf", "ink.log.parts/2/000000000000.part",
+                                        "ink.log.parts/2/000000000200.part"].map { .init(path: "\(base)/\($0)", kind: .file) }
+        XCTAssertEqual(SyncFolderCheck.incomplete(inTree: full, records), [])
+        XCTAssertEqual(SyncFolderCheck.incomplete(inTree: Array(full.dropFirst()), records), [id])
+        XCTAssertEqual(SyncFolderCheck.incomplete(inTree: [], records), [id])
+
+        // The Duo's own compaction deletes the replaced generation: not missing.
+        let ownDelete = [DropboxTreeEntry(path: "\(base)/ink.log.parts/1", kind: .deleted),
+                         DropboxTreeEntry(path: "\(base)/ink.log.parts/2/000000000400.part", kind: .file)]
+        XCTAssertEqual(SyncFolderCheck.incomplete(afterChanges: ownDelete, records), [])
+        // A canvas whose name starts the same is another folder.
+        XCTAssertEqual(SyncFolderCheck.incomplete(afterChanges: [.init(path: "\(base)0", kind: .deleted)], records), [])
+        // A part of the current generation deleted: the log can't be joined.
+        XCTAssertEqual(SyncFolderCheck.incomplete(afterChanges: [.init(path: "\(base)/ink.log.parts/2/000000000200.part",
+                                                                        kind: .deleted)], records), [id])
+        // A folder deleted, then a file written into it again: everything else in it is still gone.
+        XCTAssertEqual(SyncFolderCheck.incomplete(afterChanges: [.init(path: base, kind: .deleted),
+                                                                 .init(path: "\(base)/canvas.json", kind: .file)], records),
+                       [id])
+        // A file deleted and written again: there.
+        XCTAssertEqual(SyncFolderCheck.incomplete(afterChanges: [.init(path: "\(base)/sheets/s1.pdf", kind: .deleted),
+                                                                 .init(path: "\(base)/sheets/s1.pdf", kind: .file)], records),
+                       [])
+    }
 }
 
 // MARK: - Wording

@@ -93,14 +93,12 @@ actor SheetPDFReader {
         return drew ? pixels : []
     }
 
-    /// The page's text in lines, each with where it is on the paper. Each character and its box are read by PDFKit's
-    /// own character index (`numberOfCharacters`, a one-character selection, `characterBounds(at:)`), so they always
-    /// belong together (`page.string`'s indices can drift from the boxes'). Characters are joined while they sit on
-    /// one line with no wide gap, so two labels side by side stay two lines, the way they read on the sheet. A page
-    /// with more than `characterLimit` characters is read by PDFKit's own lines instead, which is quicker.
+    /// The page's text in lines, each with where it is on the paper. PDFKit's own lines are used, since a selection's
+    /// text and bounds always belong together (character indices can drift from character boxes where PDFKit adds
+    /// spaces and line breaks). A line wider than its text accounts for may be labels set side by side on one row, so
+    /// it is split at the gaps where a narrow strip of it selects no text.
     static func lines(of page: PDFPage, paper: PaperSize) -> [PageText] {
-        let count = page.numberOfCharacters
-        guard count > 0 else { return [] }
+        guard page.numberOfCharacters > 0 else { return [] }
         let toDisplay = page.pageRef?.getDrawingTransform(.cropBox, rect: CGRect(x: 0, y: 0,
                                                                                 width: paper.width.inches * 72,
                                                                                 height: paper.height.inches * 72),
@@ -110,50 +108,55 @@ actor SheetPDFReader {
             .inches(x: Double(rect.minX) / 72, y: height - Double(rect.maxY) / 72, width: Double(rect.width) / 72,
                     height: Double(rect.height) / 72)
         }
-        if count > characterLimit {
-            let lines = page.selection(for: page.bounds(for: .cropBox))?.selectionsByLine() ?? []
-            return lines.compactMap { line in
-                guard let text = line.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-                    return nil
+        func text(_ selection: PDFSelection?) -> String? {
+            guard let string = selection?.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !string.isEmpty else { return nil }
+            return string
+        }
+        var out: [PageText] = []
+        for line in page.selection(for: page.bounds(for: .cropBox))?.selectionsByLine() ?? [] {
+            guard let string = text(line) else { continue }
+            let bounds = line.bounds(for: page)
+            let h = max(bounds.height, 1)
+            // About 0.7 of the height a character, generously: wider than that holds gaps worth looking for.
+            guard bounds.width > CGFloat(string.count) * h * 0.9 + 2 * h else {
+                out.append(PageText(string, paperRect(bounds.applying(toDisplay))))
+                continue
+            }
+            let step = h * 0.5
+            var runs: [(CGFloat, CGFloat)] = []
+            var start: CGFloat?, emptyFrom: CGFloat?
+            var x = bounds.minX
+            while x < bounds.maxX {
+                let strip = CGRect(x: x, y: bounds.minY + h * 0.2, width: step, height: h * 0.6)
+                let filled = text(page.selection(for: strip)) != nil
+                if filled {
+                    if start == nil { start = x }
+                    emptyFrom = nil
+                } else if let begun = start {
+                    if emptyFrom == nil { emptyFrom = x }
+                    // A gap of more than a character and a half ends the run.
+                    if let from = emptyFrom, x + step - from > h * 1.5 {
+                        runs.append((begun, from))
+                        start = nil
+                        emptyFrom = nil
+                    }
                 }
-                return PageText(text, paperRect(line.bounds(for: page).applying(toDisplay)))
+                x += step
             }
-        }
-        var lines: [PageText] = []
-        var current = ""
-        var rect = CGRect.null
-        func flush() {
-            let trimmed = current.trimmingCharacters(in: .whitespaces)
-            if !trimmed.isEmpty, !rect.isNull { lines.append(PageText(trimmed, paperRect(rect))) }
-            current = ""
-            rect = .null
-        }
-        for i in 0..<count {
-            let character = page.selection(for: NSRange(location: i, length: 1))?.string ?? ""
-            if character.contains(where: \.isNewline) {
-                flush()
+            if let begun = start { runs.append((begun, emptyFrom ?? bounds.maxX)) }
+            if runs.count <= 1 {
+                out.append(PageText(string, paperRect(bounds.applying(toDisplay))))
                 continue
             }
-            let box = page.characterBounds(at: i).applying(toDisplay)
-            if character.allSatisfy(\.isWhitespace) || box.width <= 0 || box.height <= 0 {
-                if !current.isEmpty { current += " " }
-                continue
+            for (from, to) in runs {
+                let piece = page.selection(for: CGRect(x: from, y: bounds.minY, width: to - from, height: bounds.height))
+                guard let pieceText = text(piece), let pieceBounds = piece?.bounds(for: page) else { continue }
+                out.append(PageText(pieceText, paperRect(pieceBounds.applying(toDisplay))))
             }
-            if !rect.isNull {
-                let size = max(rect.height, box.height)
-                let sameLine = abs(box.midY - rect.midY) < size * 0.5
-                let gap = box.minX - rect.maxX
-                if !sameLine || gap > size * 1.5 || gap < -size { flush() }
-            }
-            current += character
-            rect = rect.isNull ? box : rect.union(box)
         }
-        flush()
-        return lines
+        return out
     }
-
-    /// Past this many characters a page is read by PDFKit's lines rather than character by character.
-    static let characterLimit = 20_000
 }
 
 /// A page's thumbnail handed back from the reader.

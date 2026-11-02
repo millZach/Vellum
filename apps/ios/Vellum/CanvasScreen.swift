@@ -181,7 +181,7 @@ private struct WeightPicker: View {
 
 // MARK: - Top bar
 
-/// Back to the Canvases list, the canvas's name, its units, light or dark, and undo and redo. A long press on the
+/// Back to the Canvases list, the canvas's name, its units, light or dark, undo and redo, and Settings. A long press on the
 /// name offers the made-up test canvas (`TestCanvas`).
 private struct TopBar: View {
     @Bindable var editor: CanvasEditor
@@ -189,6 +189,9 @@ private struct TopBar: View {
     @AppStorage(AppearanceSetting.storageKey) private var appearance = AppearanceSetting.default.rawValue
     @Environment(\.testCanvas) private var testCanvas
     @State private var offersTestCanvas = false
+    /// The Settings sheet the Drawings tab's gear opens too (#28). Debug builds accept `--ui-canvas-settings` to open
+    /// with it up, for the captures.
+    @State private var showsSettings = TopBar.launchesWithSettings
 
     var body: some View {
         HStack(spacing: 10) {
@@ -250,6 +253,14 @@ private struct TopBar: View {
             }
             .disabled(!editor.canRedo)
             .accessibilityLabel("Redo")
+            Button {
+                showsSettings = true
+            } label: {
+                Image(systemName: "gearshape").font(.system(size: 17)).frame(width: 30, height: 30)
+            }
+            .accessibilityLabel("Settings")
+            .accessibilityHint("Draw with finger and Dropbox")
+            .sheet(isPresented: $showsSettings) { SettingsSheet(dropbox: .app) }
         }
         .buttonStyle(.plain)
         .foregroundStyle(Chrome.text)
@@ -257,6 +268,14 @@ private struct TopBar: View {
         .padding(.horizontal, 12)
         .frame(height: 40)
         .chromePanel(cornerRadius: 12)
+    }
+
+    private static var launchesWithSettings: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--ui-canvas-settings")
+        #else
+        false
+        #endif
     }
 }
 

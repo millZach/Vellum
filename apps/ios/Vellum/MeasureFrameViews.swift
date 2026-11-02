@@ -134,6 +134,7 @@ final class WindowMenu: UIView {
     private let zoomAction: @MainActor () -> Void
     private let frameAction: @MainActor () -> Void
     private let closeAction: @MainActor () -> Void
+    private let stack = UIStackView()
 
     init(zoom: @escaping @MainActor () -> Void, makeFrame: @escaping @MainActor () -> Void,
          close: @escaping @MainActor () -> Void) {
@@ -158,13 +159,13 @@ final class WindowMenu: UIView {
         }
         let close = button("✕", hint: "Closes the window", action: #selector(closeTapped(_:)))
         close.accessibilityLabel = "Close"
-        let stack = UIStackView(arrangedSubviews: [
+        for view in [
             button("Zoom to window", hint: "Zooms the canvas to the window", action: #selector(zoomTapped(_:))),
             button("Make a frame here", hint: "Places a frame on the paper in hand at the scale that covers the window",
                    action: #selector(frameTapped(_:))),
             send,
             close,
-        ])
+        ] { stack.addArrangedSubview(view) }
         stack.axis = .horizontal
         stack.spacing = 2
         stack.alignment = .center
@@ -212,8 +213,10 @@ final class WindowMenu: UIView {
 
     /// Places the menu under a window's rectangle on screen (above it when it would not fit), clear of the chrome.
     func place(under rect: CGRect, in bounds: CGRect) {
-        let size = systemLayoutSizeFitting(UIView.layoutFittingCompressedSize, withHorizontalFittingPriority: .fittingSizeLevel,
-                                           verticalFittingPriority: .fittingSizeLevel)
+        // Each button at its own width on one line, with the stack's spacing and margins round them.
+        let buttons = stack.arrangedSubviews.map { $0.intrinsicContentSize }
+        let size = CGSize(width: buttons.reduce(0) { $0 + $1.width } + stack.spacing * CGFloat(max(buttons.count - 1, 0)) + 8,
+                          height: (buttons.map(\.height).max() ?? 30) + 8)
         let chrome = CanvasEditor.chromeInsets
         let (top, left, bottom, right) = (CGFloat(chrome.top), CGFloat(chrome.left), CGFloat(chrome.bottom),
                                           CGFloat(chrome.right))

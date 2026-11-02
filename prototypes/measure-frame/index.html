@@ -1,0 +1,699 @@
+<!doctype html>
+<!--
+  PROTOTYPE - throwaway. Never merge to main; kept on the branch prototype/measure-frame.
+  Issue #8: measure, dimension, frame and window on the canvas.
+  Already settled by prototype/canvas-screen (not asked here): measure is two taps and is not kept; dimension is two
+  taps and is kept; a frame is a paper size at a drawing scale; window is a drag, then Zoom to window / Make a frame
+  here / Send (later).
+
+  Four open questions, one section each. Picks go in the URL: ?q1=B&q2=A&q3=C&q4=B (and &theme=dark if pinned).
+  Q1. How is a dimension placed?
+      A two taps, it sits right on the two points.  B two taps, then drag or tap a third point to pull it off the
+      object, with extension lines (AutoCAD DIMLINEAR / DIMALIGNED).  C two taps, it lands at a fixed offset to one
+      side with extension lines; drag it afterwards to move it.
+  Q2. How do the taps for measure and dimension find points?
+      A snap to ink ends and corners within ~20 px, with a magnifier loupe above the finger or Pencil while it is down.
+      B snap the same way, marker but no loupe.  C no snap; the point is exactly where the tip touches.
+      In all three the point shows while the tip is down and is taken on lift.
+  Q3. How is a frame placed?
+      A pick paper and scale in a bar, tap to place it centred.  B pick paper, drag a rectangle; Vellum picks the
+      smallest standard scale whose paper covers the drag, live.  C tap to place at the current paper and scale, drag
+      the body to move it, drag a corner to step through the standard scales.
+  Q4. What do feet-and-inch dimension lengths round to?  A 1/2"  B 1/4"  C 1/16"  D 1"
+      (Canvas units stay as the canvas sets them; this is only ft-in rounding.)
+
+  The drawings are made up. One finger, mouse or Pencil uses the tool; two fingers pan and pinch; ctrl+wheel zooms.
+  Plain HTML, CSS and JS, no dependencies.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Vellum measure, dimension, frame - prototype</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme:light; --page:#ebe6da; --card:#fbf9f4; --ink:#1d1d1f; --mute:#6b6b70; --line:#d9d4c9; --accent:#2f5d8a; --accentBg:#e6edf5; --paper:#f3efe6; }
+  :root[data-theme=dark] { color-scheme:dark; --page:#121315; --card:#1f2023; --ink:#e8e6e1; --mute:#a3a3a8; --line:#36373c; --accent:#9cc4ec; --accentBg:#2c3a4a; --paper:#1c1d20; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--page); color:var(--ink); font:15px/1.4 -apple-system,system-ui,"SF Pro Text","Segoe UI",sans-serif;
+         padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
+  button, select { font:inherit; color:inherit; touch-action:manipulation; cursor:pointer; }
+  header { max-width:1000px; margin:0 auto; padding:14px 14px 6px; display:flex; gap:12px; align-items:flex-start; justify-content:space-between; }
+  header h1 { font-size:18px; margin:0; }
+  header p { margin:4px 0 0; color:var(--mute); font-size:13.5px; max-width:640px; }
+  main { max-width:1000px; margin:0 auto; padding:6px 10px 84px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px 12px; margin:0 0 14px;
+          display:grid; grid-template-columns:minmax(0,1fr); grid-template-areas:"head" "pick" "main"; gap:10px; scroll-margin-top:8px; }
+  .card.x { grid-template-areas:"head" "pick" "main" "extra"; }
+  .head { grid-area:head; } .pick { grid-area:pick; } .main { grid-area:main; min-width:0; } .extra { grid-area:extra; }
+  h2 { font-size:17px; margin:0; display:flex; align-items:center; gap:8px; }
+  .num { display:inline-flex; flex:none; width:24px; height:24px; border-radius:50%; background:var(--accent); color:var(--card); font-size:13px; align-items:center; justify-content:center; }
+  .try { margin:6px 0 0; font-size:14px; }
+  .seg { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:6px; }
+  .seg button { min-height:58px; border:1.5px solid var(--line); border-radius:12px; background:transparent; padding:6px 4px;
+                display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
+  .seg button b { font-size:20px; line-height:1; }
+  .seg button span { font-size:12px; color:var(--mute); line-height:1.15; text-align:center; }
+  .seg button[aria-pressed=true] { border-color:var(--accent); background:var(--accentBg); }
+  .seg button[aria-pressed=true] b { color:var(--accent); }
+  .seg button[aria-pressed=true] span { color:var(--ink); }
+  .seg.unpicked button[aria-pressed=true] { border-style:dashed; }
+  .desc { margin:8px 0 0; font-size:14px; }
+  .note { margin:6px 0 0; font-size:12.5px; color:var(--mute); }
+  .bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; min-height:36px; }
+  .bar .grow { flex:1; }
+  .bar .lbl { font-size:13px; color:var(--mute); }
+  .btn { min-height:36px; padding:0 11px; border:1px solid var(--line); border-radius:10px; background:var(--card); font-size:14px; }
+  .tog { display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; flex:none; }
+  .tog button { border:0; min-height:34px; padding:0 11px; background:transparent; font-size:14px; }
+  .tog button[aria-pressed=true] { background:var(--accentBg); color:var(--accent); font-weight:600; }
+  select { min-height:36px; font-size:14px; border:1px solid var(--line); border-radius:10px; background:var(--card); padding:0 6px; max-width:100%; }
+  .stage { position:relative; height:clamp(260px,42vh,360px); height:clamp(260px,42svh,360px); border-radius:12px; overflow:hidden; border:1px solid var(--line); background:var(--paper); }
+  .stage canvas { position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+  .status { position:absolute; left:8px; bottom:8px; max-width:calc(100% - 112px); padding:5px 9px; border-radius:9px; background:rgba(29,29,31,.86); color:#fff;
+            font-size:12.5px; line-height:1.3; pointer-events:none; }
+  :root[data-theme=dark] .status { background:rgba(70,71,77,.92); }
+  .zoom, .edit { position:absolute; right:8px; bottom:8px; display:flex; gap:6px; }
+  .edit { top:8px; bottom:auto; }
+  .zoom button, .edit button { min-width:38px; height:38px; border-radius:10px; border:1px solid var(--line); background:var(--card); font-size:19px; line-height:1; padding:0; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  .edit button { font-size:14px; padding:0 10px; }
+  .edit { transition:opacity .15s; }
+  .stage.busy .edit { opacity:0; pointer-events:none; }
+  table { border-collapse:collapse; width:100%; font-size:13px; font-variant-numeric:tabular-nums; }
+  th, td { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); }
+  td:not(:first-child) { white-space:nowrap; }
+  th { font-size:12px; color:var(--mute); font-weight:600; }
+  td.shown { font-weight:700; color:var(--accent); }
+  tr.hl td { background:var(--accentBg); }
+  #picks { position:fixed; left:0; right:0; bottom:0; z-index:5; padding:8px 12px calc(8px + env(safe-area-inset-bottom)); background:var(--card);
+           background:color-mix(in srgb, var(--card) 92%, transparent); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+           border-top:1px solid var(--line); display:flex; gap:10px; align-items:center; justify-content:center; font-size:14px; }
+  #picks a { color:inherit; text-decoration:none; padding:4px 2px; }
+  #picks a b { color:var(--accent); }
+  #picks a.none b { color:var(--mute); font-weight:400; }
+  @media (min-width:820px) {
+    header { padding:16px 16px 8px; }
+    .card { grid-template-columns:288px minmax(0,1fr); grid-template-areas:"head main" "pick main"; grid-template-rows:auto 1fr; column-gap:16px; padding:16px; }
+    .card.x { grid-template-areas:"head main" "pick main" "extra main"; grid-template-rows:auto auto 1fr; }
+    .seg { grid-auto-flow:row; }
+    .seg button { flex-direction:row; justify-content:flex-start; gap:12px; padding:8px 12px; min-height:46px; }
+    .seg button span { text-align:left; font-size:13.5px; }
+    .main { display:flex; flex-direction:column; }
+    .stage { flex:1 1 auto; height:auto; min-height:clamp(320px,calc(100vh - 190px),500px); min-height:clamp(320px,calc(100svh - 190px),500px); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Vellum: measure, dimension, frame</h1>
+    <p>Issue #8. Four questions: pick A, B or C in each. In the drawings, one finger, the Pencil or the mouse uses the tool, and two fingers pan and zoom. Scroll from outside the drawings.</p>
+  </div>
+  <div class="tog" id="theme" role="group" aria-label="Light or dark"><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+</header>
+<main>
+  <section class="card" id="s1">
+    <div class="head"><h2><span class="num">1</span>Placing a dimension</h2>
+      <p class="try">Tap two ends to dimension them. Try a straight pipe run, then a diagonal from a skid corner to the tank centre.</p></div>
+    <div class="pick"><div class="seg" data-q="q1" role="group" aria-label="Question 1"></div><p class="desc"></p><p class="note" data-uses="q1"></p></div>
+    <div class="main">
+      <div class="stage" id="st1"><canvas></canvas><div class="status"></div><div class="edit"><button data-act="undo">Undo</button><button data-act="clear">Clear</button><button data-act="fit">Fit</button></div><div class="zoom"><button data-z="out" aria-label="Zoom out">&minus;</button><button data-z="in" aria-label="Zoom in">+</button></div></div></div>
+  </section>
+
+  <section class="card" id="s2">
+    <div class="head"><h2><span class="num">2</span>Finding the points</h2>
+      <p class="try">Zoom out with two fingers until the drawing is small, then measure a skid corner to the tank centre. The point shows while you are down and is taken when you lift.</p></div>
+    <div class="pick"><div class="seg" data-q="q2" role="group" aria-label="Question 2"></div><p class="desc"></p><p class="note" data-uses="q2"></p></div>
+    <div class="main"><div class="bar"><div class="tog" id="kind2" role="group" aria-label="Tool"><button data-k="measure">Measure</button><button data-k="dim">Dimension</button></div></div>
+      <div class="stage" id="st2"><canvas></canvas><div class="status"></div><div class="edit"><button data-act="undo">Undo</button><button data-act="clear">Clear</button><button data-act="fit">Fit</button></div><div class="zoom"><button data-z="out" aria-label="Zoom out">&minus;</button><button data-z="in" aria-label="Zoom in">+</button></div></div></div>
+  </section>
+
+  <section class="card" id="s3">
+    <div class="head"><h2><span class="num">3</span>Placing a frame</h2>
+      <p class="try">Put a frame around the boiler house, then one around the whole site.</p></div>
+    <div class="pick"><div class="seg" data-q="q3" role="group" aria-label="Question 3"></div><p class="desc"></p><p class="note">The site is about 240 &times; 150 ft. The plant room from the other sections sits top right.</p></div>
+    <div class="main"><div class="bar"><span id="bar3" style="display:contents"></span></div>
+      <div class="stage" id="st3"><canvas></canvas><div class="status"></div><div class="edit"><button data-act="undo">Undo</button><button data-act="clear">Clear</button><button data-act="fit">Fit</button></div><div class="zoom"><button data-z="out" aria-label="Zoom out">&minus;</button><button data-z="in" aria-label="Zoom in">+</button></div></div></div>
+  </section>
+
+  <section class="card x" id="s4">
+    <div class="head"><h2><span class="num">4</span>Rounding feet and inches</h2>
+      <p class="try">The header run is exactly 13'-7 5/16". See what each choice shows on it and in the table. Tap two points to dimension something else.</p></div>
+    <div class="pick"><div class="seg" data-q="q4" role="group" aria-label="Question 4"></div><p class="desc"></p></div>
+    <div class="extra"><table><thead><tr><th>Length</th><th>Exact</th><th>Shows as</th><th>Off by</th></tr></thead><tbody id="t4"></tbody></table>
+      <p class="note">Only feet-and-inches canvases. Decimal feet and mm stay as the canvas sets them.</p><p class="note" data-uses="q4"></p></div>
+    <div class="main">
+      <div class="stage" id="st4"><canvas></canvas><div class="status"></div><div class="edit"><button data-act="undo">Undo</button><button data-act="clear">Clear</button><button data-act="fit">Fit</button></div><div class="zoom"><button data-z="out" aria-label="Zoom out">&minus;</button><button data-z="in" aria-label="Zoom in">+</button></div></div></div>
+  </section>
+</main>
+<div id="picks"><span>Picks:</span><span id="pickList"></span><button class="btn" id="copy">Copy link</button></div>
+
+<script>
+"use strict";
+// ---------- from prototype/canvas-screen ----------
+const SCALES = [ ['1/8" = 1\'-0"',96], ['3/16" = 1\'-0"',64], ['1/4" = 1\'-0"',48], ['3/8" = 1\'-0"',32], ['1/2" = 1\'-0"',24], ['3/4" = 1\'-0"',16],
+                 ['1" = 1\'-0"',12], ['1-1/2" = 1\'-0"',8], ['3" = 1\'-0"',4], ['1" = 10\'',120], ['1" = 20\'',240], ['1" = 50\'',600], ['Full size 1:1',1] ];
+const PAPERS = { '11×17':[17,11], '24×36':[36,24], '30×42':[42,30], '8.5×11':[11,8.5] };
+const scaleLabel = k => (SCALES.find(s => s[1] === k) || ['1:' + k])[0];
+const STD = SCALES.map(s => s[1]).sort((a, b) => a - b); // standard scales, real inches per paper inch, smallest first
+
+// ---------- questions and picks ----------
+const Q = {
+  q1: { A:['On the points', 'Two taps. The dimension sits right on the two points, as in the canvas prototype.'],
+        B:['Pull it off', 'Two taps, then drag or tap a third point to pull the line off the object, with extension lines. Above or below gives horizontal, beside gives vertical, out at an angle gives aligned, like AutoCAD.'],
+        C:['Fixed offset', 'Two taps. It lands a set distance to one side, with extension lines. Drag it afterwards to move it.'] },
+  q2: { A:['Snap + loupe', 'Snaps to ink ends, corners and circle centres within about 20 px. A magnifier shows above your finger or Pencil while it is down.'],
+        B:['Snap, marker', 'Snaps the same way and shows a marker, but no magnifier.'],
+        C:['No snap', 'No snapping. The point is exactly where the tip touches.'] },
+  q3: { A:['Pick, then tap', 'Pick paper and scale in the bar, then tap. The frame is centred where you tap.'],
+        B:['Drag a box', 'Pick paper, then drag around what you want. Vellum picks the smallest standard scale that covers it, live while you drag.'],
+        C:['Tap, then adjust', "Tap to drop a frame at the bar's paper and scale. Drag it to move it. Drag a corner to step through the scales."] },
+  q4: { A:['1/2"', 'Nearest half inch, as in the canvas prototype.'], B:['1/4"', 'Nearest quarter inch.'],
+        C:['1/16"', 'Nearest sixteenth of an inch.'], D:['1"', 'Nearest whole inch.'] },
+};
+const params = new URLSearchParams(location.search);
+const pick = {}; for (const k in Q) pick[k] = Q[k][params.get(k)] ? params.get(k) : null;
+const shown = k => pick[k] || 'A';
+const ROUND = { A:2, B:4, C:16, D:1 };
+
+// ---------- feet and inches ----------
+function gcd(a, b) { while (b) [a, b] = [b, a % b]; return a; }
+function frac(n, d) { const g = gcd(n, d); return `${n / g}/${d / g}`; }
+function fmt(inches, den = ROUND[shown('q4')]) { // rounds to 1/den inch, carrying into feet
+  const neg = inches < 0; const n = Math.round(Math.abs(inches) * den);
+  const ft = Math.floor(n / (12 * den)), r = n - ft * 12 * den, whole = Math.floor(r / den), f = r - whole * den;
+  return `${neg ? '-' : ''}${ft}'-${whole}${f ? ' ' + frac(f, den) : ''}"`;
+}
+function offBy(shownIn, exact) { const n = Math.round((shownIn - exact) * 32); if (!n) return '0'; return (n > 0 ? '+' : '−') + (Math.abs(n) >= 32 ? fmt(Math.abs(n) / 32, 32).replace(/^0'-/, '') : frac(Math.abs(n), 32) + '"'); }
+
+// ---------- theme ----------
+const mq = matchMedia('(prefers-color-scheme: dark)');
+let themePin = ['light', 'dark'].includes(params.get('theme')) ? params.get('theme') : null;
+const isDark = () => themePin ? themePin === 'dark' : mq.matches;
+const COL = {
+  light:{ paper:'#f3efe6', g1:'rgba(120,110,90,.10)', g2:'rgba(120,110,90,.20)', ink:'#3a3a3a', faint:'#a39d92', text:'#6b6455', measure:'#c2410c', measureLine:'#c2410c',
+          frame:'#7a4fb3', frameText:'#5b3191', frameFill:'rgba(122,79,179,.07)', box:'rgba(255,255,255,.94)', boxText:'#1d1d1f', snap:'#0f766e', accent:'#2f5d8a', accentFill:'rgba(47,93,138,.08)', card:'#fbf9f4', ring:'rgba(0,0,0,.35)' },
+  dark: { paper:'#1c1d20', g1:'rgba(255,255,255,.05)', g2:'rgba(255,255,255,.10)', ink:'#e6e6e6', faint:'#6d6d73', text:'#a9a9ae', measure:'#c2410c', measureLine:'#f0703a',
+          frame:'#b892ea', frameText:'#b892ea', frameFill:'rgba(184,146,234,.08)', box:'rgba(40,41,45,.94)', boxText:'#e8e6e1', snap:'#2dd4bf', accent:'#9cc4ec', accentFill:'rgba(156,196,236,.08)', card:'#1f2023', ring:'rgba(255,255,255,.4)' },
+};
+const C = () => COL[isDark() ? 'dark' : 'light'];
+
+// ---------- made-up drawings, in real-world inches ----------
+function L(w, closed, pts) { return { w, closed, pts }; }
+function plantRoom(ox = 0, oy = 0) { // a 40' x 24' plant room
+  const P = pts => pts.map(p => [p[0] + ox, p[1] + oy]);
+  const rect = (w, x0, y0, x1, y1) => L(w, true, P([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]));
+  const bow = (x, y, s, vert) => L(1.2, true, P(vert ? [[x - s * .6, y - s], [x + s * .6, y + s], [x - s * .6, y + s], [x + s * .6, y - s]]
+                                                     : [[x - s, y - s * .6], [x + s, y + s * .6], [x + s, y - s * .6], [x - s, y + s * .6]]));
+  return {
+    lines: [
+      L(5, false, P([[36, 288], [0, 288], [0, 0], [480, 0], [480, 288], [84, 288]])),     // walls, door at the south
+      L(1.5, false, P([[84, 288], [84, 240]])),                                            // door leaf
+      rect(2, 132, 168, 204, 204),                                                         // pump skid, 6'-0" x 3'-0"
+      rect(1.5, 8, 216, 20, 264),                                                          // MCC
+      L(3, false, P([[324, 112], [264, 112], [264, 186], [204, 186]])),                     // suction from the tank
+      L(3, false, P([[132, 186], [60, 186], [60, 48], [223.3125, 48], [223.3125, 0]])),     // discharge header; 13'-7 5/16" run along the top
+      L(3, false, P([[372, 160], [372, 240], [480, 240]])),                                 // tank outlet
+      bow(292, 112, 7), bow(60, 120, 7, true), bow(426, 240, 7),                             // valves
+    ],
+    circles: [ { x:372 + ox, y:112 + oy, r:48, w:2 }, { x:150 + ox, y:186 + oy, r:9, w:1.5 }, { x:186 + ox, y:186 + oy, r:9, w:1.5 } ],
+    arcs: [ { x:84 + ox, y:288 + oy, r:48, a0:-Math.PI / 2, a1:Math.PI } ],
+    texts: [ { t:'TK-1', x:350 + ox, y:117 + oy, s:14 }, { t:'P-1A/B SKID', x:132 + ox, y:218 + oy, s:11 }, { t:'4" HWS', x:66 + ox, y:96 + oy, s:10 },
+             { t:'MCC-1', x:24 + ox, y:244 + oy, s:10 }, { t:'PLANT ROOM', x:330 + ox, y:278 + oy, s:14 } ],
+  };
+}
+function siteParts() { // about 240' x 150'
+  const rect = (w, x0, y0, x1, y1) => L(w, true, [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+  const pr = plantRoom(1560, 360);
+  return {
+    lines: [
+      rect(6, 240, 240, 1200, 840),            // boiler house 80' x 50'
+      rect(6, 1800, 1080, 2640, 1560),         // warehouse 70' x 40'
+      rect(4, 360, 1200, 720, 1440),           // cooling tower pad 30' x 20'
+      rect(3, 960, 1140, 1560, 1500),          // tank farm dike
+      rect(3, 300, 300, 540, 480), rect(3, 660, 300, 900, 480),   // boilers
+      L(3, false, [[1200, 500], [1560, 500]]), L(3, false, [[1200, 524], [1560, 524]]),     // pipe rack to the plant room
+      L(3, false, [[1300, 524], [1300, 1140]]), L(3, false, [[1324, 524], [1324, 1140]]),   // rack down to the tank farm
+      L(3, false, [[720, 1320], [960, 1320]]),
+      ...pr.lines,
+    ],
+    circles: [ { x:450, y:1320, r:84, w:3 }, { x:630, y:1320, r:84, w:3 }, { x:1110, y:1320, r:120, w:3 }, { x:1410, y:1320, r:120, w:3 }, ...pr.circles ],
+    arcs: pr.arcs,
+    faint: [ rect(1, 0, 0, 2880, 1800), L(1, false, [[0, 1650], [2880, 1650]]), L(1, false, [[0, 1770], [2880, 1770]]) ],
+    texts: [ { t:'BOILER HOUSE', x:270, y:810, s:84 }, { t:'WAREHOUSE', x:1840, y:1350, s:84 }, { t:'COOLING TOWER', x:360, y:1176, s:60 },
+             { t:'TANK FARM', x:960, y:1122, s:60 }, { t:'ROAD', x:120, y:1732, s:60 }, { t:'PLANT ROOM', x:1560, y:336, s:60 } ],
+  };
+}
+function makeScene(parts) {
+  const snaps = [];
+  const add = (x, y, kind) => { if (!snaps.some(s => Math.abs(s.x - x) < 0.01 && Math.abs(s.y - y) < 0.01)) snaps.push({ x, y, kind }); };
+  for (const l of parts.lines) l.pts.forEach((p, i) => add(p[0], p[1], l.closed ? 'Corner' : (i === 0 || i === l.pts.length - 1) ? 'End' : 'Corner'));
+  for (const c of parts.circles) add(c.x, c.y, 'Centre');
+  return Object.assign({ faint:[], arcs:[], texts:[] }, parts, { snaps });
+}
+const ROOM = makeScene(plantRoom()), SITE = makeScene(siteParts());
+const HEADER = [[60, 48], [223.3125, 48]]; // exactly 13'-7 5/16"
+
+// ---------- geometry ----------
+const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+function normalUp(a, b) { // unit normal to a-b pointing up the screen (or left, for a vertical pair)
+  const l = dist(a, b) || 1; let nx = -(b[1] - a[1]) / l, ny = (b[0] - a[0]) / l;
+  if (ny > 1e-9 || (Math.abs(ny) <= 1e-9 && nx > 0)) { nx = -nx; ny = -ny; } return [nx, ny];
+}
+function dimGeom(d) { // where the dimension line goes, and the length it reads
+  const a = d.a, b = d.b;
+  if (d.mode === 'on') return { d1:a, d2:b, len:dist(a, b), ext:false };
+  if (d.kind === 'h') return { d1:[a[0], d.at], d2:[b[0], d.at], len:Math.abs(b[0] - a[0]), ext:true };
+  if (d.kind === 'v') return { d1:[d.at, a[1]], d2:[d.at, b[1]], len:Math.abs(b[1] - a[1]), ext:true };
+  const n = normalUp(a, b), o = d.off || 0;
+  return { d1:[a[0] + n[0] * o, a[1] + n[1] * o], d2:[b[0] + n[0] * o, b[1] + n[1] * o], len:dist(a, b), ext:true };
+}
+function pullTo(d, p) { // DIMLINEAR / DIMALIGNED: above or below = horizontal, beside = vertical, otherwise aligned
+  const [ax, ay] = d.a, [bx, by] = d.b;
+  const inX = p[0] >= Math.min(ax, bx) && p[0] <= Math.max(ax, bx), inY = p[1] >= Math.min(ay, by) && p[1] <= Math.max(ay, by);
+  if (inX && !inY) { d.kind = 'h'; d.at = p[1]; }
+  else if (inY && !inX) { d.kind = 'v'; d.at = p[0]; }
+  else { d.kind = 'aligned'; const n = normalUp(d.a, d.b); d.off = (p[0] - ax) * n[0] + (p[1] - ay) * n[1]; }
+}
+function segDist(p, a, b) { const vx = b[0] - a[0], vy = b[1] - a[1], l2 = vx * vx + vy * vy || 1;
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / l2)); return Math.hypot(p[0] - a[0] - t * vx, p[1] - a[1] - t * vy); }
+function rrect(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); }
+function seg(ctx, x0, y0, x1, y1) { ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); }
+
+// ---------- a live canvas ----------
+class Board {
+  constructor(id, scene, tool, box) {
+    this.stage = document.getElementById(id); this.cv = this.stage.querySelector('canvas'); this.ctx = this.cv.getContext('2d');
+    this.statusEl = this.stage.querySelector('.status'); this.card = this.stage.closest('.card');
+    this.scene = scene; this.tool = tool; tool.b = this; this.box = box;
+    this.view = { cx:0, cy:0, z:1 }; this.W = 1; this.H = 1; this.dpr = 1; this.fitted = false; this.moved = false;
+    this.ptrs = new Map(); this.toolPtr = null; this.gesture = null; this.raf = 0; this.m = this.viewMap();
+    new ResizeObserver(() => this.resize()).observe(this.stage);
+    this.bind();
+  }
+  viewMap() { return { cx:this.view.cx, cy:this.view.cy, z:this.view.z, ox:this.W / 2, oy:this.H / 2 }; }
+  toS(w) { const m = this.m; return [(w[0] - m.cx) * m.z + m.ox, (w[1] - m.cy) * m.z + m.oy]; }
+  toW(s) { const m = this.m; return [(s[0] - m.ox) / m.z + m.cx, (s[1] - m.oy) / m.z + m.cy]; }
+  worldTx() { const m = this.m, d = this.dpr; this.ctx.setTransform(d * m.z, 0, 0, d * m.z, d * (m.ox - m.cx * m.z), d * (m.oy - m.cy * m.z)); }
+  screenTx() { this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); }
+  resize() {
+    const r = this.stage.getBoundingClientRect(); if (r.width < 2 || r.height < 2) return;
+    this.W = r.width; this.H = r.height; this.dpr = Math.min(3, devicePixelRatio || 1);
+    this.cv.width = Math.round(this.W * this.dpr); this.cv.height = Math.round(this.H * this.dpr);
+    if (!this.fitted || !this.moved) { this.fit(); this.fitted = true; }
+    this.render();
+  }
+  fit() { const [x0, y0, x1, y1] = this.box; this.view.z = Math.min(this.W / (x1 - x0), this.H / (y1 - y0)) * 0.92;
+    this.view.cx = (x0 + x1) / 2; this.view.cy = (y0 + y1) / 2; this.moved = false; this.draw(); }
+  zoomAt(sp, f) { this.m = this.viewMap(); const w = this.toW(sp); const z = Math.min(80, Math.max(0.004, this.view.z * f));
+    this.view.z = z; this.view.cx = w[0] - (sp[0] - this.W / 2) / z; this.view.cy = w[1] - (sp[1] - this.H / 2) / z; this.moved = true; this.draw(); }
+  draw() { if (!this.raf) this.raf = requestAnimationFrame(() => { this.raf = 0; this.render(); }); }
+  render() {
+    const ctx = this.ctx, c = C(); this.m = this.viewMap();
+    this.screenTx(); ctx.fillStyle = c.paper; ctx.fillRect(0, 0, this.W, this.H);
+    this.paint(c); this.tool.overlay(c, false);
+    if (this.tool.loupe) this.paintLoupe(c);
+    const t = this.tool.status(); if (t !== this.st) { this.st = t; this.statusEl.textContent = t; }
+  }
+  paint(c) { this.worldTx(); this.grid(c); this.paintScene(c); this.tool.paint(c); }
+  grid(c) {
+    const ctx = this.ctx, z = this.m.z, target = 24 / z; const steps = [1, 2, 6, 12, 24, 60, 120, 240, 600, 1200, 2400, 6000];
+    const step = steps.find(v => v >= target) || 6000, major = step < 12 ? 12 : step * 10;
+    const [x0, y0] = this.toW([0, 0]), [x1, y1] = this.toW([this.W, this.H]); ctx.lineWidth = 1 / z;
+    for (const [sp, col] of [[step, c.g1], [major, c.g2]]) {
+      if (sp * z < 6) continue; ctx.strokeStyle = col; ctx.beginPath();
+      for (let x = Math.floor(x0 / sp) * sp; x < x1; x += sp) { ctx.moveTo(x, y0); ctx.lineTo(x, y1); }
+      for (let y = Math.floor(y0 / sp) * sp; y < y1; y += sp) { ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
+      ctx.stroke();
+    }
+  }
+  paintScene(c) {
+    const ctx = this.ctx, s = this.scene, z = this.m.z; ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const path = l => { ctx.beginPath(); l.pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); if (l.closed) ctx.closePath(); ctx.stroke(); };
+    ctx.strokeStyle = c.faint; ctx.lineWidth = 1 / z; ctx.setLineDash([10 / z, 6 / z]); s.faint.forEach(path);
+    for (const a of s.arcs) { ctx.beginPath(); ctx.arc(a.x, a.y, a.r, a.a0, a.a1, true); ctx.stroke(); }
+    ctx.setLineDash([]); ctx.strokeStyle = c.ink;
+    for (const l of s.lines) { ctx.lineWidth = Math.max(l.w, (l.w >= 4 ? 1.7 : 1.1) / z); path(l); }
+    for (const a of s.circles) { ctx.lineWidth = Math.max(a.w, 1.1 / z); ctx.beginPath(); ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.fillStyle = c.text;
+    for (const t of s.texts) if (t.s * z >= 5) { ctx.font = `600 ${t.s}px -apple-system,system-ui,sans-serif`; ctx.fillText(t.t, t.x, t.y); }
+    ctx.restore();
+  }
+  paintLoupe(c) { // a magnified circle above the tip, centred on where the tip really is
+    const L = this.tool.loupe, ctx = this.ctx, r = 60, mag = 3;
+    let lx = L.sp[0], ly = L.sp[1] - 104;
+    if (ly - r < 4) { ly = L.sp[1]; lx = L.sp[0] + (L.sp[0] < this.W / 2 ? 110 : -110); }
+    lx = Math.max(r + 4, Math.min(this.W - r - 4, lx)); ly = Math.max(r + 4, Math.min(this.H - r - 4, ly));
+    const saved = this.m; this.m = { cx:L.w[0], cy:L.w[1], z:saved.z * mag, ox:lx, oy:ly };
+    ctx.save(); this.screenTx(); ctx.beginPath(); ctx.arc(lx, ly, r, 0, Math.PI * 2); ctx.clip();
+    ctx.fillStyle = c.paper; ctx.fillRect(lx - r, ly - r, r * 2, r * 2);
+    this.paint(c); this.tool.overlay(c, true); ctx.restore();
+    this.screenTx(); ctx.save(); ctx.strokeStyle = c.ring; ctx.lineWidth = 1; ctx.globalAlpha = .7;
+    seg(ctx, lx - 8, ly, lx - 3, ly); seg(ctx, lx + 3, ly, lx + 8, ly); seg(ctx, lx, ly - 8, lx, ly - 3); seg(ctx, lx, ly + 3, lx, ly + 8);
+    ctx.globalAlpha = 1; ctx.shadowColor = 'rgba(0,0,0,.3)'; ctx.shadowBlur = 8; ctx.lineWidth = 2; ctx.strokeStyle = c.ink;
+    ctx.beginPath(); ctx.arc(lx, ly, r, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    this.m = saved;
+  }
+  touches() { return [...this.ptrs.values()].filter(p => p.type === 'touch'); }
+  pt(e) { const r = this.cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+  bind() {
+    const cv = this.cv;
+    cv.addEventListener('contextmenu', e => e.preventDefault());
+    cv.addEventListener('pointerdown', e => this.pdown(e));
+    cv.addEventListener('pointermove', e => this.pmove(e));
+    cv.addEventListener('pointerup', e => this.pup(e, false));
+    cv.addEventListener('pointercancel', e => this.pup(e, true));
+    cv.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch' && this.toolPtr == null && this.tool.hover) { this.tool.hover(null); this.draw(); } });
+    cv.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); this.zoomAt(this.pt(e), Math.exp(-e.deltaY * 0.01)); }, { passive:false });
+    this.stage.querySelectorAll('.zoom button').forEach(btn => btn.addEventListener('click', () => this.zoomAt([this.W / 2, this.H / 2], btn.dataset.z === 'in' ? 1.6 : 1 / 1.6)));
+    this.stage.querySelectorAll('[data-act]').forEach(btn => btn.addEventListener('click', () => {
+      const a = btn.dataset.act; if (a === 'fit') this.fit(); else if (a === 'undo') this.tool.undo(); else if (a === 'clear') this.tool.clear(); this.draw(); }));
+  }
+  pdown(e) {
+    e.preventDefault(); try { this.cv.setPointerCapture(e.pointerId); } catch (_) {}
+    this.m = this.viewMap(); const sp = this.pt(e); this.ptrs.set(e.pointerId, { sp, type:e.pointerType });
+    if (e.pointerType === 'touch' && this.touches().length >= 2) { // two fingers: pan and pinch, and drop what the first finger was doing
+      if (this.toolPtr != null) { this.tool.cancel(); this.toolPtr = null; this.stage.classList.remove('busy'); }
+      const [p, q] = this.touches().map(t => t.sp); const c = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+      this.gesture = { type:'pinch', d:Math.hypot(p[0] - q[0], p[1] - q[1]) || 1, w:this.toW(c), z:this.view.z }; this.draw(); return;
+    }
+    if (this.gesture) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) { this.gesture = { type:'pan', sp, cx:this.view.cx, cy:this.view.cy }; return; }
+    if (this.toolPtr != null) return;
+    this.toolPtr = e.pointerId; this.stage.classList.add('busy'); this.tool.down(sp, e.pointerType); this.draw();
+  }
+  pmove(e) {
+    const sp = this.pt(e), p = this.ptrs.get(e.pointerId); this.m = this.viewMap();
+    if (!p) { if (e.pointerType !== 'touch' && this.toolPtr == null && !this.gesture && this.tool.hover) { this.tool.hover(sp); this.draw(); } return; }
+    p.sp = sp;
+    if (this.gesture) {
+      const g = this.gesture;
+      if (g.type === 'pinch') { const t = this.touches(); if (t.length < 2) return; const [a, b] = [t[0].sp, t[1].sp]; const c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        const z = Math.min(80, Math.max(0.004, g.z * (Math.hypot(a[0] - b[0], a[1] - b[1]) || 1) / g.d));
+        this.view.z = z; this.view.cx = g.w[0] - (c[0] - this.W / 2) / z; this.view.cy = g.w[1] - (c[1] - this.H / 2) / z; }
+      else if (g.type === 'pan') { this.view.cx = g.cx - (sp[0] - g.sp[0]) / this.view.z; this.view.cy = g.cy - (sp[1] - g.sp[1]) / this.view.z; }
+      else return;
+      this.moved = true; this.draw(); return;
+    }
+    if (e.pointerId === this.toolPtr) { this.tool.move(sp); this.draw(); }
+  }
+  pup(e, cancelled) {
+    this.ptrs.delete(e.pointerId); this.m = this.viewMap();
+    if (e.pointerId === this.toolPtr) { this.toolPtr = null; this.stage.classList.remove('busy'); if (cancelled) this.tool.cancel(); else this.tool.up(this.pt(e)); this.draw(); }
+    if (this.gesture) {
+      if (this.gesture.type === 'pan') this.gesture = null;
+      else if (this.touches().length === 0) this.gesture = null;
+      else if (this.touches().length < 2) this.gesture = { type:'idle' }; // the finger left over after a pinch does nothing
+    }
+  }
+}
+
+// ---------- dimensions and measures ----------
+function drawDim(b, d, c, style, grips) { // style: kept | measure | band (rubber band) | preview
+  const ctx = b.ctx, z = b.m.z, g = dimGeom(d), faded = style === 'band' || style === 'preview';
+  b.worldTx(); ctx.save(); ctx.strokeStyle = style === 'measure' ? c.measureLine : c.ink; ctx.lineWidth = 1.2 / z; ctx.lineCap = 'butt';
+  if (faded) ctx.globalAlpha = .7;
+  if (g.ext) for (const [p, q] of [[d.a, g.d1], [d.b, g.d2]]) { // extension lines: a small gap off the object, a little past the dimension line
+    const vx = q[0] - p[0], vy = q[1] - p[1], l = Math.hypot(vx, vy); if (l * z < 4) continue;
+    const ux = vx / l, uy = vy / l; seg(ctx, p[0] + ux * 3 / z, p[1] + uy * 3 / z, q[0] + ux * 5 / z, q[1] + uy * 5 / z); }
+  if (style === 'measure' || style === 'band') ctx.setLineDash([6 / z, 4 / z]);
+  seg(ctx, g.d1[0], g.d1[1], g.d2[0], g.d2[1]); ctx.setLineDash([]);
+  const l = dist(g.d1, g.d2) || 1, nx = -(g.d2[1] - g.d1[1]) / l, ny = (g.d2[0] - g.d1[0]) / l, t = 6 / z;
+  for (const p of [g.d1, g.d2]) seg(ctx, p[0] + nx * t, p[1] + ny * t, p[0] - nx * t, p[1] - ny * t);
+  ctx.restore();
+  const s1 = b.toS(g.d1), s2 = b.toS(g.d2), m = [(s1[0] + s2[0]) / 2, (s1[1] + s2[1]) / 2], steep = Math.abs(s2[1] - s1[1]) > Math.abs(s2[0] - s1[0]);
+  b.screenTx(); ctx.save(); ctx.font = '600 12px -apple-system,system-ui,sans-serif'; const txt = fmt(g.len), w = ctx.measureText(txt).width + 10, h = 17;
+  const bx = m[0] - w / 2, by = steep ? m[1] - h / 2 : m[1] - h - 2;
+  if (grips) { ctx.fillStyle = c.accent; for (const s of [s1, s2]) ctx.fillRect(s[0] - 3.5, s[1] - 3.5, 7, 7); }
+  ctx.globalAlpha = faded ? .9 : 1; ctx.fillStyle = style === 'measure' ? c.measure : c.box; rrect(ctx, bx, by, w, h, 4); ctx.fill();
+  ctx.fillStyle = style === 'measure' ? '#fff' : c.boxText; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + 5, by + h / 2 + .5); ctx.restore();
+}
+
+class DimTool {
+  constructor(kind) { this.kind = kind; this.dims = []; this.hist = []; this.measure = null; this.msg = ''; this.resetPhase(); }
+  resetPhase() { this.phase = 'a'; this.a = null; this.prev = null; this.cand = null; this.isDown = false; this.loupe = null; this.drag = null; this.hov = null; }
+  save() { this.hist.push(JSON.stringify(this.dims)); if (this.hist.length > 50) this.hist.shift(); }
+  undo() { if (this.phase !== 'a') { this.resetPhase(); this.msg = ''; return; } if (this.hist.length) this.dims = JSON.parse(this.hist.pop()); else this.measure = null; this.msg = ''; }
+  clear() { this.save(); this.dims = []; this.measure = null; this.resetPhase(); this.msg = ''; }
+  snapAt(sp) {
+    const b = this.b, raw = b.toW(sp); if (shown('q2') === 'C') return { w:raw, raw, kind:null };
+    let best = null, bd = 20;
+    for (const s of b.scene.snaps) { const q = b.toS([s.x, s.y]), d = Math.hypot(q[0] - sp[0], q[1] - sp[1]); if (d < bd) { bd = d; best = s; } }
+    return best ? { w:[best.x, best.y], raw, kind:best.kind } : { w:raw, raw, kind:null };
+  }
+  hitDim(sp) { const b = this.b;
+    for (let i = this.dims.length - 1; i >= 0; i--) { const d = this.dims[i]; if (d.mode !== 'off') continue; const g = dimGeom(d);
+      if (segDist(sp, b.toS(g.d1), b.toS(g.d2)) < 18) return d; } return null; }
+  down(sp) {
+    const b = this.b;
+    if (this.phase === 'pull') { this.isDown = true; pullTo(this.prev, b.toW(sp)); return; }
+    if (this.kind === 'dim' && this.phase === 'a' && shown('q1') === 'C') { const d = this.hitDim(sp); if (d) { this.save(); this.drag = d; return; } }
+    this.isDown = true; this.cand = this.snapAt(sp); this.loupe = shown('q2') === 'A' ? { sp, w:this.cand.raw } : null;
+  }
+  move(sp) {
+    const b = this.b;
+    if (this.drag) { const d = this.drag, n = normalUp(d.a, d.b), p = b.toW(sp); d.off = (p[0] - d.a[0]) * n[0] + (p[1] - d.a[1]) * n[1]; return; }
+    if (this.phase === 'pull') { pullTo(this.prev, b.toW(sp)); return; }
+    if (!this.isDown) return; this.cand = this.snapAt(sp); if (this.loupe) this.loupe = { sp, w:this.cand.raw };
+  }
+  up(sp) {
+    const b = this.b;
+    if (this.drag) { this.drag = null; this.msg = 'Moved'; return; }
+    if (!this.isDown) return; this.isDown = false;
+    if (this.phase === 'pull') { pullTo(this.prev, b.toW(sp)); this.save(); this.dims.push(this.prev); this.msg = `Dimension kept: ${fmt(dimGeom(this.prev).len)}`; this.prev = null; this.phase = 'a'; return; }
+    const p = this.snapAt(sp).w; this.cand = null; this.loupe = null;
+    if (this.phase === 'a') { this.a = p; this.phase = 'b'; if (this.kind === 'measure') this.measure = null; return; }
+    const a = this.a; this.a = null; this.phase = 'a';
+    if (dist(a, p) * b.m.z < 2) { this.msg = 'Same point twice. Try again.'; return; }
+    if (this.kind === 'measure') { this.measure = { a, b:p, mode:'on' }; this.msg = `Measured ${fmt(dist(a, p))}`; return; }
+    const pl = shown('q1');
+    if (pl === 'A') { this.save(); this.dims.push({ a, b:p, mode:'on' }); this.msg = `Dimension kept: ${fmt(dist(a, p))}`; }
+    else if (pl === 'B') { this.prev = { a, b:p, mode:'pull', kind:'aligned', off:0 }; this.phase = 'pull'; }
+    else { this.save(); this.dims.push({ a, b:p, mode:'off', kind:'aligned', off:28 / b.m.z }); this.msg = 'Kept. Drag it to move it.'; }
+  }
+  hover(sp) { if (!sp) { this.hov = null; return; } this.hov = this.snapAt(sp); if (this.phase === 'pull') pullTo(this.prev, this.b.toW(sp)); }
+  cancel() { if (this.drag) { this.dims = JSON.parse(this.hist.pop()); this.drag = null; } this.isDown = false; this.cand = null; this.loupe = null; }
+  paint(c) {
+    const b = this.b, grips = this.kind === 'dim' && shown('q1') === 'C';
+    for (const d of this.dims) drawDim(b, d, c, 'kept', grips && d.mode === 'off');
+    if (this.measure) drawDim(b, this.measure, c, 'measure');
+    if (this.prev) drawDim(b, this.prev, c, 'preview');
+    if (this.phase === 'b' && this.a) { const tip = this.isDown && this.cand ? this.cand.w : this.hov ? this.hov.w : null;
+      if (tip && dist(this.a, tip) * b.m.z > 2) drawDim(b, { a:this.a, b:tip, mode:'on' }, c, this.kind === 'measure' ? 'measure' : 'band'); }
+  }
+  overlay(c, inLoupe) {
+    const b = this.b, ctx = b.ctx; b.screenTx(); ctx.save();
+    if (this.a) { const s = b.toS(this.a); ctx.fillStyle = this.kind === 'measure' ? c.measure : c.ink; ctx.beginPath(); ctx.arc(s[0], s[1], 3.5, 0, Math.PI * 2); ctx.fill(); }
+    const k = this.isDown ? this.cand : (this.hov && this.phase !== 'pull' ? this.hov : null);
+    if (k) {
+      const s = b.toS(k.w); ctx.strokeStyle = c.snap; ctx.lineWidth = 2;
+      if (k.kind) { ctx.strokeRect(s[0] - 6, s[1] - 6, 12, 12); }
+      else { seg(ctx, s[0] - 10, s[1], s[0] - 3, s[1]); seg(ctx, s[0] + 3, s[1], s[0] + 10, s[1]); seg(ctx, s[0], s[1] - 10, s[0], s[1] - 3); seg(ctx, s[0], s[1] + 3, s[0], s[1] + 10); }
+      if (k.kind && !inLoupe && this.isDown) { // the snap name sits up and to the right, clear of the finger
+        ctx.font = '600 11px -apple-system,system-ui,sans-serif'; const w = ctx.measureText(k.kind).width + 10;
+        const x = Math.min(s[0] + 14, b.W - w - 4), y = Math.max(4, s[1] - 42);
+        ctx.fillStyle = c.snap; rrect(ctx, x, y, w, 17, 8); ctx.fill(); ctx.fillStyle = isDark() ? '#0b1f1d' : '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(k.kind, x + 5, y + 9); }
+    }
+    ctx.restore();
+  }
+  status() {
+    if (this.drag) return 'Drag to move it';
+    if (this.isDown && this.cand) return this.cand.kind ? `Snaps to ${this.cand.kind.toLowerCase()}. Lift to take it.` : 'Lift to take this point';
+    if (this.phase === 'pull') return 'Drag or tap where the line goes';
+    if (this.phase === 'b') return 'Tap the second point';
+    return this.msg || (this.kind === 'measure' ? 'Measure: tap the first point' : 'Tap the first point');
+  }
+}
+
+// ---------- frames ----------
+function frameAt(cx, cy, paper, k) { const [pw, ph] = PAPERS[paper]; return { x:cx - pw * k / 2, y:cy - ph * k / 2, w:pw * k, h:ph * k, paper, scale:k }; }
+function drawFrame(b, f, c, mode) { // mode: '' | ghost | sel
+  const ctx = b.ctx, z = b.m.z; b.worldTx(); ctx.save();
+  if (mode) { ctx.fillStyle = c.frameFill; ctx.fillRect(f.x, f.y, f.w, f.h); }
+  ctx.setLineDash([8 / z, 5 / z]); ctx.lineWidth = (mode === 'sel' ? 2.2 : 1.5) / z; ctx.strokeStyle = c.frame; if (mode === 'ghost') ctx.globalAlpha = .8;
+  ctx.strokeRect(f.x, f.y, f.w, f.h); ctx.restore();
+  b.screenTx(); ctx.save(); const s = b.toS([f.x, f.y + f.h]); const txt = `Frame · ${f.paper} at ${scaleLabel(f.scale)}`;
+  ctx.font = '600 11px -apple-system,system-ui,sans-serif'; const w = ctx.measureText(txt).width;
+  const x = Math.max(4, Math.min(b.W - w - 6, s[0] + 4)), y = Math.max(14, Math.min(b.H - 52, s[1] + 14));
+  ctx.fillStyle = c.paper; ctx.globalAlpha = .8; ctx.fillRect(x - 2, y - 11, w + 4, 14); ctx.globalAlpha = 1;
+  ctx.fillStyle = c.frameText; ctx.fillText(txt, x, y);
+  if (mode === 'sel') for (const q of corners(f)) { const p = b.toS(q); ctx.fillStyle = c.card; ctx.strokeStyle = c.frame; ctx.lineWidth = 2; ctx.fillRect(p[0] - 7, p[1] - 7, 14, 14); ctx.strokeRect(p[0] - 7, p[1] - 7, 14, 14); }
+  ctx.restore();
+}
+const corners = f => [[f.x, f.y], [f.x + f.w, f.y], [f.x + f.w, f.y + f.h], [f.x, f.y + f.h]];
+
+class FrameTool {
+  constructor() { this.frames = []; this.hist = []; this.preset = { paper:'24×36', scale:48 }; this.reset(); this.loupe = null; }
+  reset() { this.frames = []; this.hist = []; this.sel = -1; this.ghost = null; this.rect = null; this.drag = null; this.msg = ''; }
+  get v() { return shown('q3'); }
+  save() { this.hist.push(JSON.stringify(this.frames)); if (this.hist.length > 50) this.hist.shift(); }
+  undo() { if (this.hist.length) { this.frames = JSON.parse(this.hist.pop()); this.sel = -1; this.msg = ''; } }
+  clear() { this.save(); this.frames = []; this.sel = -1; this.msg = ''; }
+  fitRect(r) { // smallest standard scale whose paper covers the drag, centred on it
+    const [pw, ph] = PAPERS[this.preset.paper], rw = Math.abs(r.b[0] - r.a[0]), rh = Math.abs(r.b[1] - r.a[1]);
+    const k = STD.find(k => pw * k >= rw && ph * k >= rh) || STD[STD.length - 1];
+    return frameAt((r.a[0] + r.b[0]) / 2, (r.a[1] + r.b[1]) / 2, this.preset.paper, k);
+  }
+  hitC(sp, w) {
+    const b = this.b, f = this.frames[this.sel];
+    if (f) { const ci = corners(f).findIndex(q => { const p = b.toS(q); return Math.hypot(p[0] - sp[0], p[1] - sp[1]) < 24; }); if (ci >= 0) return { i:this.sel, corner:ci };
+             if (w[0] >= f.x && w[0] <= f.x + f.w && w[1] >= f.y && w[1] <= f.y + f.h) return { i:this.sel, body:true }; }
+    for (let i = this.frames.length - 1; i >= 0; i--) { const g = this.frames[i], a = b.toS([g.x, g.y]), e = b.toS([g.x + g.w, g.y + g.h]), t = 14;
+      const inOuter = sp[0] > a[0] - t && sp[0] < e[0] + t && sp[1] > a[1] - t && sp[1] < e[1] + t, inInner = sp[0] > a[0] + t && sp[0] < e[0] - t && sp[1] > a[1] + t && sp[1] < e[1] - t;
+      if (inOuter && !inInner) return { i, body:true, edge:true }; }
+    return null;
+  }
+  down(sp) {
+    const w = this.b.toW(sp), v = this.v; this.msg = '';
+    if (v === 'A') { this.ghost = frameAt(w[0], w[1], this.preset.paper, this.preset.scale); return; }
+    if (v === 'B') { this.rect = { a:w, b:w }; this.ghost = null; return; }
+    const h = this.hitC(sp, w);
+    if (h && h.corner != null) { this.save(); const f = this.frames[h.i]; this.drag = { type:'corner', f, o:corners(f)[(h.corner + 2) % 4], corner:h.corner }; return; }
+    if (h) { const wasSel = h.i === this.sel && !h.edge; this.sel = h.i; syncBar3(); this.save(); const f = this.frames[h.i];
+      this.drag = { type:'move', f, sp, start:w, x:f.x, y:f.y, moved:false, wasSel }; return; }
+    this.ghost = frameAt(w[0], w[1], this.preset.paper, this.preset.scale);
+  }
+  move(sp) {
+    const w = this.b.toW(sp);
+    if (this.ghost && this.v !== 'B') { const g = this.ghost; g.x = w[0] - g.w / 2; g.y = w[1] - g.h / 2; return; }
+    if (this.rect) { this.rect.b = w; this.ghost = this.fitRect(this.rect); return; }
+    const d = this.drag; if (!d) return;
+    if (d.type === 'move') { if (Math.hypot(sp[0] - d.sp[0], sp[1] - d.sp[1]) > 6) d.moved = true; if (d.moved) { d.f.x = d.x + w[0] - d.start[0]; d.f.y = d.y + w[1] - d.start[1]; } return; }
+    const [pw, ph] = PAPERS[d.f.paper], s = Math.max(Math.abs(w[0] - d.o[0]) / pw, Math.abs(w[1] - d.o[1]) / ph, 1e-6); // corner: snap to the nearest standard scale
+    const k = STD.reduce((best, k) => Math.abs(Math.log(k / s)) < Math.abs(Math.log(best / s)) ? k : best, STD[0]);
+    const f = d.f; f.scale = k; f.w = pw * k; f.h = ph * k;
+    f.x = (d.corner === 1 || d.corner === 2) ? d.o[0] : d.o[0] - f.w; f.y = (d.corner === 2 || d.corner === 3) ? d.o[1] : d.o[1] - f.h;
+    this.preset.scale = k; syncBar3();
+  }
+  up(sp) {
+    if (this.v === 'B') { const r = this.rect; this.rect = null; if (!r) return; const a = this.b.toS(r.a), e = this.b.toS(r.b);
+      if (Math.hypot(e[0] - a[0], e[1] - a[1]) < 12) { this.ghost = null; this.msg = 'Drag a box around what you want'; return; }
+      this.save(); this.frames.push(this.ghost); this.msg = `Frame: ${this.ghost.paper} at ${scaleLabel(this.ghost.scale)}`; this.ghost = null; return; }
+    if (this.ghost) { this.move(sp); this.save(); this.frames.push(this.ghost); this.msg = `Frame placed: ${this.ghost.paper} at ${scaleLabel(this.ghost.scale)}`; this.ghost = null;
+      if (this.v === 'C') { this.sel = this.frames.length - 1; syncBar3(); } return; }
+    const d = this.drag; this.drag = null; if (!d) return;
+    if (d.type === 'move' && !d.moved) { this.hist.pop(); if (d.wasSel) { this.sel = -1; this.msg = 'Tap to place a frame, or tap an edge to pick one'; } }
+    if (d.type === 'corner') this.msg = `Now ${scaleLabel(d.f.scale)}`;
+  }
+  cancel() { this.ghost = null; this.rect = null; if (this.drag) { this.frames = JSON.parse(this.hist.pop()); this.sel = -1; this.drag = null; } }
+  paint(c) {
+    const b = this.b, ctx = b.ctx, z = b.m.z;
+    this.frames.forEach((f, i) => drawFrame(b, f, c, i === this.sel && this.v === 'C' ? 'sel' : ''));
+    if (this.rect) { const r = this.rect, x0 = Math.min(r.a[0], r.b[0]), y0 = Math.min(r.a[1], r.b[1]), w = Math.abs(r.b[0] - r.a[0]), h = Math.abs(r.b[1] - r.a[1]);
+      b.worldTx(); ctx.save(); ctx.fillStyle = c.accentFill; ctx.fillRect(x0, y0, w, h); ctx.setLineDash([5 / z, 4 / z]); ctx.strokeStyle = c.accent; ctx.lineWidth = 1.2 / z; ctx.strokeRect(x0, y0, w, h); ctx.restore(); }
+    if (this.ghost) drawFrame(b, this.ghost, c, 'ghost');
+  }
+  overlay() {}
+  status() {
+    const p = this.preset, now = `${p.paper} at ${scaleLabel(p.scale)}`;
+    if (this.rect && this.ghost) return `Fits on ${this.ghost.paper} at ${scaleLabel(this.ghost.scale)}`;
+    if (this.ghost) return 'Lift to place it';
+    if (this.drag && this.drag.type === 'corner') return scaleLabel(this.drag.f.scale);
+    if (this.drag && this.drag.moved) return 'Moving the frame';
+    if (this.msg) return this.msg;
+    if (this.v === 'A') return `Tap to place ${now}`;
+    if (this.v === 'B') return `Drag a box. Paper: ${p.paper}`;
+    return this.sel >= 0 ? 'Drag to move. Drag a corner to rescale.' : `Tap to place ${now}`;
+  }
+}
+
+// ---------- the four boards ----------
+const ROOM_BOX = [-24, -24, 504, 312];
+const b1 = new Board('st1', ROOM, new DimTool('dim'), ROOM_BOX);
+const b2 = new Board('st2', ROOM, new DimTool('measure'), ROOM_BOX);
+const b3 = new Board('st3', SITE, new FrameTool(), [-80, -80, 2960, 1880]);
+const b4 = new Board('st4', ROOM, new DimTool('dim'), [20, -24, 330, 220]);
+const boards = [b1, b2, b3, b4];
+
+function placed(a, b, upBy) { // a dimension in the Q1 style, for the seeded examples
+  const pl = shown('q1');
+  if (pl === 'A') return { a, b, mode:'on' };
+  if (pl === 'B') return { a, b, mode:'pull', kind:'h', at:a[1] - upBy };
+  return { a, b, mode:'off', kind:'aligned', off:upBy };
+}
+function seedQ1() { const t = b1.tool; t.resetPhase(); t.hist = []; t.msg = ''; t.dims = [placed([132, 168], [204, 168], 30)]; }
+function seedQ4() { const t = b4.tool; t.resetPhase(); t.hist = []; t.msg = ''; t.dims = [placed(HEADER[0], HEADER[1], 24)]; }
+
+// ---------- page controls ----------
+function renderSegs() {
+  document.querySelectorAll('.seg').forEach(seg => {
+    const q = seg.dataset.q;
+    if (!seg.children.length) seg.innerHTML = Object.entries(Q[q]).map(([k, [name]]) => `<button data-v="${k}"><b>${k}</b><span>${name}</span></button>`).join('');
+    seg.classList.toggle('unpicked', !pick[q]);
+    for (const btn of seg.children) btn.setAttribute('aria-pressed', btn.dataset.v === shown(q));
+    seg.parentElement.querySelector('.desc').textContent = (pick[q] ? '' : `Showing ${shown(q)} until you pick. `) + Q[q][shown(q)][1];
+  });
+  const r = Q.q4[shown('q4')][0];
+  document.querySelector('[data-uses=q1]').textContent = `Points find as in Q2 (${shown('q2')}). Lengths round as in Q4 (${r}).`;
+  document.querySelector('[data-uses=q2]').textContent = `Dimensions place as in Q1 (${shown('q1')}). Lengths round as in Q4 (${r}).`;
+  document.querySelector('[data-uses=q4]').textContent = `Dimensions place as in Q1 (${shown('q1')}), points find as in Q2 (${shown('q2')}).`;
+  document.getElementById('pickList').innerHTML = Object.keys(Q).map((q, i) =>
+    `<a href="#s${i + 1}" class="${pick[q] ? '' : 'none'}">Q${i + 1} <b>${pick[q] || '–'}</b></a>`).join(' · ');
+}
+document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-v]'); if (!btn) return; const q = seg.dataset.q; pick[q] = btn.dataset.v; writeURL();
+  if (q === 'q1') { seedQ1(); b2.tool.resetPhase(); seedQ4(); }
+  if (q === 'q2') [b1, b2, b4].forEach(b => b.tool.resetPhase());
+  if (q === 'q3') { b3.tool.reset(); renderBar3(); }
+  if (q === 'q4') renderTable();
+  renderSegs(); boards.forEach(b => b.draw());
+}));
+function writeURL() {
+  const u = new URL(location.href);
+  for (const k in Q) pick[k] ? u.searchParams.set(k, pick[k]) : u.searchParams.delete(k);
+  themePin ? u.searchParams.set('theme', themePin) : u.searchParams.delete('theme');
+  history.replaceState(null, '', u);
+}
+
+// Q2: measure or dimension
+const kind2 = document.getElementById('kind2');
+function renderKind2() { for (const btn of kind2.children) btn.setAttribute('aria-pressed', btn.dataset.k === b2.tool.kind); }
+kind2.addEventListener('click', e => { const btn = e.target.closest('button[data-k]'); if (!btn) return; b2.tool.kind = btn.dataset.k; b2.tool.resetPhase(); b2.tool.msg = ''; renderKind2(); b2.draw(); });
+
+// Q3: the paper and scale bar
+const bar3 = document.getElementById('bar3');
+function renderBar3() {
+  const t = b3.tool, v = shown('q3');
+  const paper = `<select data-f="paper" aria-label="Paper size">${Object.keys(PAPERS).map(p => `<option ${p === t.preset.paper ? 'selected' : ''}>${p}</option>`).join('')}</select>`;
+  const scale = `<select data-f="scale" aria-label="Drawing scale">${SCALES.map(s => `<option value="${s[1]}" ${s[1] === t.preset.scale ? 'selected' : ''}>${s[0]}</option>`).join('')}</select>`;
+  bar3.innerHTML = v === 'B' ? `${paper}<span class="lbl">scale: from your drag</span>` : `${paper}<span class="lbl">at</span>${scale}`;
+}
+function syncBar3() { const t = b3.tool, f = t.frames[t.sel]; if (f) { t.preset.paper = f.paper; t.preset.scale = f.scale; }
+  const p = bar3.querySelector('[data-f=paper]'), s = bar3.querySelector('[data-f=scale]'); if (p) p.value = t.preset.paper; if (s) s.value = String(t.preset.scale); }
+bar3.addEventListener('change', e => {
+  const t = b3.tool, f = shown('q3') === 'C' ? t.frames[t.sel] : null;
+  if (e.target.dataset.f === 'paper') t.preset.paper = e.target.value; else t.preset.scale = +e.target.value;
+  if (f) { t.save(); const cx = f.x + f.w / 2, cy = f.y + f.h / 2; Object.assign(f, frameAt(cx, cy, t.preset.paper, t.preset.scale)); } // C: the bar edits the picked frame
+  t.msg = ''; b3.draw();
+});
+
+// Q4: the sample table
+const SAMPLES = [ ['Header run', 163.3125], ['Wall to tank', 107.875], ['Diagonal', Math.hypot(168, 92)], ['Offset', 5.6875] ];
+function renderTable() {
+  const den = ROUND[shown('q4')];
+  document.getElementById('t4').innerHTML = SAMPLES.map(([name, x], i) => { const s = Math.round(x * den) / den;
+    return `<tr class="${i ? '' : 'hl'}"><td>${name}</td><td>${Math.abs(x * 32 - Math.round(x * 32)) > 1e-6 ? '≈ ' : ''}${fmt(x, 32)}</td><td class="shown">${fmt(x)}</td><td>${offBy(s, x)}</td></tr>`; }).join('');
+}
+
+// theme
+const themeEl = document.getElementById('theme');
+function applyTheme() {
+  document.documentElement.dataset.theme = isDark() ? 'dark' : 'light';
+  for (const btn of themeEl.children) btn.setAttribute('aria-pressed', (btn.dataset.t === 'dark') === isDark());
+  boards.forEach(b => b.draw());
+}
+themeEl.addEventListener('click', e => { const btn = e.target.closest('button[data-t]'); if (!btn) return; themePin = btn.dataset.t; writeURL(); applyTheme(); });
+mq.addEventListener('change', () => { if (!themePin) applyTheme(); });
+
+// copy link
+document.getElementById('copy').addEventListener('click', async e => {
+  const btn = e.currentTarget;
+  try { await navigator.clipboard.writeText(location.href); btn.textContent = 'Copied'; } catch (_) { prompt('Copy this link', location.href); }
+  setTimeout(() => { btn.textContent = 'Copy link'; }, 1500);
+});
+
+seedQ1(); seedQ4(); renderSegs(); renderKind2(); renderBar3(); renderTable(); applyTheme();
+</script>
+</body>
+</html>

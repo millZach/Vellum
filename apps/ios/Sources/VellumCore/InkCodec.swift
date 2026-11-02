@@ -40,12 +40,13 @@ enum InkCodec {
     // MARK: Events
 
     /// Each kind of event's code. Codes are never reused: 1 to 4 are version 1's, 5 to 9 came with #7, 10 to 14 with
-    /// #8. A move, duplicate or delete of a selection holding no dimension or frame keeps its #7 code and bytes; one
+    /// #8, 15 with #11. A move, duplicate or delete of a selection holding no dimension or frame keeps its #7 code and bytes; one
     /// holding any takes the #8 code, whose selection adds the dimension and frame ids.
     private enum EventTag: UInt8 {
         case draw = 1, erase = 2, undo = 3, redo = 4
         case transform = 5, duplicate = 6, delete = 7, addText = 8, editText = 9
         case addDimension = 10, addFrame = 11, transformAll = 12, duplicateAll = 13, deleteAll = 14
+        case addSheet = 15
     }
 
     static func encode(_ event: InkEvent) -> [UInt8] {
@@ -96,6 +97,9 @@ enum InkCodec {
         case .addFrame(let frame):
             w.u8(EventTag.addFrame.rawValue)
             w.frame(frame)
+        case .addSheet(let sheet):
+            w.u8(EventTag.addSheet.rawValue)
+            w.sheet(sheet)
         }
         return w.bytes
     }
@@ -140,6 +144,8 @@ enum InkCodec {
             event = .addDimension(try r.dimension())
         case .addFrame:
             event = .addFrame(try r.frame())
+        case .addSheet:
+            event = .addSheet(try r.sheet())
         }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after an event") }
         return event
@@ -152,7 +158,9 @@ enum InkCodec {
     /// since version 3, a dimension or a frame), the next text box id and the text boxes, then, in version 3 and only
     /// on a canvas that has ever had a dimension or a frame, the next dimension id and the dimensions and the next
     /// frame id and the frames. A canvas of ink alone is written exactly as version 1 wrote it, byte for byte, and one
-    /// of ink and text boxes exactly as version 2 did.
+    /// of ink and text boxes exactly as version 2 did. Version 4 (#11) adds, on a canvas that has ever had a sheet, the
+    /// next sheet id and the sheets after the frames (writing the parts before them even when they are empty); a
+    /// canvas that never had one is written exactly as version 3 wrote it.
     static func encode(_ session: InkSession) -> [UInt8] {
         var w = ByteWriter()
         w.i64(Int64(session.nextID))
@@ -162,7 +170,8 @@ enum InkCodec {
             w.u32(UInt32(stack.count))
             for edit in stack { w.edit(edit, on: session.ink) }
         }
-        let annotations = session.hasHadAnnotations
+        let sheets = session.hasHadSheets
+        let annotations = session.hasHadAnnotations || sheets
         if session.nextTextID > 1 || !session.texts.isEmpty || annotations {
             w.varint(UInt64(max(session.nextTextID, 1)))
             w.u32(UInt32(session.texts.count))
@@ -175,6 +184,11 @@ enum InkCodec {
             w.varint(UInt64(max(session.nextFrameID, 1)))
             w.u32(UInt32(session.frames.count))
             for frame in session.frames { w.frame(frame) }
+        }
+        if sheets {
+            w.varint(UInt64(max(session.nextSheetID, 1)))
+            w.u32(UInt32(session.sheets.count))
+            for sheet in session.sheets { w.sheet(sheet) }
         }
         return w.bytes
     }
@@ -217,10 +231,18 @@ enum InkCodec {
             frames.reserveCapacity(frameCount)
             for _ in 0..<frameCount { frames.append(try r.frame()) }
         }
+        var nextSheetID = 1
+        var sheets: [Sheet] = []
+        if version >= 4, !r.isAtEnd {
+            nextSheetID = Int(clamping: try r.varint())
+            let sheetCount = try r.count(each: ByteReader.smallestSheet)
+            sheets.reserveCapacity(sheetCount)
+            for _ in 0..<sheetCount { sheets.append(try r.sheet()) }
+        }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after a snapshot") }
-        return InkSession(ink: ink, texts: texts, dimensions: dimensions, frames: frames, undoStack: stacks[0],
-                          redoStack: stacks[1], nextID: nextID, nextTextID: nextTextID,
-                          nextDimensionID: nextDimensionID, nextFrameID: nextFrameID)
+        return InkSession(ink: ink, texts: texts, dimensions: dimensions, frames: frames, sheets: sheets,
+                          undoStack: stacks[0], redoStack: stacks[1], nextID: nextID, nextTextID: nextTextID,
+                          nextDimensionID: nextDimensionID, nextFrameID: nextFrameID, nextSheetID: nextSheetID)
     }
 }
 
@@ -320,6 +342,9 @@ struct ByteWriter {
         case .addFrame(let frame):
             u8(EditTag.addFrame.rawValue)
             self.frame(frame)
+        case .addSheet(let sheet):
+            u8(EditTag.addSheet.rawValue)
+            self.sheet(sheet)
         }
     }
 
@@ -416,6 +441,58 @@ struct ByteWriter {
         gridPoint(frame.origin)
     }
 
+    /// A sheet (#11): id, its paper's width and height in printed inches as 64-bit floats, its scale, its top-left
+    /// corner in grid units, whether it inverts badly, then its page (1 and the PDF's name on the Duo, its file name,
+    /// its Dropbox path, the page and the sheet number read, or 0 for none) and its scale areas (a count, then each
+    /// one's name, rectangle on the paper in printed inches as four 64-bit floats, and scale). About 200 bytes.
+    mutating func sheet(_ sheet: Sheet) {
+        varint(UInt64(max(sheet.id.value, 0)))
+        f64(sheet.paper.width.inches)
+        f64(sheet.paper.height.inches)
+        sheetScale(sheet.scale)
+        gridPoint(sheet.origin)
+        u8(sheet.invertsBadly ? 1 : 0)
+        if let page = sheet.page {
+            u8(1)
+            string(page.file)
+            string(page.name)
+            string(page.path)
+            varint(UInt64(max(page.index, 0)))
+            string(page.number ?? "")
+        } else {
+            u8(0)
+        }
+        varint(UInt64(sheet.areas.count))
+        for area in sheet.areas {
+            string(area.name)
+            f64(area.rect.x.inches)
+            f64(area.rect.y.inches)
+            f64(area.rect.width.inches)
+            f64(area.rect.height.inches)
+            sheetScale(area.scale)
+        }
+    }
+
+    /// A sheet's or scale area's scale: 2 for NTS, else the notation (0 lengths, 1 ratio) and the printed and real
+    /// sides in inches as 64-bit floats.
+    private mutating func sheetScale(_ scale: Sheet.Scale) {
+        switch scale {
+        case .notToScale:
+            u8(2)
+        case .drawn(let drawing):
+            u8(drawing.notation == .ratio ? 1 : 0)
+            f64(drawing.printed.inches)
+            f64(drawing.real.inches)
+        }
+    }
+
+    /// Text as a varint length and its UTF-8.
+    mutating func string(_ text: String) {
+        let utf8 = Array(text.utf8)
+        varint(UInt64(utf8.count))
+        raw(utf8)
+    }
+
     private mutating func historyStroke(_ stroke: InkStroke, on ink: Ink) {
         // A moved stroke keeps its id, so the id alone says nothing: only the very stroke on the canvas goes by id.
         if let index = ink.index(of: stroke.id), ink.strokes[index] == stroke {
@@ -445,6 +522,8 @@ enum EditTag: UInt8 {
     case transformAll = 10
     case duplicateAll = 11
     case deleteAll = 12
+    // Version 4 (#11).
+    case addSheet = 13
 }
 
 struct ByteReader {
@@ -556,6 +635,8 @@ struct ByteReader {
             return .addDimension(try dimension())
         case .addFrame:
             return .addFrame(try frame())
+        case .addSheet:
+            return .addSheet(try sheet())
         case .addText:
             return .addText(try textBox())
         case .editText:
@@ -607,6 +688,58 @@ struct ByteReader {
         guard textHeight.isFinite, textHeight > 0 else { throw InkCodec.Malformed(reason: "a dimension's text height") }
         return CanvasDimension(id: id, start: start, end: end, through: through, orientation: orientation, colour: colour,
                          textHeight: .inches(textHeight))
+    }
+
+    /// The fewest bytes a sheet takes: an id, a paper, an NTS scale, a corner, the flag, no page and no areas.
+    static let smallestSheet = 22
+
+    mutating func sheet() throws -> Sheet {
+        let id = SheetID(Int(clamping: try varint()))
+        let width = try f64(), height = try f64()
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else {
+            throw InkCodec.Malformed(reason: "a sheet's paper")
+        }
+        let scale = try sheetScale()
+        let origin = try gridPoint()
+        let invertsBadly = try u8() == 1
+        var page: SheetPage?
+        switch try u8() {
+        case 0: break
+        case 1:
+            let file = try string(), name = try string(), path = try string()
+            let index = Int(clamping: try varint())
+            let number = try string()
+            page = SheetPage(file: file, name: name, path: path, index: index, number: number.isEmpty ? nil : number)
+        default: throw InkCodec.Malformed(reason: "a sheet's page")
+        }
+        let areaCount = try varintCount(each: 34)
+        var areas: [ScaleArea] = []
+        areas.reserveCapacity(areaCount)
+        for _ in 0..<areaCount {
+            let name = try string()
+            let x = try f64(), y = try f64(), w = try f64(), h = try f64()
+            guard [x, y, w, h].allSatisfy(\.isFinite) else { throw InkCodec.Malformed(reason: "a scale area") }
+            areas.append(ScaleArea(name: name, rect: .inches(x: x, y: y, width: w, height: h), scale: try sheetScale()))
+        }
+        return Sheet(id: id, paper: .inches(width, by: height), scale: scale, origin: origin, page: page, areas: areas,
+                     invertsBadly: invertsBadly)
+    }
+
+    private mutating func sheetScale() throws -> Sheet.Scale {
+        let kind = try u8()
+        if kind == 2 { return .notToScale }
+        guard kind <= 1 else { throw InkCodec.Malformed(reason: "unknown scale notation") }
+        let printed = try f64(), real = try f64()
+        guard let scale = DrawingScale(printed: .inches(printed), real: .inches(real),
+                                       notation: kind == 1 ? .ratio : .lengths) else {
+            throw InkCodec.Malformed(reason: "a sheet's scale")
+        }
+        return .drawn(scale)
+    }
+
+    mutating func string() throws -> String {
+        let count = try varintCount(each: 1)
+        return String(decoding: try raw(count), as: UTF8.self)
     }
 
     mutating func frame() throws -> Frame {

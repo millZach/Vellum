@@ -98,6 +98,9 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         case pullOff
         /// A window is drawn and waits for what to do with it.
         case chooseWindowAction
+        /// A sheet confirmed in Add sheet waits, as a true-size outline, for a tap where it goes (#11). It belongs to no
+        /// tool: whatever is in hand, the next tap places the sheet.
+        case placeSheet
     }
 
     /// The status bar's prompt part way through a measure, dimension or window.
@@ -107,8 +110,15 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .secondPoint: "Tap the second point"
         case .pullOff: "Drag or tap to place line"
         case .chooseWindowAction: "Zoom or make a frame"
+        case .placeSheet: Self.placeSheetPrompt
         }
     }
+
+    /// The status bar's prompt while a sheet waits to be placed, whatever the tool.
+    public static let placeSheetPrompt = "Tap where the sheet goes"
+
+    /// What VoiceOver says while a sheet waits to be placed.
+    public static let placeSheetHint = "Tap the canvas where the sheet's centre goes. Pan and pinch to find the spot first"
 
     public var id: String { rawValue }
     public var title: String { descriptor.title }
@@ -137,6 +147,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// The status bar's prompt, given whether the lasso has a selection: with one, it says to drag it; and, for a
     /// measure, dimension or window part way through, what it waits for next (#8).
     public func prompt(fingerDraws: Bool, hasSelection: Bool, step: Step = .start) -> String {
+        if step == .placeSheet { return Self.placeSheetPrompt }
         if self == .lasso, hasSelection { return Self.selectionPrompt }
         if let next = Self.prompt(for: step) { return next }
         return prompt(fingerDraws: fingerDraws)

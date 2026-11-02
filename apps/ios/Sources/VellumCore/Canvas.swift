@@ -27,10 +27,32 @@ public struct Canvas: Hashable, Sendable {
     /// The length between two points on the canvas. It is real wherever the canvas is real, across any number of
     /// sheets at different scales, because every scaled sheet sits at real-world size. When either point lies on an
     /// NTS sheet the length is the printed length marked NTS, never a real one, even where that sheet overlaps others.
+    /// Inside a scale area (#11) the length reads at the area's scale: as the printed length it spans on the sheet,
+    /// turned into a real length by the area's drawing scale, or marked NTS in an NTS area.
     public func measure(from start: CanvasPoint, to end: CanvasPoint) -> Measure {
-        let distance = start.distance(to: end)
-        let onNotToScaleSheet = sheets.contains { $0.isNotToScale && ($0.contains(start) || $0.contains(end)) }
-        return onNotToScaleSheet ? .notToScale(PrintedLength(inches: distance.inches)) : .real(distance)
+        Self.measure(start.distance(to: end), between: start, and: end, on: sheets)
+    }
+
+    /// What a canvas length between two points reads as on these sheets (`measure(from:to:)`): `length` is the
+    /// canvas length measured, which for a dimension may be its horizontal or vertical run rather than the distance.
+    public static func measure(_ length: Length, between start: CanvasPoint, and end: CanvasPoint, on sheets: [Sheet])
+        -> Measure {
+        // NTS first, as before #11: a point on an NTS sheet, or in an NTS area, reads printed inches marked NTS.
+        for point in [start, end] {
+            for sheet in sheets.reversed() where sheet.contains(point) && sheet.scale(at: point) == .notToScale {
+                return .notToScale(PrintedLength(inches: length.inches / sheet.canvasPerPrinted))
+            }
+        }
+        // Then a scale area at a scale other than its sheet's: the first point's, else the second's, topmost sheet
+        // first. The length spans length / k printed inches on that sheet, which the area's scale makes real.
+        for point in [start, end] {
+            for sheet in sheets.reversed() {
+                guard let area = sheet.area(at: point), area.scale != sheet.scale else { continue }
+                let printed = PrintedLength(inches: length.inches / sheet.canvasPerPrinted)
+                return Sheet.measure(printed: printed, at: area.scale)
+            }
+        }
+        return .real(length)
     }
 
     /// A measure shown in this canvas's units.

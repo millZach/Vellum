@@ -70,8 +70,9 @@ public final class InkStore {
     /// reused, so new events appended to a version 1 log replay too; the next compaction writes version 2 files.
     /// Version 3 (#8) adds dimensions and frames: their events, and the snapshot's dimensions and frames after its text
     /// boxes. Older files open as they are, in the same way, and the snapshot payload of a canvas with neither is
-    /// written byte for byte as version 2 wrote it.
-    static let version: UInt16 = 3
+    /// written byte for byte as version 2 wrote it. Version 4 (#11) adds sheets: their event, and the snapshot's sheets
+    /// after its frames; a canvas that never had a sheet is written byte for byte as version 3 wrote it.
+    static let version: UInt16 = 4
     static let snapshotMagic: [UInt8] = Array("VINK".utf8)
     static let logMagic: [UInt8] = Array("VLOG".utf8)
     /// The log's header: magic (4), version (2), reserved (2), generation (8).

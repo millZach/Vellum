@@ -128,4 +128,6 @@ enum DropboxEndpoint {
     static let revoke = URL(string: "https://api.dropboxapi.com/2/auth/token/revoke")!
     static let listFolder = URL(string: "https://api.dropboxapi.com/2/files/list_folder")!
     static let listFolderContinue = URL(string: "https://api.dropboxapi.com/2/files/list_folder/continue")!
+    /// A file's bytes (#11): a content endpoint, its argument in the `Dropbox-API-Arg` header.
+    static let download = URL(string: "https://content.dropboxapi.com/2/files/download")!
 }

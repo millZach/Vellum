@@ -81,7 +81,7 @@ public actor DropboxSession {
     private var kept = Kept.unread
     private var listings: [String: DropboxListing]?
     private var renewal: Shared<DropboxTokens>?
-    private var listingsInFlight: [String: Shared<[DropboxFolder]>] = [:]
+    private var listingsInFlight: [String: Shared<DropboxListing>] = [:]
 
     public init(appKey: DropboxAppKey, transport: any DropboxTransport, store: any DropboxTokenStore,
                 listings: any DropboxListingStore = DropboxMemoryListingStore(), revokeDeadline: Duration = .seconds(4),
@@ -129,12 +129,24 @@ public actor DropboxSession {
     public func folders(in path: String, freshness: DropboxFreshness = .now,
                         partial: (@Sendable ([DropboxFolder]) async -> Void)? = nil) async throws(DropboxError)
         -> [DropboxFolder] {
+        try await listing(in: path, freshness: freshness, partial: partial).folders
+    }
+
+    /// The folders and PDFs directly inside `path`, by name (#11), kept and refreshed exactly as `folders(in:)` is.
+    public func contents(of path: String, freshness: DropboxFreshness = .now) async throws(DropboxError)
+        -> DropboxFolderContents {
+        try await listing(in: path, freshness: freshness, partial: nil).contents
+    }
+
+    private func listing(in path: String, freshness: DropboxFreshness,
+                         partial: (@Sendable ([DropboxFolder]) async -> Void)?) async throws(DropboxError)
+        -> DropboxListing {
         let started = generation
         guard isSignedIn else { throw .notSignedIn }
         if freshness == .recent, let kept = keptListing(path), now().timeIntervalSince(kept.checkedAt) < Self.recentCheck {
-            return kept.folders
+            return kept
         }
-        let result: Result<[DropboxFolder], DropboxError>
+        let result: Result<DropboxListing, DropboxError>
         if let shared = listingsInFlight[path], shared.generation == started {
             result = await shared.task.value
         } else {
@@ -218,11 +230,31 @@ public actor DropboxSession {
 
     // MARK: - Listing
 
+    /// Downloads a PDF's bytes as listed (its revision), in one request (#11). Callers keep the bytes, so a PDF is
+    /// downloaded once: `SheetPDFs` asks only for a PDF it does not already hold. A reply of another size than the
+    /// listing's is refused, so a cut-short download is never kept.
+    public func download(_ file: DropboxFile) async throws(DropboxError) -> Data {
+        let started = generation
+        guard isSignedIn else { throw .notSignedIn }
+        let argument = file.rev.isEmpty ? file.id : "rev:\(file.rev)"
+        guard let arg = try? JSONSerialization.data(withJSONObject: ["path": argument], options: [.sortedKeys]),
+              let header = String(data: arg, encoding: .utf8) else { throw .unexpectedReply }
+        let response = try await authorized(started: started) { tokens in
+            DropboxHTTPRequest(url: DropboxEndpoint.download, headers: [
+                "Authorization": "Bearer \(tokens.accessToken)",
+                "Dropbox-API-Arg": header,
+            ])
+        }
+        guard response.body.count == file.size else { throw .unexpectedReply }
+        return response.body
+    }
+
     private func list(_ path: String, started: Int, partial: (@Sendable ([DropboxFolder]) async -> Void)?) async
-        -> Result<[DropboxFolder], DropboxError> {
+        -> Result<DropboxListing, DropboxError> {
         do {
             var listing: DropboxListing
-            if let previous = keptListing(path), let changed = try await changes(since: previous, started: started, partial: partial) {
+            if let previous = keptListing(path), previous.listsPDFs,
+               let changed = try await changes(since: previous, started: started, partial: partial) {
                 listing = changed
             } else {
                 listing = try await fullListing(path, started: started, partial: keptListing(path) == nil ? partial : nil)
@@ -233,7 +265,7 @@ public actor DropboxSession {
             all[path] = listing
             listings = all
             listingStore.save(all)
-            return .success(listing.folders)
+            return .success(listing)
         } catch {
             return .failure(error)
         }
@@ -244,15 +276,17 @@ public actor DropboxSession {
         var page = try listPage(try await authorizedJSON(
             DropboxEndpoint.listFolder, ["path": path, "recursive": false, "include_deleted": false], started: started))
         var folders: [String: DropboxFolder] = [:]
-        page.apply(to: &folders)
+        var pdfs: [String: DropboxFile] = [:]
+        page.apply(to: &folders, &pdfs)
         while page.hasMore {
             await partial?(Self.sorted(folders))
             try still(started)
             page = try listPage(try await authorizedJSON(DropboxEndpoint.listFolderContinue, ["cursor": page.cursor],
                                                          started: started))
-            page.apply(to: &folders)
+            page.apply(to: &folders, &pdfs)
         }
-        return DropboxListing(folders: Self.sorted(folders), cursor: page.cursor, checkedAt: now())
+        return DropboxListing(folders: Self.sorted(folders), pdfs: Self.sorted(pdfs), cursor: page.cursor,
+                              checkedAt: now())
     }
 
     /// The kept listing with Dropbox's changes since its cursor applied, or nil when Dropbox says the cursor has to
@@ -260,6 +294,7 @@ public actor DropboxSession {
     private func changes(since kept: DropboxListing, started: Int, partial: (@Sendable ([DropboxFolder]) async -> Void)?)
         async throws(DropboxError) -> DropboxListing? {
         var folders = Dictionary(kept.folders.map { (Self.key($0.path), $0) }) { $1 }
+        var pdfs = Dictionary(kept.pdfs.map { (Self.key($0.path), $0) }) { $1 }
         var cursor = kept.cursor
         var first = true
         while true {
@@ -275,11 +310,11 @@ public actor DropboxSession {
                 return nil
             }
             let page = try listPage(response)
-            page.apply(to: &folders)
+            page.apply(to: &folders, &pdfs)
             cursor = page.cursor
             if !page.hasMore { break }
         }
-        return DropboxListing(folders: Self.sorted(folders), cursor: cursor, checkedAt: now())
+        return DropboxListing(folders: Self.sorted(folders), pdfs: Self.sorted(pdfs), cursor: cursor, checkedAt: now())
     }
 
     private func keptListing(_ path: String) -> DropboxListing? {
@@ -298,21 +333,34 @@ public actor DropboxSession {
         folders.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
+    private static func sorted(_ pdfs: [String: DropboxFile]) -> [DropboxFile] {
+        pdfs.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
     private struct Page {
         enum Entry {
             case folder(DropboxFolder)
-            /// Anything at this path that is no longer a folder: deleted, or a file now.
+            /// A PDF (#11).
+            case pdf(DropboxFile)
+            /// Anything at this path that is no longer a folder or a PDF: deleted, or another kind of file.
             case gone(String)
         }
         var entries: [Entry]
         var cursor: String
         var hasMore: Bool
 
-        func apply(to folders: inout [String: DropboxFolder]) {
+        func apply(to folders: inout [String: DropboxFolder], _ pdfs: inout [String: DropboxFile]) {
             for entry in entries {
                 switch entry {
-                case .folder(let folder): folders[DropboxSession.key(folder.path)] = folder
-                case .gone(let key): folders[key] = nil
+                case .folder(let folder):
+                    folders[DropboxSession.key(folder.path)] = folder
+                    pdfs[DropboxSession.key(folder.path)] = nil
+                case .pdf(let file):
+                    pdfs[DropboxSession.key(file.path)] = file
+                    folders[DropboxSession.key(file.path)] = nil
+                case .gone(let key):
+                    folders[key] = nil
+                    pdfs[key] = nil
                 }
             }
         }
@@ -326,7 +374,12 @@ public actor DropboxSession {
                 let name: String
                 let path_display: String?
                 let path_lower: String?
-                enum CodingKeys: String, CodingKey { case tag = ".tag", id, name, path_display, path_lower }
+                let size: Int?
+                let content_hash: String?
+                let rev: String?
+                enum CodingKeys: String, CodingKey {
+                    case tag = ".tag", id, name, path_display, path_lower, size, content_hash, rev
+                }
             }
             let entries: [Entry]
             let cursor: String
@@ -335,6 +388,10 @@ public actor DropboxSession {
         guard let reply = try? JSONDecoder().decode(Reply.self, from: response.body) else { throw .unexpectedReply }
         let entries: [Page.Entry] = reply.entries.map {
             let path = $0.path_display ?? "/\($0.name)"
+            if $0.tag == "file", DropboxFile.isPDF($0.name), let size = $0.size {
+                return .pdf(DropboxFile(id: $0.id ?? path, name: $0.name, path: path, size: size,
+                                        contentHash: $0.content_hash ?? "", rev: $0.rev ?? ""))
+            }
             guard $0.tag == "folder" else { return .gone($0.path_lower ?? Self.key(path)) }
             return .folder(DropboxFolder(id: $0.id ?? path, name: $0.name, path: path))
         }
@@ -350,14 +407,23 @@ public actor DropboxSession {
         guard let body = try? JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys]) else {
             throw .unexpectedReply
         }
+        return try await authorized(started: started, acceptingConflict: acceptingConflict) { tokens in
+            self.request(url, body, tokens)
+        }
+    }
+
+    /// An authorized call to Dropbox, the request made from the tokens by `make`, renewed as `authorizedJSON` says.
+    private func authorized(started: Int, acceptingConflict: Bool = false,
+                            _ make: (DropboxTokens) -> DropboxHTTPRequest) async throws(DropboxError)
+        -> DropboxHTTPResponse {
         try still(started)
         guard var tokens = tokens() else { throw .notSignedIn }
         if tokens.needsRefresh(at: now()) { tokens = try await refresh(tokens, started: started) }
-        var response = try await send(request(url, body, tokens))
+        var response = try await send(make(tokens))
         try still(started)
         if response.status == 401 {
             tokens = try await refresh(tokens, started: started)
-            response = try await send(request(url, body, tokens))
+            response = try await send(make(tokens))
             try still(started)
             if response.status == 401 {
                 forgetSignIn()
@@ -368,7 +434,7 @@ public actor DropboxSession {
         throw response.status == 429 || response.status >= 500 ? .dropboxUnavailable : .unexpectedReply
     }
 
-    private func request(_ url: URL, _ body: Data, _ tokens: DropboxTokens) -> DropboxHTTPRequest {
+    private nonisolated func request(_ url: URL, _ body: Data, _ tokens: DropboxTokens) -> DropboxHTTPRequest {
         DropboxHTTPRequest(url: url, headers: ["Authorization": "Bearer \(tokens.accessToken)",
                                                "Content-Type": "application/json"], body: body)
     }

@@ -68,7 +68,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
                        help: "Tap to place a text box or edit one, then type, or write with the Pencil and it becomes text")
         case .measure:
             Descriptor(title: "Measure", systemImage: "ruler", group: .lengthsAndRegions, comingIn: nil, inkTool: nil,
-                       prompt: "Measure: tap the first point",
+                       prompt: "Measure: tap first point",
                        help: "Tap two points to read the length between them in the canvas units. A tap snaps to "
                            + "ink ends, corners and circle centres, shown in a magnifier while you touch")
         case .dimension:
@@ -78,7 +78,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
                            + "horizontal, beside for vertical, out at an angle for aligned. It stays on the canvas")
         case .frame:
             Descriptor(title: "Frame", systemImage: "rectangle.inset.filled", group: .lengthsAndRegions, comingIn: nil,
-                       inkTool: nil, prompt: "Drag a box to make a frame",
+                       inkTool: nil, prompt: "Drag a box for a frame",
                        help: "Pick a paper size, then drag a box round what the frame takes in. Vellum picks the "
                            + "drawing scale whose paper covers it")
         case .window:
@@ -106,7 +106,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .start: nil
         case .secondPoint: "Tap the second point"
         case .pullOff: "Drag or tap to place line"
-        case .chooseWindowAction: "Zoom to it or make a frame"
+        case .chooseWindowAction: "Zoom or make a frame"
         }
     }
 

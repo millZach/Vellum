@@ -114,13 +114,13 @@ final class CanvasToolPromptTests: XCTestCase {
                 XCTAssertLessThanOrEqual(prompt.count, 28, prompt)
             }
         }
-        XCTAssertEqual(CanvasTool.measure.prompt(fingerDraws: false, hasSelection: false), "Measure: tap the first point")
+        XCTAssertEqual(CanvasTool.measure.prompt(fingerDraws: false, hasSelection: false), "Measure: tap first point")
         XCTAssertEqual(CanvasTool.dimension.prompt(fingerDraws: false, hasSelection: false, step: .secondPoint),
                        "Tap the second point")
         XCTAssertEqual(CanvasTool.dimension.prompt(fingerDraws: false, hasSelection: false, step: .pullOff),
                        "Drag or tap to place line")
         XCTAssertEqual(CanvasTool.window.prompt(fingerDraws: false, hasSelection: false, step: .chooseWindowAction),
-                       "Zoom to it or make a frame")
+                       "Zoom or make a frame")
     }
 
     /// With something selected, the lasso's prompt says to drag it (#7); the other tools ignore a selection.

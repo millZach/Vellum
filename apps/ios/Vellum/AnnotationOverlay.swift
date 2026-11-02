@@ -37,6 +37,7 @@ final class AnnotationOverlay {
         didSet {
             guard isDark != oldValue else { return }
             rebuildAll()
+            applyToolColours()
             showTool()
         }
     }
@@ -125,8 +126,8 @@ final class AnnotationOverlay {
     func show(_ viewport: Viewport) {
         self.viewport = viewport
         if items.isEmpty && editor.dimensions.isEmpty && editor.frames.isEmpty {
-            base = viewport
-            withoutAnimation { keptLayer.transform = CATransform3DIdentity }
+            // Nothing kept: a pan or a pinch touches no layer here. The first dimension or frame draws afresh.
+            base = nil
         } else if let base {
             let ratio = viewport.pointsPerInch / base.pointsPerInch
             if ratio < 0.5 || ratio > 2 { rebuildAll() } else { placeKept() }
@@ -145,7 +146,7 @@ final class AnnotationOverlay {
 
     /// Follows a change to the dimensions and frames: what it took away goes, what it added is drawn.
     func annotationsChanged(_ change: InkChange) {
-        guard base != nil else { return rebuildAll() }
+        guard base != nil, !items.isEmpty else { return rebuildAll() }
         withoutAnimation {
             for id in change.removedDimensions { items.removeValue(forKey: .dimension(id))?.removeFromSuperlayer() }
             for id in change.removedFrames { items.removeValue(forKey: .frame(id))?.removeFromSuperlayer() }
@@ -329,10 +330,19 @@ final class AnnotationOverlay {
         }
     }
 
+    /// Whether any tool layer holds something, so a view change with nothing showing touches none of them.
+    private var toolShown = false
+
+    private var toolIsEmpty: Bool {
+        tool.measure == nil && tool.firstPoint == nil && tool.tip == nil && tool.pulling == nil
+            && tool.frameDrag == nil && tool.window == nil
+    }
+
     /// Places what the tool in hand is showing for the view now.
     private func showTool() {
         guard let viewport else { return }
-        applyToolColours()
+        if toolIsEmpty && !toolShown { return }
+        toolShown = !toolIsEmpty
         let screen = { (p: CanvasPoint) -> CGPoint in
             let s = viewport.screenPoint(for: p)
             return CGPoint(x: s.x, y: s.y)

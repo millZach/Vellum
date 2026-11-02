@@ -149,9 +149,13 @@ final class WindowMenu: UIView {
         layer.shadowOpacity = 0.18
         layer.shadowRadius = 6
         layer.shadowOffset = CGSize(width: 0, height: 2)
-        let send = button("Send…", subtitle: "later", hint: "Sending a window to an agent comes in a later update.",
+        let send = button("Send… (later)", hint: "Not available yet. Sending a window to an agent comes in a later update.",
                           action: nil)
         send.isEnabled = false
+        // Disabled, it stays readable on the dark menu, dimmed.
+        send.configurationUpdateHandler = { button in
+            button.configuration?.baseForegroundColor = UIColor(white: 1, alpha: button.isEnabled ? 1 : 0.45)
+        }
         let close = button("✕", hint: "Closes the window", action: #selector(closeTapped(_:)))
         close.accessibilityLabel = "Close"
         let stack = UIStackView(arrangedSubviews: [
@@ -164,6 +168,7 @@ final class WindowMenu: UIView {
         stack.axis = .horizontal
         stack.spacing = 2
         stack.alignment = .center
+        stack.distribution = .fill
         stack.isLayoutMarginsRelativeArrangement = true
         stack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 4)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -199,6 +204,7 @@ final class WindowMenu: UIView {
             return attributes
         }
         let button = UIButton(configuration: configuration)
+        button.setContentHuggingPriority(.required, for: .horizontal)
         if let action { button.addTarget(self, action: action, for: .touchUpInside) }
         button.accessibilityHint = hint
         return button
@@ -206,7 +212,8 @@ final class WindowMenu: UIView {
 
     /// Places the menu under a window's rectangle on screen (above it when it would not fit), clear of the chrome.
     func place(under rect: CGRect, in bounds: CGRect) {
-        let size = systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        let size = systemLayoutSizeFitting(UIView.layoutFittingCompressedSize, withHorizontalFittingPriority: .fittingSizeLevel,
+                                           verticalFittingPriority: .fittingSizeLevel)
         let chrome = CanvasEditor.chromeInsets
         let (top, left, bottom, right) = (CGFloat(chrome.top), CGFloat(chrome.left), CGFloat(chrome.bottom),
                                           CGFloat(chrome.right))

@@ -111,6 +111,9 @@ public actor CanvasSync {
     private let report: @Sendable (SyncReport) -> Void
 
     private var ledger = SyncLedger()
+    /// Whether `ledger` has been read from the store: every change waits for that, so one made before `start` (a
+    /// canvas left at once after launch) never writes an empty ledger over the outbox kept on the Duo.
+    private var loaded = false
     private var started = false
     private var online = true
     private var inBackground = false
@@ -145,7 +148,7 @@ public actor CanvasSync {
     public func start() async {
         guard !started else { return }
         started = true
-        ledger = store.load()
+        loadLedger()
         guard let session else { return publish() }
         signedOut = !(await session.isSignedIn)
         if signedOut { forgetUploads() }
@@ -182,6 +185,7 @@ public actor CanvasSync {
     /// nothing more of it uploads.
     public func canvasWillBeDeleted(_ id: UUID) {
         if onScreen == id { onScreen = nil }
+        loadLedger()
         guard let record = ledger[id] else { return }
         ledger[id] = nil
         failed.remove(id)
@@ -260,7 +264,14 @@ public actor CanvasSync {
 
     // MARK: The outbox
 
+    private func loadLedger() {
+        guard !loaded else { return }
+        ledger = store.load()
+        loaded = true
+    }
+
     private func queue(_ id: UUID, entry: CanvasSyncEntry? = nil) {
+        loadLedger()
         if var record = ledger[id] {
             record.pending = true
             record.queued += 1
@@ -277,6 +288,7 @@ public actor CanvasSync {
     /// After a sign-out the next sign-in may be another Dropbox: forget what was uploaded, so every canvas goes up
     /// whole, replacing whatever it finds.
     private func forgetUploads() {
+        loadLedger()
         for (key, var record) in ledger.canvases {
             record.uploaded = .nothing
             record.manifestRev = nil
@@ -289,6 +301,7 @@ public actor CanvasSync {
     }
 
     private func persist() {
+        guard loaded else { return }
         try? store.save(ledger)
     }
 

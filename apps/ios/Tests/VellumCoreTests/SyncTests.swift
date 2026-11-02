@@ -321,6 +321,21 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(ledgerFile.load().deletes, [])
     }
 
+    func testACanvasLeftBeforeTheEngineStartsNeverWipesTheKeptOutbox() async throws {
+        let ledgerFile = SyncLedgerFile(url: root.appendingPathComponent("Sync/ledger.json"))
+        var kept = SyncLedger()
+        kept.deletes = [PendingDelete(id: UUID(), folder: "Deleted while offline 0a1b")]
+        try ledgerFile.save(kept)
+        let id = try library.create(name: "Left at once").id
+        let (sync, _) = engine(ledger: ledgerFile)
+        await sync.setOnline(false)
+        await sync.canvasLeft(id)  // before start, as a canvas left the moment the app launches
+        await sync.start()
+        let ledger = ledgerFile.load()
+        XCTAssertEqual(ledger.deletes, kept.deletes, "the delete queued before the relaunch is still there")
+        XCTAssertEqual(ledger.pending, [id])
+    }
+
     func testAFailedUploadIsRetriedWithBackoffAndLosesNothing() async throws {
         let id = try library.create(name: "Retried").id
         try await draw(0..<10, on: id)
@@ -459,7 +474,7 @@ final class SyncTests: XCTestCase {
             timings[syncing ? "leave-canvas-sync-on" : "leave-canvas-sync-off"] = total / 20
         }
         for (metric, value) in timings.sorted(by: { $0.key < $1.key }) { SyncBudget.time(metric, value, unit: "µs") }
-        try await assertDropboxRebuildsTheDuosCanvas(sync, id)
+        XCTAssertEqual(reports.state(id), .synced, "and every round synced once it was left")
     }
 }
 

@@ -33,10 +33,11 @@ extension DropboxSession {
         -> DropboxWriteResult {
         let started = generation
         guard isSignedIn else { throw .notSignedIn }
-        let modeArgument: Any = switch mode {
-        case .add: "add"
-        case .overwrite: "overwrite"
-        case .update(let rev): [".tag": "update", "update": rev]
+        let modeArgument: Any
+        switch mode {
+        case .add: modeArgument = "add"
+        case .overwrite: modeArgument = "overwrite"
+        case .update(let rev): modeArgument = [".tag": "update", "update": rev]
         }
         guard let header = Self.apiArgument(["path": path, "mode": modeArgument, "autorename": false, "mute": true,
                                              "strict_conflict": false]) else { throw .unexpectedReply }

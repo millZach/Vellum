@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 import UIKit
 import VellumCore
@@ -10,6 +11,7 @@ struct CanvasListScreen: View {
     @State private var renaming: CanvasSummary?
     @State private var newName = ""
     @State private var deleting: CanvasSummary?
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
         GeometryReader { proxy in
@@ -79,6 +81,9 @@ struct CanvasListScreen: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("canvases.unsaved")
             }
+            if let banner = model.syncBanner {
+                syncBanner(banner)
+            }
             if model.hasLoaded && model.summaries.isEmpty {
                 ContentUnavailableView("No canvases yet", systemImage: "square.and.pencil",
                                        description: Text("Make one with New canvas. Everything you draw is saved on this Duo as you draw it."))
@@ -106,7 +111,7 @@ struct CanvasListScreen: View {
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(canvas.name).font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                Text(details(canvas)).font(.system(size: 12)).foregroundStyle(Chrome.secondaryText).lineLimit(1)
+                detailsLine(canvas).font(.system(size: 12)).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
@@ -123,6 +128,34 @@ struct CanvasListScreen: View {
         }
         .accessibilityHint(selected ? "Opens the canvas" : "Shows its preview")
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// The details, then where the canvas's sync stands when it isn't synced (#12): "· waiting for Dropbox" in amber,
+    /// "· sync failed · will retry" in the text colour.
+    private func detailsLine(_ canvas: CanvasSummary) -> Text {
+        let details = Text(details(canvas)).foregroundColor(Chrome.secondaryText)
+        guard let note = SyncStatusLine.listNote(model.syncState(of: canvas.id)) else { return details }
+        let noted = Text(" · \(note.text)").foregroundColor(SyncStatusStyle.colour(note.tone))
+        return details + (note.tone == .calm ? noted : noted.fontWeight(.medium))
+    }
+
+    /// The list's line about syncing: offline in amber with its warning sign, a failure with Retry, signed out with
+    /// Sign in.
+    private func syncBanner(_ banner: SyncStatusLine) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Image(systemName: banner.tone == .offline ? "exclamationmark.triangle" : "icloud.slash")
+                .accessibilityHidden(true)
+            Text(banner.text).fixedSize(horizontal: false, vertical: true)
+            if let action = banner.action {
+                Spacer(minLength: 4)
+                SyncActionButton(action: action,
+                                 act: SyncActions(model: model, webAuthentication: webAuthenticationSession).run)
+            }
+        }
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(SyncStatusStyle.colour(banner.tone))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("canvases.sync")
     }
 
     /// "Today 2:14 PM · 312 strokes", the sheets once they can be placed.

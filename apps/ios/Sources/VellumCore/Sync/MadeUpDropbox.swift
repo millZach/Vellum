@@ -109,15 +109,15 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
             let bytes = [UInt8](request.body ?? Data())
             _bytesUploaded += bytes.count
             let existing = files[path.lowercased()]
-            switch argument["mode"] {
-            case let mode as String where mode == "add":
+            let mode = argument["mode"]
+            if let tag = mode as? String, tag == "add" {
                 if existing != nil { return Self.conflict("path/conflict/file/") }
-            case let mode as String where mode == "overwrite":
-                break
-            case let mode as [String: Any]:
-                guard mode[".tag"] as? String == "update", let rev = mode["update"] as? String else { return Self.badRequest }
+            } else if let tag = mode as? String, tag == "overwrite" {
+                // Whatever is there.
+            } else if let update = mode as? [String: Any], update[".tag"] as? String == "update",
+                      let rev = update["update"] as? String {
                 if existing?.rev != rev { return Self.conflict("path/conflict/file/") }
-            default:
+            } else {
                 return Self.badRequest
             }
             revisions += 1

@@ -104,8 +104,8 @@ benchmark() {
 }
 
 # PART splits the work between CI jobs (the captures job outgrew its 45 minutes with #8): "captures" runs every capture
-# and the Debug benchmark, "sheets" only the sheet captures (#11, their own job so the captures job stays under its
-# hour), "release-benchmark" only the optimised build's benchmark; unset, it runs them all.
+# and the Debug benchmark, "sheets" the sheet captures (#11, their own job so the captures job stays under its
+# hour) and the sync captures (#12), "release-benchmark" only the optimised build's benchmark; unset, it runs them all.
 part=${PART:-all}
 
 # Placing sheets (#11), in light and dark, on the made-up Dropbox (`--ui-dropbox sheets`) and made-up PDFs
@@ -134,8 +134,47 @@ sheet_captures() {
   ls -lR "$data/Library/Application Support/Canvases" | sed "s|$data|<app data>|" | head -30
 }
 
+# Syncing to Dropbox (#12), in light and dark, on the made-up Dropbox (`--ui-sync`, Vellum/DebugSync.swift; the
+# simulator has no Dropbox key): the canvas screen's status bar and the Canvases list in each state (synced, waiting
+# offline, failed with Retry, signed out with Sign in) and "Not saved" beside them for contrast, each with the pen's
+# full prompt, "Draw with the Pencil". Then the done-when proof, in light: a canvas drawn with the Dropbox switched
+# off, left (the list says it waits), the connection returned (it syncs), and the made-up Dropbox's files rebuilt as
+# the laptop would and checked byte for byte against the Duo's; sync.txt says each step.
+sync_captures() {
+  for appearance in light dark; do
+    xcrun simctl ui "$udid" appearance "$appearance"
+    saved_wait=${WAIT:-6}; WAIT=${SYNC_WAIT:-8}
+    for state in synced offline failed signedout notsaved; do
+      capture "sync-$state" --ui-tab canvases --ui-reset --ui-sync "$state"
+      capture "sync-list-$state" --ui-tab canvases --ui-reset --ui-sync "$state" --ui-sync-list
+    done
+    WAIT=$saved_wait
+  done
+  appearance=light
+  xcrun simctl ui "$udid" appearance light
+  xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+  rm -f "$data/Documents/sync.txt"
+  xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-reset --ui-sync airplane >/dev/null
+  for step in "offline canvas ready:sync-airplane-canvas-offline" "offline list ready:sync-airplane-list-offline" \
+              "online list ready:sync-airplane-list-online"; do
+    marker=${step%%:*}; name=${step#*:}
+    waited=0
+    while [ "$waited" -lt 90 ] && ! grep -q "^$marker" "$data/Documents/sync.txt" 2>/dev/null; do
+      sleep 1; waited=$((waited + 1))
+    done
+    sleep 1
+    shot "$name"
+  done
+  echo "The airplane-mode proof (made-up Dropbox):"
+  cat "$data/Documents/sync.txt" 2>/dev/null | tee "$out/sync-airplane.txt" || echo "The app wrote no sync.txt"
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+}
+
 if [ "$part" = sheets ]; then
   sheet_captures
+  sync_captures
   exit 0
 fi
 
@@ -242,7 +281,7 @@ capture appearance-light-then-system --ui-tab canvases --ui-reset --ui-new-canva
 
 benchmark ""
 
-if [ "$part" = all ]; then sheet_captures; fi
+if [ "$part" = all ]; then sheet_captures; sync_captures; fi
 
 # The Home Screen, to show the installed app icon. Vellum has to be on the first page: if SpringBoard put it on a later
 # page, it swaps places with the first page's first app in SpringBoard's saved layout while the simulator is shut down.

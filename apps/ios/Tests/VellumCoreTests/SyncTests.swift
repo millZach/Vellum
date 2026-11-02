@@ -39,7 +39,7 @@ final class SyncTests: XCTestCase {
     private func engine(ledger: any SyncLedgerStore = SyncLedgerMemory(), tokens: DropboxTokens? = syncTokens,
                         sleep: @escaping @Sendable (Double) async -> Void = { _ in }) -> (CanvasSync, DropboxSession) {
         let session = DropboxSession(appKey: syncKey, transport: dropbox, store: DropboxMemoryTokenStore(tokens))
-        let reports = reports!
+        let reports = self.reports!
         let sync = CanvasSync(session: session, source: savers, ledger: ledger, sleep: sleep,
                               report: { reports.add($0) })
         return (sync, session)
@@ -69,7 +69,8 @@ final class SyncTests: XCTestCase {
     /// byte for byte, and opens to the same ink.
     private func assertDropboxRebuildsTheDuosCanvas(_ sync: CanvasSync, _ id: UUID,
                                                     file: StaticString = #filePath, line: UInt = #line) async throws {
-        let files = dropbox.files(in: SyncPaths.folder(await folder(sync, id)))
+        let name = await self.folder(sync, id)
+        let files = dropbox.files(in: SyncPaths.folder(name))
         let rebuilt = try SyncedCanvasFolder.rebuild(files)
         XCTAssertEqual(rebuilt.manifest, try duoFile(id, CanvasManifest.fileName), file: file, line: line)
         XCTAssertEqual(rebuilt.snapshot, try duoFile(id, InkStore.snapshotName), file: file, line: line)
@@ -135,7 +136,7 @@ final class SyncTests: XCTestCase {
         let (sync, _) = engine()
         await sync.start()
         await sync.settled()
-        let folder = await folder(sync, made.id)
+        let folder = await self.folder(sync, made.id)
         XCTAssertTrue(folder.hasPrefix("Renamed before its first sync "), folder)
         _ = try library.rename(made.id, to: "Renamed again")
         await sync.canvasChanged(made.id)
@@ -161,7 +162,8 @@ final class SyncTests: XCTestCase {
         let (sync, _) = engine()
         await sync.start()
         await sync.settled()
-        let folder = "/Vellum/\(await self.folder(sync, id))"
+        let name = await self.folder(sync, id)
+        let folder = "/Vellum/\(name)"
         XCTAssertEqual(Set(dropbox.requests), ["upload \(folder)/canvas.json",
                                                 "upload \(folder)/ink.log.parts/0/000000000000.part"],
                        "a first sync: canvas.json and the whole log as one part")
@@ -197,7 +199,8 @@ final class SyncTests: XCTestCase {
         try await draw(40..<60, on: id)
         await sync.canvasLeft(id)
         await sync.settled()
-        let folder = "/Vellum/\(await self.folder(sync, id))"
+        let name = await self.folder(sync, id)
+        let folder = "/Vellum/\(name)"
         XCTAssertEqual(dropbox.folders(in: "\(folder)/ink.log.parts"), ["0"])
 
         // The canvas is closed and its saver has let go, so compacting it here is what the saver would do.
@@ -238,7 +241,8 @@ final class SyncTests: XCTestCase {
         let (sync, _) = engine()
         await sync.start()
         await sync.settled()
-        let folder = "/Vellum/\(await self.folder(sync, id))"
+        let name = await self.folder(sync, id)
+        let folder = "/Vellum/\(name)"
         SyncBudget.check("sheet-pdf-uploads-first-sync",
                          dropbox.requests.filter { $0 == "upload \(folder)/sheets/madeuphash01.pdf" }.count)
         XCTAssertEqual(dropbox.files(in: folder)["sheets/madeuphash01.pdf"], [UInt8](try Data(contentsOf: pdf)))
@@ -285,7 +289,7 @@ final class SyncTests: XCTestCase {
         let (first, _) = engine(ledger: ledgerFile)
         await first.start()
         await first.settled()
-        let deletedFolder = await folder(first, deleted)
+        let deletedFolder = await self.folder(first, deleted)
 
         // Airplane mode: an edit and a delete wait.
         dropbox.offline = true
@@ -323,7 +327,7 @@ final class SyncTests: XCTestCase {
         let logBefore = try duoFile(id, InkStore.logName)
         dropbox.failing = true
         let waits = Counter()
-        let dropbox = dropbox!
+        let dropbox = self.dropbox!
         let (sync, _) = engine(sleep: { _ in
             waits.next()
             if waits.value == 3 { dropbox.failing = false }
@@ -391,7 +395,8 @@ final class SyncTests: XCTestCase {
         let (sync, _) = engine()
         await sync.start()
         await sync.settled()
-        let folder = "/Vellum/\(await self.folder(sync, id))"
+        let name = await self.folder(sync, id)
+        let folder = "/Vellum/\(name)"
         dropbox.changeOnTheLaptop("\(folder)/canvas.json", to: Array(#"{"name":"edited on the laptop"}"#.utf8))
         dropbox.removeOnTheLaptop("\(folder)/ink.log.parts")
         let duoLog = try duoFile(id, InkStore.logName)

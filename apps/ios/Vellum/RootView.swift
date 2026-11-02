@@ -19,6 +19,7 @@ struct RootView: View {
                 Tab(tab.descriptor.title, systemImage: tab.descriptor.systemImage, value: tab) {
                     if tab == .canvases {
                         CanvasesTab(model: canvases)
+                            .environment(canvases)
                     } else if tab == .drawings {
                         DrawingsScreen()
                     } else {
@@ -48,8 +49,10 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             // Every change is already written; leaving the screen flushes it to storage so a power cut keeps it too.
-            if phase != .active { canvases.appWillLeaveScreen() }
+            if phase != .active { canvases.appWillLeaveScreen(background: phase == .background) }
+            if phase == .active { canvases.appDidBecomeActive() }
         }
+        .onChange(of: DropboxConnection.app.isSignedIn) { _, _ in canvases.dropboxSignInChanged() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
             canvases.appWillTerminate()
         }

@@ -75,13 +75,13 @@ enum SyncCaptureReader {
         var snapshotGeneration: UInt64 = 0
         var snapshotBytes: [UInt8]?
         if let header = try prefix(of: snapshotURL, count: InkStore.headerSize) {
-            guard let generation = generation(in: header, magic: InkStore.snapshotMagic) else {
+            guard let found = generation(in: header, magic: InkStore.snapshotMagic) else {
                 throw CanvasSyncReadError.notReady
             }
-            snapshotGeneration = generation
-            if known.snapshotGeneration != generation {
+            snapshotGeneration = found
+            if known.snapshotGeneration != found {
                 guard let bytes = try DurableFile.read(snapshotURL),
-                      self.generation(in: bytes, magic: InkStore.snapshotMagic) == generation,
+                      generation(in: bytes, magic: InkStore.snapshotMagic) == found,
                       InkCodec.unframe(bytes, from: InkStore.snapshotHeaderSize).end == bytes.count
                 else { throw CanvasSyncReadError.notReady }
                 snapshotBytes = bytes
@@ -101,7 +101,8 @@ enum SyncCaptureReader {
         if known.logGeneration == logGeneration, known.logOffset >= InkStore.headerSize {
             if known.logOffset <= size { start = known.logOffset } else { restarted = true }
         }
-        var bytes = start == size ? [] : try range(of: logURL, from: start, to: size)
+        var bytes: [UInt8] = []
+        if start < size { bytes = try range(of: logURL, from: start, to: size) }
         if live == nil {
             // A closed canvas's log may end in a record cut short, or one this Vellum can't read, which opening it
             // would trim: never upload those.

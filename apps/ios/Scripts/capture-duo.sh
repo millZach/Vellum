@@ -125,7 +125,7 @@ sheet_captures() {
     done
     for what in outline quarter asnoted nts scan; do
       capture "sheet-$what" --ui-tab canvases --ui-reset --ui-new-canvas --ui-sheets "$what"
-      tail -4 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
+      tail -30 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
     done
     WAIT=$saved_wait
   done

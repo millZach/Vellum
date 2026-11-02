@@ -140,6 +140,10 @@ enum DebugSheetSource {
         }
         let chosen = scale ?? info.reading.suggestedScale ?? .drawn(.architectural(inchesPerFoot: 0.125))
         let invertsBadly = await reader.invertsBadly(page: page)
+        for detail in info.reading.details {
+            log(String(format: "  %@ %@ area %.2f, %.2f to %.2f, %.2f", detail.name, detail.scale.description,
+                       detail.area.minX, detail.area.minY, detail.area.maxX, detail.area.maxY))
+        }
         log("read \(info.reading.sheetNumber ?? "no number") \(info.reading.caption), placed at \(chosen), "
               + "areas \(info.reading.areas(placedAt: chosen).map(\.label)), invertsBadly \(invertsBadly)")
         let sheet = Sheet(paper: info.paper, scale: chosen,

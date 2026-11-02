@@ -80,14 +80,15 @@ public enum MadeUpSheets {
         let paper = PaperSize.inches(17, by: 11)
         var texts = titleBlock(paper, number: "D-501", title: "INSTRUMENT DETAILS (EXAMPLE)", scale: "SCALE: AS NOTED")
         texts += [
-            .at(1.2, 7.3, "1  TRANSMITTER STAND", width: 2.6, height: 0.18),
-            .at(1.2, 7.6, "SCALE: 1\" = 1'-0\"", width: 1.8, height: 0.16),
+            // Each detail's title and scale centred under it, as details are titled.
+            .at(1.7, 7.3, "1  TRANSMITTER STAND", width: 2.6, height: 0.18),
+            .at(2.1, 7.6, "SCALE: 1\" = 1'-0\"", width: 1.8, height: 0.16),
             .at(2.6, 3.35, "3'-0\"", width: 0.6, height: 0.16),
-            .at(5.8, 7.3, "2  PIPE SUPPORT", width: 2, height: 0.18),
-            .at(5.8, 7.6, "SCALE: 1 1/2\" = 1'-0\"", width: 2.1, height: 0.16),
+            .at(6.5, 7.3, "2  PIPE SUPPORT", width: 2, height: 0.18),
+            .at(6.45, 7.6, "SCALE: 1 1/2\" = 1'-0\"", width: 2.1, height: 0.16),
             .at(7.1, 3.35, "2'-0\"", width: 0.6, height: 0.16),
-            .at(10.4, 7.3, "3  TUBING SCHEMATIC", width: 2.4, height: 0.18),
-            .at(10.4, 7.6, "SCALE: NTS", width: 1.2, height: 0.16),
+            .at(10.3, 7.3, "3  TUBING SCHEMATIC", width: 2.4, height: 0.18),
+            .at(10.9, 7.6, "SCALE: NTS", width: 1.2, height: 0.16),
             .at(11.2, 3.35, "2\"", width: 0.4, height: 0.16),
         ]
         return Page(number: "D-501", title: "INSTRUMENT DETAILS (EXAMPLE)", paper: paper, texts: texts,

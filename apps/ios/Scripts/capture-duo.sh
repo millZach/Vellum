@@ -133,6 +133,13 @@ for appearance in light dark; do
   capture canvas-finger-stroke --ui-tab canvases --ui-reset --ui-new-canvas --ui-finger-stroke --ui-draw-with-finger
 done
 
+# Settings from the canvas (#28): the gear at the end of the top bar opens the same Settings sheet as the Drawings tab's
+# gear. The Debug-only `--ui-canvas-settings` opens the canvas with the sheet up.
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  capture canvas-settings --ui-tab canvases --ui-reset --ui-new-canvas --ui-canvas-settings
+done
+
 # Appearance after Light (#26): the Debug-only `--ui-appearance-steps` sets the appearance setting in turn, a second
 # apart, as the top bar's menu does. Both captures must show the dark canvas: Light then Dark with the simulator light,
 # and Light then System with the simulator dark. The second leaves the setting on System.

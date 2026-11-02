@@ -56,6 +56,10 @@ _Avoid_: document, package, bundle
 The folder in `Dropbox/Vellum` a canvas folder is mirrored to, named `<name> <short id>` (such as "Boiler 4 walkdown 7f3a") when the canvas is made and never renamed, so the laptop's paths stay put. Its log is kept in log parts.
 _Avoid_: remote copy, cloud copy, backup
 
+**Folder check**:
+One request asking Dropbox whether any canvas's Dropbox folder is missing a file the sync ledger says it holds (deleted on the laptop), made before the next upload after the app starts, comes back to the foreground or gets its connection back. A canvas it finds incomplete is uploaded whole once (ADR-0003).
+_Avoid_: scan, poll, health check
+
 **Log part**:
 One upload of an ink log's new records, named by the log's generation and the byte offset it starts at; a generation's parts joined in order are the Duo's ink log (ADR-0014).
 _Avoid_: chunk, segment, delta file

@@ -1,7 +1,8 @@
 import Foundation
 
 /// A made-up Dropbox, in memory, that answers the requests syncing makes (`files/upload`, `files/move_v2`,
-/// `files/delete_v2` and token renewal) the way Dropbox does, behind the same transport seam the live client uses.
+/// `files/delete_v2`, `files/list_folder` and `list_folder/continue`, and token renewal) the way Dropbox does, behind
+/// the same transport seam the live client uses.
 /// The tests sync through it, and Debug builds use it for the simulator's sync captures (`--ui-sync`), since the
 /// simulator has no Dropbox key. It can be switched offline, made to fail, and have a file changed "on the laptop".
 /// Nothing in it is anyone's real Dropbox.
@@ -19,6 +20,14 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
     private var _failing = false
     private var _requests: [String] = []
     private var _bytesUploaded = 0
+    /// Every change, in order, for `list_folder/continue`: a file written, or a path removed.
+    private var changes: [DropboxTreeEntry] = []
+    /// What each cursor handed out still has to give: the folder it lists, the change it lists from, and entries of a
+    /// listing still to page through.
+    private var cursors: [String: (folder: String, from: Int, queued: [DropboxTreeEntry])] = [:]
+    private var _pageSize = 2000
+    private var cursorsMade = 0
+    private var removals: [(after: Int, path: String)] = []
 
     public init() {}
 
@@ -32,6 +41,22 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
     public var failing: Bool {
         get { lock.withLock { _failing } }
         set { lock.withLock { _failing = newValue } }
+    }
+
+    /// The most entries a listing page holds.
+    public var pageSize: Int {
+        get { lock.withLock { _pageSize } }
+        set { lock.withLock { _pageSize = max(1, newValue) } }
+    }
+
+    /// Forgets every cursor handed out, so `list_folder/continue` answers `reset`, as Dropbox may.
+    public func resetCursors() {
+        lock.withLock { cursors = [:] }
+    }
+
+    /// Removes `path` on the laptop after `requests` more requests are answered: a folder deleted mid-sync.
+    public func removeOnTheLaptop(_ path: String, afterRequests requests: Int) {
+        lock.withLock { removals.append((requests, path)) }
     }
 
     /// Each request answered, as "<endpoint> <path>", token renewals excepted.
@@ -79,6 +104,7 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
         lock.withLock {
             revisions += 1
             files[path.lowercased()] = File(path: path, bytes: bytes, rev: Self.rev(revisions))
+            changes.append(DropboxTreeEntry(path: path.lowercased(), kind: .file))
         }
     }
 
@@ -89,7 +115,17 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
     // MARK: Answering
 
     public func send(_ request: DropboxHTTPRequest) async throws -> DropboxHTTPResponse {
-        try lock.withLock { try answer(request) }
+        try lock.withLock {
+            let response = try answer(request)
+            if request.url.path != "/oauth2/token" { removeWhenDue() }
+            return response
+        }
+    }
+
+    private func removeWhenDue() {
+        removals = removals.map { (after: $0.after - 1, path: $0.path) }
+        for removal in removals where removal.after <= 0 { _ = remove(removal.path) }
+        removals.removeAll { $0.after <= 0 }
     }
 
     private func answer(_ request: DropboxHTTPRequest) throws -> DropboxHTTPResponse {
@@ -110,19 +146,29 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
             _bytesUploaded += bytes.count
             let existing = files[path.lowercased()]
             let mode = argument["mode"]
+            let strict = argument["strict_conflict"] as? Bool ?? false
+            // As Dropbox's WriteMode says: nothing at the path is always written; a file with the same bytes is
+            // left as it is, with no conflict, unless `strict_conflict`.
+            if let existing, existing.bytes == bytes, !strict {
+                return Self.json(["name": (path as NSString).lastPathComponent, "path_display": existing.path,
+                                  "rev": existing.rev, "size": bytes.count])
+            }
             if let tag = mode as? String, tag == "add" {
                 if existing != nil { return Self.conflict("path/conflict/file/") }
             } else if let tag = mode as? String, tag == "overwrite" {
                 // Whatever is there.
             } else if let update = mode as? [String: Any], update[".tag"] as? String == "update",
                       let rev = update["update"] as? String {
-                if existing?.rev != rev { return Self.conflict("path/conflict/file/") }
+                // `strict_conflict` makes a removed file a conflict too; without it the file is written again.
+                if let existing, existing.rev != rev { return Self.conflict("path/conflict/file/") }
+                if existing == nil, strict { return Self.conflict("path/conflict/file/") }
             } else {
                 return Self.badRequest
             }
             revisions += 1
             let file = File(path: path, bytes: bytes, rev: Self.rev(revisions))
             files[path.lowercased()] = file
+            changes.append(DropboxTreeEntry(path: path.lowercased(), kind: .file))
             return Self.json(["name": (path as NSString).lastPathComponent, "path_display": path, "rev": file.rev,
                               "size": bytes.count])
         case "/2/files/move_v2":
@@ -141,6 +187,7 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
             for file in moved {
                 let path = to + file.path.dropFirst(from.count)
                 files[path.lowercased()] = File(path: path, bytes: file.bytes, rev: file.rev)
+                changes.append(DropboxTreeEntry(path: path.lowercased(), kind: .file))
             }
             return Self.json(["metadata": ["path_display": to]])
         case "/2/files/delete_v2":
@@ -150,9 +197,52 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
             _requests.append("delete \(path)")
             guard !remove(path).isEmpty else { return Self.conflict("path_lookup/not_found/") }
             return Self.json(["metadata": ["path_display": path]])
+        case "/2/files/list_folder":
+            guard let body = request.body,
+                  let argument = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let path = argument["path"] as? String else { return Self.badRequest }
+            _requests.append("list \(path)")
+            let folder = path.lowercased()
+            guard folder.isEmpty || exists(folder) else { return Self.conflict("path/not_found/") }
+            let recursive = argument["recursive"] as? Bool ?? false
+            var entries: [DropboxTreeEntry] = []
+            var folders: Set<String> = []
+            for key in files.keys.sorted() where key.hasPrefix(folder + "/") {
+                let rest = key.dropFirst(folder.count + 1).split(separator: "/").map(String.init)
+                for depth in 1..<rest.count where recursive || depth == 1 {
+                    folders.insert(folder + "/" + rest[0..<depth].joined(separator: "/"))
+                }
+                if recursive || rest.count == 1 { entries.append(DropboxTreeEntry(path: key, kind: .file)) }
+            }
+            entries = folders.sorted().map { DropboxTreeEntry(path: $0, kind: .folder) } + entries
+            return page(entries, folder: folder, from: changes.count)
+        case "/2/files/list_folder/continue":
+            guard let body = request.body,
+                  let argument = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let cursor = argument["cursor"] as? String else { return Self.badRequest }
+            _requests.append("list/continue")
+            guard let state = cursors[cursor] else { return Self.conflict("reset/") }
+            if !state.queued.isEmpty { return page(state.queued, folder: state.folder, from: state.from) }
+            let changed = changes[state.from...].filter { SyncFolderCheck.within($0.path, state.folder) }
+            return page(Array(changed), folder: state.folder, from: changes.count)
         default:
             return Self.badRequest
         }
+    }
+
+    /// One page of `entries` and a new cursor that gives the rest, then the changes from `from` on.
+    private func page(_ entries: [DropboxTreeEntry], folder: String, from: Int) -> DropboxHTTPResponse {
+        let shown = Array(entries.prefix(_pageSize))
+        let rest = Array(entries.dropFirst(_pageSize))
+        cursorsMade += 1
+        let cursor = "made-up-cursor-\(cursorsMade)"
+        cursors[cursor] = (folder, from, rest)
+        let tags: [DropboxTreeEntry.Kind: String] = [.file: "file", .folder: "folder", .deleted: "deleted"]
+        let listed: [[String: String]] = shown.map {
+            [".tag": tags[$0.kind] ?? "file", "name": ($0.path as NSString).lastPathComponent, "path_lower": $0.path,
+             "path_display": $0.path]
+        }
+        return Self.json(["entries": listed, "cursor": cursor, "has_more": !rest.isEmpty])
     }
 
     private func exists(_ path: String) -> Bool {
@@ -165,6 +255,7 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
         let key = path.lowercased()
         let gone = files.filter { $0.key == key || $0.key.hasPrefix(key + "/") }
         for key in gone.keys { files[key] = nil }
+        if !gone.isEmpty { changes.append(DropboxTreeEntry(path: key, kind: .deleted)) }
         return Array(gone.values)
     }
 

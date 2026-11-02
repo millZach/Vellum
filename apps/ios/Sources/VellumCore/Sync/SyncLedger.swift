@@ -12,6 +12,9 @@ public struct SyncLedger: Codable, Hashable, Sendable {
     public var canvases: [String: CanvasSyncRecord] = [:]
     /// Deleted canvases whose Dropbox folder is still to be moved to `Vellum/.deleted`, oldest first.
     public var deletes: [PendingDelete] = []
+    /// Dropbox's cursor for `Vellum/` as of the last folder check (`SyncFolderCheck`), so the next asks only what
+    /// changed since; nil before the first, or after a sign-out.
+    public var dropboxCursor: String?
 
     public init() {}
 

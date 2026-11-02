@@ -355,6 +355,8 @@ enum SyncSetup {
     static func session() -> (DropboxSession?, Bool) {
         #if DEBUG
         if let session = DebugSync.session() { return (session, true) }
+        // The sheet captures' made-up Dropbox only lists and downloads, so syncing to it would fail behind the sheet.
+        if DebugLaunch.argument("--ui-dropbox") != nil { return (nil, false) }
         #endif
         return (DropboxConnection.app.downloads, false)
     }

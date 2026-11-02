@@ -8,7 +8,9 @@ import VellumCore
 /// or a pinch moves and scales with one transform, as the text boxes do; they are drawn again only when the zoom has
 /// moved by more than a factor of two, or when the pinch ends, so a pan draws nothing. A dimension's lines and text
 /// are sized from its text height, a real-world length, so it zooms with the ink; its text is hidden when it would be
-/// smaller than `smallestText` points on screen. A frame's label is chrome-sized, as in the prototype.
+/// smaller than `smallestText` points on screen. A frame's label is chrome-sized, as in the prototype. Between
+/// drawings everything in the layer is scaled alike, so a label can show up to twice its size or half of it during a
+/// pinch, and fits its scale area either way; it is back to its set size when the pinch ends or the view jumps.
 ///
 /// What the tools show while in use (a measure, the first point, the rubber band to the second, the dimension being
 /// pulled off, the frame or window being dragged, the snap marker) is a handful of layers in screen points, placed
@@ -145,7 +147,8 @@ final class AnnotationOverlay {
         showTool()
     }
 
-    /// The pinch or pan ended: draw the kept layer again, crisp, if the zoom moved.
+    /// The pinch or pan ended, or the view jumped (zoom to everything, zoom to a window): draw the kept layer again,
+    /// crisp, if the zoom moved.
     func settle() {
         isGesturing = false
         guard let base, let viewport, viewport.pointsPerInch != base.pointsPerInch else { return }
@@ -250,18 +253,14 @@ final class AnnotationOverlay {
 
     // MARK: Drawing a sheet's label and scale areas (#11)
 
-    /// A sheet's label under its bottom-left corner, as a frame's is, and each scale area dashed in purple with its
-    /// name and scale in its top-left corner, as the prototype at `prototype/place-sheets` (question 2, C) draws them.
+    /// A sheet's name on a small backing inside its top-left corner, and each scale area dashed in purple with its
+    /// name over its scale inside its top-left corner, as the prototype at `prototype/sheet-labels` (B, B) draws them.
+    /// `SheetLabelLayout` decides what fits. This runs when the kept layer is drawn, never per frame; a pan or a pinch
+    /// only moves and scales the layer, and everything in it scales alike, so what fits here stays fitted on screen.
     static func draw(_ sheet: Sheet, on viewport: Viewport, into layer: CALayer, dark: Bool) {
         let rect = screenRect(sheet.bounds, viewport)
-        let label = Pill()
-        label.set(sheet.label, size: 11, colour: Palette.sheetText(dark: dark),
-                  fill: Palette.ground(dark: dark).withAlphaComponent(0.8), weight: .semibold, padding: 2, radius: 2)
-        label.layer.anchorPoint = .zero
-        label.layer.position = CGPoint(x: rect.minX + 2, y: rect.maxY + 3)
-        layer.addSublayer(label.layer)
-        for area in sheet.areas {
-            let box = screenRect(sheet.canvasRect(of: area.rect), viewport)
+        let boxes = sheet.areas.map { screenRect(sheet.canvasRect(of: $0.rect), viewport) }
+        for box in boxes {
             let shape = CAShapeLayer()
             shape.actions = noAnimations
             shape.path = CGPath(rect: box, transform: nil)
@@ -270,16 +269,79 @@ final class AnnotationOverlay {
             shape.lineWidth = 1.6
             shape.lineDashPattern = [6, 4]
             layer.addSublayer(shape)
-            // The area's name only where there is room for it.
-            guard box.width > 60, box.height > 18 else { continue }
-            let pill = Pill()
-            pill.set(area.label, size: 10, colour: .white, fill: Palette.scaleArea(dark: dark), weight: .semibold,
-                     padding: 4, radius: 0)
-            pill.layer.anchorPoint = .zero
-            pill.layer.position = CGPoint(x: box.minX, y: box.minY)
-            layer.addSublayer(pill.layer)
+        }
+        let name = Pill()
+        name.set(sheet.label, size: sheetNameSize, colour: Palette.sheetText(dark: dark),
+                 fill: Palette.ground(dark: dark).withAlphaComponent(0.92), weight: .semibold, padding: 2, radius: 2)
+        let laid = layout(sheet, rect: rect, boxes: boxes, nameSize: name.layer.bounds.size)
+        if let box = laid.sheetName {
+            name.layer.anchorPoint = .zero
+            name.layer.position = CGPoint(x: box.x, y: box.y)
+            layer.addSublayer(name.layer)
+        }
+        for (area, placed) in zip(sheet.areas, laid.areas) {
+            guard let box = placed.box else { continue }
+            let lines = placed.fit == .twoLines ? [area.name, area.scale.description] : [area.scale.description]
+            layer.addSublayer(areaLabel(lines, in: box, dark: dark))
         }
     }
+
+    /// A sheet's name's text size; a scale area's label's.
+    static let sheetNameSize: CGFloat = 11
+    static let areaLabelSize: CGFloat = 10
+
+    /// The size of one line of a scale area's label, rounded up as the layers are.
+    static func measureAreaLine(_ text: String) -> LabelSize {
+        let size = areaAttributed(text, colour: .white).size()
+        return LabelSize(width: ceil(size.width), height: ceil(size.height))
+    }
+
+    private static func areaAttributed(_ text: String, colour: UIColor) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [.font: UIFont.systemFont(ofSize: areaLabelSize, weight: .semibold),
+                                                      .foregroundColor: colour])
+    }
+
+    private static func layout(_ sheet: Sheet, rect: CGRect, boxes: [CGRect], nameSize: CGSize) -> SheetLabelLayout {
+        let areas = zip(sheet.areas, boxes).map { area, box in
+            SheetLabelLayout.Area(rect: LabelRect(x: box.minX, y: box.minY, width: box.width, height: box.height),
+                                  name: measureAreaLine(area.name), scale: measureAreaLine(area.scale.description))
+        }
+        return SheetLabelLayout.lay(sheet: LabelRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height),
+                                    sheetName: LabelSize(width: nameSize.width, height: nameSize.height), areas: areas)
+    }
+
+    /// A scale area's label: its lines, each whole, on the area's purple.
+    private static func areaLabel(_ lines: [String], in box: LabelRect, dark: Bool) -> CALayer {
+        let backing = CALayer()
+        backing.actions = noAnimations
+        backing.anchorPoint = .zero
+        backing.position = CGPoint(x: box.x, y: box.y)
+        backing.bounds = CGRect(x: 0, y: 0, width: box.width, height: box.height)
+        backing.backgroundColor = Palette.scaleArea(dark: dark).cgColor
+        let lineHeight = (box.height - SheetLabelLayout.areaVerticalPadding * 2) / CGFloat(lines.count)
+        for (index, line) in lines.enumerated() {
+            let text = CATextLayer()
+            text.actions = noAnimations
+            text.contentsScale = Pill.displayScale
+            text.string = areaAttributed(line, colour: Palette.scaleAreaText(dark: dark))
+            text.frame = CGRect(x: SheetLabelLayout.areaHorizontalPadding,
+                                y: SheetLabelLayout.areaVerticalPadding + lineHeight * CGFloat(index),
+                                width: box.width - SheetLabelLayout.areaHorizontalPadding * 2, height: lineHeight)
+            backing.addSublayer(text)
+        }
+        return backing
+    }
+
+    #if DEBUG
+    /// What a sheet's labels would do at a zoom, for the captures: each area's decision, and whether the name shows.
+    static func debugLayout(_ sheet: Sheet, on viewport: Viewport) -> (name: Bool, fits: [ScaleAreaLabelFit]) {
+        let pill = Pill()
+        pill.set(sheet.label, size: sheetNameSize, colour: .white, fill: .black, weight: .semibold, padding: 2, radius: 2)
+        let boxes = sheet.areas.map { screenRect(sheet.canvasRect(of: $0.rect), viewport) }
+        let laid = layout(sheet, rect: screenRect(sheet.bounds, viewport), boxes: boxes, nameSize: pill.layer.bounds.size)
+        return (laid.sheetName != nil, laid.areas.map(\.fit))
+    }
+    #endif
 
     // MARK: Drawing a dimension and a frame
 
@@ -556,7 +618,15 @@ final class AnnotationOverlay {
     var debugLabels: [String] {
         editor.dimensions.map { "dimension \($0.orientation.rawValue) \(editor.label(for: $0))" }
             + editor.frames.map { "frame \($0.label)" }
-            + editor.sheets.map { "sheet \($0.label), areas \($0.areas.map(\.label))" }
+            + editor.sheets.flatMap { sheet -> [String] in
+                guard let viewport else { return [] }
+                let laid = Self.debugLayout(sheet, on: viewport)
+                return ["sheet \(sheet.label), name \(laid.name ? "shown" : "hidden"), areas \(sheet.areas.map(\.label))"]
+                    + zip(sheet.areas, laid.fits).map { area, fit in
+                        let (name, scale) = (Self.measureAreaLine(area.name), Self.measureAreaLine(area.scale.description))
+                        return "  \(area.name): \(fit), name \(name.width) wide, scale \(scale.width) wide"
+                    }
+            }
     }
     #endif
 }
@@ -612,10 +682,12 @@ extension Palette {
     /// A frame's dashed edge, and its label.
     static func frame(dark: Bool) -> UIColor { dark ? UIColor(hex: 0xB892EA) : UIColor(hex: 0x7A4FB3) }
     static func frameText(dark: Bool) -> UIColor { dark ? UIColor(hex: 0xB892EA) : UIColor(hex: 0x5B3191) }
-    /// A placed sheet's label (#11): the chrome's secondary text.
-    static func sheetText(dark: Bool) -> UIColor { dark ? UIColor(hex: 0xA9A9AE) : UIColor(hex: 0x4A4A4F) }
+    /// A placed sheet's name in its corner (#35): the chrome's text.
+    static func sheetText(dark: Bool) -> UIColor { dark ? UIColor(hex: 0xE8E6E1) : UIColor(hex: 0x1D1D1F) }
     /// A scale area's dashed outline and its label's box (#11): the prototype's purple.
     static func scaleArea(dark: Bool) -> UIColor { dark ? UIColor(hex: 0xC4A2F0) : UIColor(hex: 0x6B3FA8) }
+    /// The text on a scale area's label (#35): dark on the pale purple of dark mode.
+    static func scaleAreaText(dark: Bool) -> UIColor { dark ? UIColor(hex: 0x201A2C) : .white }
     /// Where a tap snaps: teal.
     static func snap(dark: Bool) -> UIColor { dark ? UIColor(hex: 0x2DD4BF) : UIColor(hex: 0x0F766E) }
     static func snapText(dark: Bool) -> UIColor { dark ? UIColor(hex: 0x0B1F1D) : .white }

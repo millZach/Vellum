@@ -234,7 +234,8 @@ private struct TopBar: View {
     @State private var showsSettings = TopBar.launchesWithSettings
 
     var body: some View {
-        HStack(spacing: 10) {
+        // Gaps of 8, not 10, so "Boiler 4 walkdown (example)" fits in full beside the actions at 951 points (#35).
+        HStack(spacing: 8) {
             if let showCanvases {
                 Button(action: showCanvases) {
                     Image(systemName: "chevron.left").font(.system(size: 16, weight: .semibold)).frame(width: 26, height: 30)
@@ -344,6 +345,9 @@ private struct CanvasActions: View {
             action("Record", systemImage: "record.circle", hint: "Recording meetings comes in a later update.")
             action("Send", systemImage: "paperplane.fill", hint: "Sending to an agent comes in a later update.", primary: true)
         }
+        .lineLimit(1)
+        // Each action stays on one line (#35); the canvas name gives way first.
+        .fixedSize(horizontal: true, vertical: false)
         .sheet(item: $addSheet) { model in
             AddSheetFlow(model: model)
         }
@@ -562,6 +566,11 @@ enum Chrome {
     static let accent = dynamic(light: 0x2F5D8A, dark: 0x9CC4EC)
     static let selected = dynamic(light: 0xE6EDF5, dark: 0x2C3A4A)
     static let primary = dynamic(light: 0x2F5D8A, dark: 0x3F74A8)
+    /// A disabled button (#35): faded blue, `ChromeColourPair.disabledButton`, which a test holds at 4.5:1.
+    static let disabledText = dynamic(light: ChromeColourPair.disabledButton(dark: false).text,
+                                      dark: ChromeColourPair.disabledButton(dark: true).text)
+    static let disabledFill = dynamic(light: ChromeColourPair.disabledButton(dark: false).fill,
+                                      dark: ChromeColourPair.disabledButton(dark: true).fill)
     /// The Canvases list's ground: the canvas's paper in light, its dark ground in dark.
     static let listGround = dynamic(light: 0xF3EFE6, dark: 0x1C1D20)
     static let chipRim = dynamic(light: 0xFFFFFF, dark: 0x26272B)
@@ -574,6 +583,22 @@ enum Chrome {
         Color(uiColor: UIColor { traits in
             traits.userInterfaceStyle == .dark ? UIColor(hex: dark, alpha: darkAlpha) : UIColor(hex: light, alpha: lightAlpha)
         })
+    }
+}
+
+/// A primary button: white on the chrome's primary blue, and faded blue when disabled (#35). Its label stays on one line.
+struct ChromePrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 14)
+            .frame(minHeight: 34)
+            .foregroundStyle(isEnabled ? Color.white : Chrome.disabledText)
+            .background(isEnabled ? Chrome.primary : Chrome.disabledFill, in: Capsule())
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 

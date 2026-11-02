@@ -1,0 +1,355 @@
+<!doctype html>
+<!--
+  PROTOTYPE: throwaway. Never merge to main.
+  Question (#12): what do the canvas status bar and the Canvases list say about Dropbox sync?
+  Three choices, switchable with ?v=A|B|C and the big control at the top:
+    A neutral: offline is calm grey ("Saved on this Duo · waiting for Dropbox"); a failure says "Sync failed · will retry" with Retry.
+    B amber:   like A, but offline shows an amber warning until a connection returns.
+    C quiet:   the status bar never talks about offline or failures; a failed upload is only a badge in the Canvases list.
+  The state buttons (keys 1-7) drive both mocks. Colours, sizes and layout are the app's (Chrome in CanvasScreen.swift,
+  CanvasListScreen.swift). The status bar is shown at actual size; on a phone it scrolls sideways.
+  All canvases here are made up.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Vellum sync status · prototype</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --ground:#F3EFE6; --panel:rgba(252,250,246,.94); --border:#D9D4C9; --text:#1D1D1F; --secondary:#6B6B70;
+    --accent:#2F5D8A; --selected:#E6EDF5; --primary:#2F5D8A; --unsaved:#9A5B00; --unsaved-tint:rgba(154,91,0,.11);
+    --chiprim:#FFFFFF; --grid:rgba(0,0,0,.035); --grid-major:rgba(0,0,0,.06);
+    --red:#D6342C; --green:#1F9D55; --blue:#2563EB; --sketch:#3A3A3A;
+    --ctl:#FFFFFF; --ctl-on:#1D1D1F; --ctl-on-text:#FFFFFF;
+  }
+  body.dark {
+    --ground:#1C1D20; --panel:rgba(36,37,41,.94); --border:#3A3B40; --text:#E8E6E1; --secondary:#A9A9AE;
+    --accent:#9CC4EC; --selected:#2C3A4A; --primary:#3F74A8; --unsaved:#E0A458; --unsaved-tint:rgba(224,164,88,.13);
+    --chiprim:#26272B; --grid:rgba(255,255,255,.03); --grid-major:rgba(255,255,255,.055);
+    --red:#F2554C; --green:#34C46E; --blue:#5B8CFF; --sketch:#E6E6E6;
+    --ctl:#2A2B30; --ctl-on:#E8E6E1; --ctl-on-text:#1C1D20;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; }
+  body { background:var(--ground); color:var(--text); font:13px/1.3 -apple-system,system-ui,"SF Pro Text","Segoe UI",sans-serif;
+         padding:10px 12px 14px; min-height:100vh; }
+  button { font:inherit; color:inherit; border:0; background:none; cursor:pointer; padding:0; }
+  svg { display:block; }
+
+  /* ---------- prototype controls (not part of the design) ---------- */
+  #top { display:flex; align-items:center; gap:10px 14px; flex-wrap:wrap; }
+  #top h1 { font-size:14px; margin:0; font-weight:700; white-space:nowrap; }
+  #top h1 span { font-weight:500; color:var(--secondary); }
+  #seg { display:flex; padding:3px; border-radius:13px; background:var(--ctl); border:1px solid var(--border); flex:1 1 360px; max-width:470px; }
+  #seg button { flex:1; height:42px; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:7px; font-size:13px; font-weight:600; color:var(--secondary); }
+  #seg button b { font-size:20px; color:var(--text); }
+  #seg button.on { background:var(--ctl-on); color:var(--ctl-on-text); }
+  #seg button.on b { color:var(--ctl-on-text); }
+  #theme { display:flex; padding:2px; border-radius:9px; background:var(--ctl); border:1px solid var(--border); margin-left:auto; }
+  #theme button { padding:5px 10px; border-radius:7px; font-size:12px; color:var(--secondary); }
+  #theme button.on { background:var(--ctl-on); color:var(--ctl-on-text); font-weight:600; }
+  #desc { margin:7px 0 7px; color:var(--secondary); font-size:12.5px; max-width:900px; }
+  #desc b { color:var(--text); }
+  #states { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:9px; }
+  #states button { padding:6px 10px 6px 8px; border-radius:16px; border:1px solid var(--border); background:var(--ctl); font-size:12px; white-space:nowrap; display:flex; align-items:baseline; gap:5px; text-align:left; }
+  #states button i { font-style:normal; font-size:10.5px; font-weight:700; color:var(--secondary); }
+  #states button.on { background:var(--ctl-on); color:var(--ctl-on-text); border-color:var(--ctl-on); font-weight:600; }
+  #states button.on i { color:var(--ctl-on-text); opacity:.7; }
+  .cap { flex-wrap:wrap; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--secondary); margin:0 0 5px; display:flex; gap:8px; align-items:baseline; }
+  .cap em { font-style:normal; text-transform:none; letter-spacing:0; font-weight:400; }
+  #scrollHint { display:none; }
+
+  /* ---------- canvas screen strip: the bottom of the 951 x 669 canvas screen ---------- */
+  #stripScroll { margin:0 -12px 12px; overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+  #strip { position:relative; width:951px; height:132px; overflow:hidden; background:var(--ground);
+           background-image:linear-gradient(var(--grid-major) 1px, transparent 1px), linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+                            linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+           background-size:177px 177px, 177px 177px, 35.4px 35.4px, 35.4px 35.4px; background-position:124px 18px, 124px 18px, 124px 18px, 124px 18px; }
+  #strip .fade { position:absolute; left:0; right:0; top:0; height:34px; background:linear-gradient(var(--ground), transparent); pointer-events:none; }
+  .panel { background:var(--panel); border:1px solid var(--border); box-shadow:0 2px 5px rgba(0,0,0,.08); }
+  #rail { position:absolute; left:9px; width:52px; top:-40px; bottom:9px; border-radius:14px; }
+  #rail .chip { position:absolute; left:13px; margin-bottom:-12px; width:24px; height:24px; border-radius:50%; border:2.5px solid var(--chiprim); box-shadow:0 0 0 1px var(--border); }
+  #tabs { position:absolute; left:880px; width:47px; top:-60px; bottom:25px; border-radius:23px; }
+  #ink { position:absolute; inset:0; }
+
+  /* the status bar: HStack(spacing 14), 12 pt, padding 12, height 34, corner 11 */
+  #bar { position:absolute; left:71px; right:93px; bottom:8px; height:34px; border-radius:11px; display:flex; align-items:center; gap:14px; padding:0 12px; font-size:12px; white-space:nowrap; }
+  #bar .coords { min-width:150px; font-variant-numeric:tabular-nums; }
+  #bar .scale { width:160px; display:flex; align-items:center; gap:6px; font-variant-numeric:tabular-nums; }
+  #bar .scale span { display:inline-block; width:90px; height:6px; border:1.5px solid var(--text); border-top:0; }
+  #bar .prompt { flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--secondary); }
+  #bar .count { color:var(--secondary); flex-shrink:0; }
+  #bar .ext { width:28px; height:28px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .sync { flex-shrink:0; display:flex; align-items:center; gap:6px; }
+  .sync.calm { color:var(--secondary); }
+  .sync.unsaved { color:var(--unsaved); }
+  .sync.strong { color:var(--text); font-weight:500; }
+  .sync.amber { color:var(--unsaved); font-weight:600; background:var(--unsaved-tint); padding:3px 8px 3px 6px; border-radius:7px; margin-right:-4px; }
+  .mini { height:22px; padding:0 8px; border-radius:6px; border:1px solid var(--border); background:var(--panel); color:var(--accent); font-size:11.5px; font-weight:600; }
+  .flash { animation:flash .5s ease-out; }
+  @keyframes flash { from { background-color:rgba(127,127,127,.22); } }
+
+  /* ---------- lower row: Canvases list and what is true ---------- */
+  #below { display:grid; grid-template-columns:minmax(0,370px) minmax(0,1fr); gap:14px; align-items:start; }
+  #list { border-radius:14px; border:1px solid var(--border); background:var(--ground); padding:12px 14px 10px; }
+  #list .head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  #list .head b { font-size:26px; font-weight:700; letter-spacing:-.01em; }
+  .newc { display:flex; align-items:center; gap:6px; height:34px; padding:0 12px; border-radius:9px; background:var(--primary); color:#fff; font-size:14px; font-weight:600; }
+  .banner { display:flex; gap:7px; align-items:flex-start; color:var(--unsaved); font-size:13px; font-weight:500; margin:0 0 8px; }
+  .banner svg { flex-shrink:0; margin-top:1px; }
+  .row { padding:8px 10px; border-radius:9px; margin-bottom:2px; }
+  .row.sel { background:var(--selected); }
+  .row .n { font-size:15px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .d { font-size:12px; color:var(--secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:0; margin-top:2px; }
+  .row .d .note { overflow:hidden; text-overflow:ellipsis; }
+  .row .d .note.amber { color:var(--unsaved); font-weight:500; }
+  .row .d .note.strong { color:var(--text); font-weight:500; }
+  .badge { display:inline-flex; align-items:center; gap:4px; margin-left:8px; height:19px; padding:0 7px 0 5px; border-radius:10px; border:1px solid var(--text);
+           color:var(--text); font-size:11px; font-weight:600; flex-shrink:0; }
+  #truth { border-radius:14px; border:1px dashed var(--border); padding:10px 14px; font-size:12.5px; }
+  #truth h3 { margin:0 0 6px; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--secondary); }
+  #truth dl { display:grid; grid-template-columns:max-content 1fr; gap:4px 12px; margin:0 0 10px; }
+  #truth dt { color:var(--secondary); }
+  #truth dd { margin:0; }
+  #truth .room.cut { color:var(--unsaved); font-weight:600; }
+  #truth p { margin:6px 0 0; color:var(--secondary); }
+  #toast { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); background:rgba(29,29,31,.9); color:#fff; padding:8px 13px; border-radius:10px; font-size:12.5px;
+           opacity:0; transition:opacity .2s; pointer-events:none; white-space:nowrap; z-index:9; }
+  #toast.show { opacity:1; }
+
+  @media (max-width:720px) {
+    body { padding:10px 12px 18px; }
+    #top h1 { flex:1 1 auto; }
+    #theme { margin-left:0; }
+    #seg { order:3; flex:1 1 100%; max-width:none; }
+    #below { grid-template-columns:1fr; }
+    #scrollHint { display:inline; }
+    #states { display:grid; grid-template-columns:1fr 1fr; }
+    #states button { white-space:normal; line-height:1.25; }
+  }
+</style>
+</head>
+<body>
+<div id="top">
+  <h1>Vellum · sync status <span>prototype, #12</span></h1>
+  <div id="seg" role="tablist" aria-label="Choice"></div>
+  <div id="theme" aria-label="Appearance">
+    <button data-theme="light">Light</button><button data-theme="dark">Dark</button>
+  </div>
+</div>
+<div id="desc"></div>
+<div id="states" aria-label="Sync state"></div>
+
+<div class="cap">Canvas screen, bottom edge <em>· actual size, 951 pt wide <span id="scrollHint">· swipe sideways for the rest of the status bar</span></em></div>
+<div id="stripScroll">
+  <div id="strip">
+    <svg id="ink" width="951" height="132" viewBox="0 0 951 132" aria-hidden="true"></svg>
+    <div id="rail" class="panel"></div>
+    <div id="tabs" class="panel"></div>
+    <div id="bar" class="panel">
+      <span class="coords">X –&nbsp; Y –</span>
+      <span class="scale"><span></span>10'-0"</span>
+      <span class="prompt" id="prompt">Draw with the Pencil</span>
+      <span class="count">2 sheets · 1 frame</span>
+      <span class="ext" aria-label="Zoom to everything"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/></svg></span>
+      <span id="sync" class="sync" aria-label="Save status"></span>
+    </div>
+    <div class="fade"></div>
+  </div>
+</div>
+
+<div id="below">
+  <div>
+    <div class="cap">Canvases list <em>· left column, actual size</em></div>
+    <div id="list"></div>
+  </div>
+  <div id="truth"></div>
+</div>
+<div id="toast"></div>
+
+<script>
+// ---------- what is true in each state ----------
+const STATES = [
+  { id:'saving',    label:'Saving',
+    duo:'Writing a change', net:'Online', dbx:'Up to date until this change is saved',
+    rows:{} },
+  { id:'uploading', label:'Saved, uploading',
+    duo:'Saved', net:'Online', dbx:'Uploading this canvas',
+    rows:{ boiler:'uploading' } },
+  { id:'synced',    label:'Synced',
+    duo:'Saved', net:'Online', dbx:'Up to date',
+    rows:{} },
+  { id:'offline',   label:'Offline, changes waiting',
+    duo:'Saved', net:'Offline (airplane mode)', dbx:'2 canvases waiting, 14 changes',
+    rows:{ boiler:'waiting', site:'waiting' } },
+  { id:'back',      label:'Back online, uploading',
+    duo:'Saved', net:'Back online', dbx:'Uploading the 2 waiting canvases',
+    rows:{ boiler:'uploading', site:'uploading' } },
+  { id:'failed',    label:'Upload failed, retrying',
+    duo:'Saved', net:'Online', dbx:'Upload failed (Dropbox error); trying again in 30 s',
+    rows:{ boiler:'failed' } },
+  { id:'signedout', label:'Dropbox signed out',
+    duo:'Saved', net:'Online', dbx:'Signed out; 2 canvases cannot upload until Zach signs in',
+    rows:{ boiler:'signedout', site:'signedout' } },
+];
+const CANVASES = [
+  { key:'boiler', name:'Boiler 4 walkdown', when:'Today 9:41 AM', strokes:17, sel:true },
+  { key:'feed',   name:'Feedwater bypass sketch', when:'Today 8:52 AM', strokes:5 },
+  { key:'panel',  name:'Panel 12 redline', when:'Yesterday', strokes:6 },
+  { key:'site',   name:'Site visit notes', when:'Today 7:15 AM', strokes:9 },
+];
+const VARIANTS = {
+  A: { name:'Neutral', desc:'<b>A, neutral.</b> Offline is normal, so the status bar says it calmly in grey: <i>Saved on this Duo · waiting for Dropbox</i>. A failed upload says <i>Sync failed · will retry</i>, with a small Retry. The list notes each canvas that is not in Dropbox yet.' },
+  B: { name:'Amber',   desc:'<b>B, amber.</b> Like A, but while offline the status bar and the list show an amber warning until a connection returns. Amber is also the app’s colour for <i>Saving…</i> and <i>Not saved</i> today. A failure shows as in A.' },
+  C: { name:'Quiet',   desc:'<b>C, quiet.</b> The status bar only ever says <i>Saving…</i>, <i>Saved on this Duo</i> or <i>Synced to Dropbox</i>; nothing about offline, uploads or failures. A failed upload (or being signed out) shows only as a badge on the canvas in the Canvases list.' },
+};
+
+// ---------- icons ----------
+const ICON = {
+  warn: (s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3.5 2.5 20h19L12 3.5z"/><path d="M12 10v4.5M12 17.4v.1"/></svg>`,
+  cloudX: (s = 12) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h10.5a4 4 0 0 0 .5-7.97A6 6 0 0 0 6.3 9.1 4.7 4.7 0 0 0 7 18.5z"/><path d="M12 9.5v4M12 16v.1"/></svg>`,
+  plus: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`,
+  send: `<svg width="25" height="25" viewBox="0 0 24 24" fill="currentColor"><path d="M21.5 2.5 2.8 10.2c-.8.3-.7 1.4.1 1.6l7.4 2 2 7.4c.2.8 1.3.9 1.6.1L21.5 2.5zM10.6 13.4l6.6-6.6-5.2 7.9z"/></svg>`,
+  wave: `<svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 10v4M6.5 7v10M10 4v16M13.5 8v8M17 5.5v13M20.5 10v4"/></svg>`,
+};
+
+// ---------- the design choices: what each variant shows ----------
+// Status bar: returns { text, tone, icon, action }.
+function statusFor(v, s) {
+  if (s === 'saving') return { text:'Saving…', tone:'unsaved' };   // as the app does today
+  if (s === 'synced') return { text:'Synced to Dropbox', tone:'calm' };
+  if (v === 'C') return { text:'Saved on this Duo', tone:'calm' };
+  switch (s) {
+    case 'uploading': case 'back': return { text:'Saved on this Duo · uploading…', tone:'calm' };
+    case 'offline': return v === 'B'
+      ? { text:'Offline · not in Dropbox yet', tone:'amber', icon:ICON.warn() }
+      : { text:'Saved on this Duo · waiting for Dropbox', tone:'calm' };
+    case 'failed': return { text:'Sync failed · will retry', tone:'strong', action:'Retry' };
+    case 'signedout': return { text:'Dropbox signed out', tone:'strong', action:'Sign in' };
+  }
+}
+// Canvases list row: returns { note, tone } or { badge }.
+function rowFor(v, r) {
+  if (!r) return {};
+  if (v === 'C') {
+    if (r === 'failed') return { badge:'Sync failed' };
+    if (r === 'signedout') return { badge:'Dropbox signed out' };
+    return {};
+  }
+  if (r === 'uploading') return { note:'uploading…', tone:'calm' };
+  if (r === 'waiting') return { note:'waiting for Dropbox', tone: v === 'B' ? 'amber' : 'calm' };
+  if (r === 'failed') return { note:'sync failed · will retry', tone:'strong' };
+  if (r === 'signedout') return { note:'Dropbox signed out', tone:'strong' };
+  return {};
+}
+function bannerFor(v, s) {
+  if (v === 'B' && s === 'offline') return 'Offline. 2 canvases aren’t in Dropbox yet. They upload when a connection returns.';
+  return null;
+}
+
+// ---------- page state, kept in the URL ----------
+const q = new URLSearchParams(location.search);
+const P = {
+  v: VARIANTS[(q.get('v') || '').toUpperCase()] ? q.get('v').toUpperCase() : 'A',
+  s: STATES.some(x => x.id === q.get('s')) ? q.get('s') : 'offline',
+  theme: q.get('theme') === 'dark' || q.get('theme') === 'light' ? q.get('theme') : null,
+};
+const mq = matchMedia('(prefers-color-scheme: dark)');
+function saveURL() {
+  const u = new URL(location); u.searchParams.set('v', P.v); u.searchParams.set('s', P.s);
+  if (P.theme) u.searchParams.set('theme', P.theme); else u.searchParams.delete('theme');
+  history.replaceState(null, '', u);
+}
+const $ = id => document.getElementById(id);
+
+// ---------- static parts ----------
+$('seg').innerHTML = Object.entries(VARIANTS).map(([k, x]) => `<button role="tab" data-v="${k}"><b>${k}</b>${x.name}</button>`).join('');
+$('states').innerHTML = STATES.map((x, i) => `<button data-s="${x.id}"><i>${i + 1}</i>${x.label}</button>`).join('');
+$('rail').innerHTML = ['red', 'green', 'blue', 'sketch'].map((c, i) => `<span class="chip" style="bottom:${26 + (3 - i) * 39}px;background:var(--${c})"></span>`).join('');
+$('tabs').innerHTML = `<span style="position:absolute;left:0;bottom:68px;width:100%">${ICON.send.replace('<svg', '<svg style="margin:0 auto"')}</span><span style="position:absolute;left:0;bottom:18px;width:100%">${ICON.wave.replace('<svg', '<svg style="margin:0 auto"')}</span>`;
+$('ink').innerHTML = `
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M150 34 H760 V-10" stroke="var(--sketch)" stroke-width="2"/>
+    <circle cx="150" cy="34" r="17" stroke="var(--sketch)" stroke-width="2"/>
+    <path d="M128 34 h40" stroke="var(--blue)" stroke-width="9" opacity=".28"/>
+    <path d="M352 26 l18 8 -18 8z M388 26 l-18 8 18 8z" stroke="var(--sketch)" stroke-width="1.5"/>
+    <path d="M330 30 q-8 -20 14 -22 q8 -14 26 -6 q18 -10 28 6 q22 2 14 22 q10 18 -12 24 q-6 16 -28 8 q-18 10 -28 -4 q-22 -2 -14 -28z" stroke="var(--red)" stroke-width="2"/>
+    <path d="M520 34 V80 M500 58 l40 40 M540 58 l-40 40" stroke="var(--green)" stroke-width="2"/>
+    <path d="M560 70 h44 M565 64 v12 M599 64 v12" stroke="var(--blue)" stroke-width="1.6"/>
+  </g>`;
+
+// ---------- render ----------
+function render() {
+  document.body.classList.toggle('dark', P.theme ? P.theme === 'dark' : mq.matches);
+  const dark = document.body.classList.contains('dark');
+  for (const b of document.querySelectorAll('#seg button')) { const on = b.dataset.v === P.v; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); }
+  for (const b of document.querySelectorAll('#states button')) b.classList.toggle('on', b.dataset.s === P.s);
+  for (const b of document.querySelectorAll('#theme button')) b.classList.toggle('on', (b.dataset.theme === 'dark') === dark);
+  $('desc').innerHTML = VARIANTS[P.v].desc;
+
+  // status bar
+  const st = statusFor(P.v, P.s), el = $('sync');
+  el.className = `sync ${st.tone}`;
+  el.innerHTML = `${st.icon || ''}<span>${st.text}</span>${st.action ? `<button class="mini" data-act="${st.action}">${st.action}</button>` : ''}`;
+  el.setAttribute('aria-label', 'Save status: ' + st.text);
+
+  // Canvases list
+  const S = STATES.find(x => x.id === P.s), banner = bannerFor(P.v, P.s);
+  $('list').innerHTML = `<div class="head"><b>Canvases</b><span class="newc">${ICON.plus}New canvas</span></div>
+    ${banner ? `<div class="banner">${ICON.warn(14)}<span>${banner}</span></div>` : ''}
+    ${CANVASES.map(c => {
+      const r = rowFor(P.v, S.rows[c.key]);
+      return `<div class="row ${c.sel ? 'sel' : ''}"><div class="n">${c.name}</div>
+        <div class="d"><span>${c.when} · ${c.strokes} strokes</span>${r.note ? `<span class="note ${r.tone}">&nbsp;· ${r.note}</span>` : ''}${r.badge ? `<button class="badge" data-act="Retry" title="Retry now">${ICON.cloudX()}${r.badge}</button>` : ''}</div></div>`;
+    }).join('')}`;
+
+  // what is true, and how much room the tool prompt has left
+  const p = $('prompt'), need = Math.ceil(p.scrollWidth), got = Math.floor(p.clientWidth), cut = need > got + 1;
+  $('truth').innerHTML = `<h3>What is true right now</h3>
+    <dl><dt>On this Duo</dt><dd>${S.duo}</dd><dt>Connection</dt><dd>${S.net}</dd><dt>Dropbox</dt><dd>${S.dbx}</dd>
+    <dt>Status bar says</dt><dd>${st.text}${st.action ? ` <span style="color:var(--secondary)">+ ${st.action}</span>` : ''}</dd>
+    <dt>Tool prompt room</dt><dd class="room ${cut ? 'cut' : ''}">${got} of ${need} pt${cut ? ', “Draw with the Pencil” is cut off' : ''}</dd></dl>
+    <p>Tap Retry, Sign in or a list badge to see it recover. Keys: 1–7 states, A/B/C choices. Widths use this browser’s font, so they are close to the Duo’s, not exact.</p>`;
+}
+
+// ---------- fit the strip: actual size, scaled down a little on mid widths, scrolled sideways on a phone ----------
+function fit() {
+  const w = $('stripScroll').clientWidth, s = w / 951;
+  $('strip').style.zoom = s >= 0.8 && s < 1 ? s : 1;
+  $('stripScroll').scrollLeft = $('stripScroll').scrollWidth;
+}
+
+// ---------- interaction ----------
+let recover;
+function setState(s, flash = true) {
+  clearTimeout(recover); P.s = s; saveURL(); render();
+  if (flash) { $('sync').classList.remove('flash'); void $('sync').offsetWidth; $('sync').classList.add('flash'); }
+}
+function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 1800); }
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.v) { P.v = b.dataset.v; saveURL(); render(); }
+  else if (b.dataset.s) setState(b.dataset.s);
+  else if (b.dataset.theme) { P.theme = b.dataset.theme; saveURL(); render(); }
+  else if (b.dataset.act) {
+    if (b.dataset.act === 'Sign in') toast('Dropbox sign-in would open here');
+    else toast('Trying the upload again');
+    setState('back');
+    recover = setTimeout(() => setState('synced'), 1600);
+  }
+});
+addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= STATES.length) setState(STATES[n - 1].id);
+  const k = e.key.toUpperCase();
+  if (VARIANTS[k]) { P.v = k; saveURL(); render(); }
+});
+mq.addEventListener('change', () => { if (!P.theme) render(); });
+addEventListener('resize', () => { fit(); render(); });
+saveURL(); render(); fit(); render();
+</script>
+</body>
+</html>

@@ -539,7 +539,7 @@ public struct InkSession: Hashable, Sendable {
     /// changes nothing.
     @discardableResult
     public mutating func transform(_ selection: CanvasSelection, by transform: CanvasTransform) -> Bool {
-        guard !transform.isIdentity, !selection.isEmpty else { return false }
+        guard !transform.isIdentity, holdsAny(of: selection) else { return false }
         perform(.transform(selection, transform))
         return !lastChange.isEmpty
     }
@@ -547,15 +547,20 @@ public struct InkSession: Hashable, Sendable {
     /// Duplicates a selection as one undo step, the copies moved by `transform`, and returns the copies' selection.
     @discardableResult
     public mutating func duplicate(_ selection: CanvasSelection, by transform: CanvasTransform) -> CanvasSelection {
-        guard !selection.isEmpty else { return .empty }
+        guard holdsAny(of: selection) else { return .empty }
         perform(.duplicate(selection, transform, firstStroke: StrokeID(nextID), firstText: TextBoxID(nextTextID)))
         return selectionAfterLastChange ?? .empty
     }
 
     /// Deletes a selection's strokes and text boxes as one undo step.
     public mutating func delete(_ selection: CanvasSelection) {
-        guard !selection.isEmpty else { return }
+        guard holdsAny(of: selection) else { return }
         perform(.delete(selection))
+    }
+
+    /// Whether any of a selection's strokes or text boxes is on the canvas, so a change to it is a step worth saving.
+    private func holdsAny(of selection: CanvasSelection) -> Bool {
+        selection.strokes.contains { ink.contains($0) } || selection.texts.contains { text($0) != nil }
     }
 
     // MARK: Text boxes

@@ -271,7 +271,7 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
 /// and turns the handwriting into its text (#7, ADR-0012: Scribble brought in for text boxes). The canvas is one
 /// element; focusing it starts a text box at the Pencil, or keeps the one being typed in.
 @MainActor
-final class CanvasScribble: NSObject, UIIndirectScribbleInteractionDelegate {
+final class CanvasScribble: NSObject, @preconcurrency UIIndirectScribbleInteractionDelegate {
     typealias ElementIdentifier = String
     private static let element = "canvas"
 

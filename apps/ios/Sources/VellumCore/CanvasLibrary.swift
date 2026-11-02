@@ -12,13 +12,17 @@ public struct CanvasManifest: Codable, Hashable, Sendable {
     /// The canvas units' stored name; an unknown one (from a newer Vellum) reads as the default.
     public var units: String
     public var created: Date
+    /// The canvas's folder name in `Dropbox/Vellum` (#12): its name when it was made and a short id, fixed then and
+    /// never renamed. Nil for a canvas made before #12, whose folder is named when it is first synced.
+    public var dropboxFolder: String?
 
-    public init(id: UUID, name: String, units: CanvasUnits, created: Date) {
+    public init(id: UUID, name: String, units: CanvasUnits, created: Date, dropboxFolder: String? = nil) {
         format = Self.currentFormat
         self.id = id
         self.name = name
         self.units = units.rawValue
         self.created = created
+        self.dropboxFolder = dropboxFolder
     }
 
     public var canvasUnits: CanvasUnits {
@@ -92,8 +96,9 @@ public struct CanvasLibrary: Sendable {
         try ensureRoot()
         let existing = (try? list().map(\.name)) ?? []
         let id = UUID()
-        let manifest = CanvasManifest(id: id, name: CanvasName.cleaned(name ?? "") ?? CanvasName.untitled(after: existing),
-                                      units: units, created: now)
+        let named = CanvasName.cleaned(name ?? "") ?? CanvasName.untitled(after: existing)
+        let manifest = CanvasManifest(id: id, name: named, units: units, created: now,
+                                      dropboxFolder: SyncFolderName.make(name: named, id: id, taken: dropboxFolders()))
         let building = root.appendingPathComponent(".\(id.uuidString).creating", isDirectory: true)
         try FileManager.default.createDirectory(at: building, withIntermediateDirectories: true)
         do {
@@ -132,6 +137,16 @@ public struct CanvasLibrary: Sendable {
         try FileManager.default.moveItem(at: folder(for: id), to: leaving)
         try DurableFile.flushFolder(root)
         try FileManager.default.removeItem(at: leaving)
+    }
+
+    /// Every canvas's Dropbox folder name that is fixed in its `canvas.json`.
+    public func dropboxFolders() -> Set<String> {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return [] }
+        var folders: Set<String> = []
+        for name in names where !name.hasPrefix(".") {
+            if let id = UUID(uuidString: name), let folder = try? manifest(for: id).dropboxFolder { folders.insert(folder) }
+        }
+        return folders
     }
 
     public func manifest(for id: UUID) throws -> CanvasManifest {

@@ -224,6 +224,14 @@ public final class InkStore {
     /// every compaction.
     public var savedVersion: String { "\(generation).\(logGeneration).\(logSize)" }
 
+    /// Where the saved ink stands, for syncing (#12): the snapshot's generation and the log's whole length, every byte
+    /// of it a whole record. Nil in the moment after a compaction's snapshot is in place and before its new log is,
+    /// when the folder's two files are of different generations; the next flush ends that.
+    var syncPosition: (generation: UInt64, logSize: Int)? {
+        guard !isClosed, logGeneration == generation, !logEndUncertain else { return nil }
+        return (generation, logSize)
+    }
+
     /// Appends changes to the end of the log: one `write`, the new changes' bytes only, never the canvas. If the write
     /// fails (the Duo is full), the log is trimmed back to before the attempt and nothing here changes, so the same
     /// changes can be appended again later. If the trim fails too, nothing more is appended until a later attempt

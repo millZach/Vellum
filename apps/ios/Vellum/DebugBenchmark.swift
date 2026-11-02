@@ -20,8 +20,11 @@ final class DebugBenchmark: NSObject {
         guard isRequested, shared == nil, view.bounds.width > 0 else { return }
         let benchmark = DebugBenchmark(view: view, editor: editor)
         shared = benchmark
-        // Let the first render of the canvas finish before measuring anything.
+        // Let the first render of the canvas finish before measuring anything. The made-up 1/4" plan for the sheet
+        // scenarios (#11) is read now, off the main thread, and placed only when they start, so the earlier scenarios
+        // run on the canvas they always have.
         Task { @MainActor in
+            benchmark.sheet = await DebugSheetSource.pending(file: 1, page: 0)
             try? await Task.sleep(for: .seconds(4))
             benchmark.start()
         }
@@ -57,6 +60,9 @@ final class DebugBenchmark: NSObject {
     private var lines: [String] = []
     private var measurements: [String: Double] = [:]
     private var strokePoint = CGPoint.zero
+    /// The made-up sheet the sheet scenarios place over the canvas.
+    private var sheet: CanvasEditor.PendingSheet?
+    private var placedSheet: Sheet?
 
     private init(view: InkCanvasUIView, editor: CanvasEditor) {
         self.view = view
@@ -212,7 +218,65 @@ final class DebugBenchmark: NSObject {
                     view.moveInput(samples: [b.strokePoint], predicted: [])
                 }
             }, tearDown: { b in b.editor.tool = .pen }),
+            // #11: a 36 x 24 sheet at 1/4" = 1'-0" placed in the middle of the canvas (its tiles drawn from the PDF off
+            // the main thread), panned across back and forth, as the pan above...
+            Scenario(name: "sheet_pan", frames: 240, setUp: { b in
+                b.placeSheet()
+            }, step: { b, i in
+                let direction: CGFloat = (i / 60) % 2 == 0 ? 1 : -1
+                b.view?.panBy(dx: 6 * direction, dy: 2 * direction)
+            }, tearDown: { b in b.logSheetTiles() }),
+            // ...pinched in and out over it...
+            Scenario(name: "sheet_pinch", frames: 240, setUp: { b in b.zoomToSheet() }, step: { b, i in
+                guard let view = b.view else { return }
+                let factor: CGFloat = i < 120 ? 1.02 : 1 / 1.02
+                view.zoomBy(factor, about: CGPoint(x: view.bounds.midX, y: view.bounds.midY))
+            }, tearDown: { b in b.logSheetTiles() }),
+            // ...and drawn over with the pen, so ink over a sheet is measured against ink on the bare canvas.
+            Scenario(name: "sheet_draw", frames: 240, setUp: { b in
+                b.zoomToSheet()
+                b.editor.tool = .pen
+                guard let view = b.view else { return }
+                b.strokePoint = CGPoint(x: 120, y: view.bounds.midY)
+                _ = view.beginInput(at: b.strokePoint)
+            }, step: { b, i in
+                guard let view = b.view else { return }
+                var samples: [CGPoint] = []
+                for _ in 0..<2 {
+                    b.strokePoint.x += 1.4
+                    samples.append(CGPoint(x: b.strokePoint.x, y: view.bounds.midY + 80 * sin(b.strokePoint.x / 40)))
+                }
+                if i == 239 {
+                    view.endInput(samples: samples, keep: true)
+                } else {
+                    view.moveInput(samples: samples, predicted: [])
+                }
+            }, tearDown: { _ in }),
         ]
+    }
+
+    /// Places the made-up sheet in the middle of the canvas, with no saver (the test canvas is never saved), and
+    /// zooms to it.
+    private func placeSheet() {
+        guard let pending = sheet, placedSheet == nil else { return zoomToSheet() }
+        editor.zoomToEverything()
+        let centre = editor.viewport.centre
+        editor.beginPlacing(pending)
+        Task { @MainActor in
+            placedSheet = await editor.placeSheet(centredAt: centre)
+            record("  sheet placed=\(placedSheet?.label ?? "none")")
+            zoomToSheet()
+        }
+    }
+
+    private func zoomToSheet() {
+        guard let placedSheet else { return editor.zoomToEverything() }
+        editor.zoom(to: placedSheet.bounds)
+    }
+
+    private func logSheetTiles() {
+        guard let tiles = view?.debugSheetTiles else { return }
+        record("  sheet tiles drawn=\(tiles.drawn) kept=\(tiles.kept)")
     }
 
     private func start() {

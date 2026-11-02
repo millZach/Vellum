@@ -1,0 +1,28 @@
+{
+  "area": "sheets",
+  "issue": "#11",
+  "about": "Placed PDF sheets: what drawing a sheet's tiles and getting its PDF onto the Duo cost. Counts are enforced by SheetTileTests in VellumCore; the pan and pinch frame times over a placed sheet are timings in canvas-rendering.json (sheet_pan_*, sheet_pinch_*), recorded by the Debug-only benchmark.",
+  "entries": [
+    { "metric": "sheet_tiles_drawn_first_view", "kind": "count", "value": 24, "unit": "tiles", "tolerance": 0,
+      "measured": "feat/place-sheets 2026-11-02 VellumCore SheetTileTests (deterministic)",
+      "note": "A 36 x 24 sheet at 1/4\" = 1'-0\" seen at 2 points per inch on the unfolded Duo (951 x 669): only the 6 x 4 tiles on screen are drawn, never the whole page (216 tiles at that level)." },
+    { "metric": "sheet_tiles_drawn_per_screen_pan", "kind": "count", "value": 20, "unit": "tiles", "tolerance": 0,
+      "measured": "feat/place-sheets 2026-11-02 VellumCore SheetTileTests (deterministic)",
+      "note": "Panning one screen width across the same sheet draws the 5 x 4 tiles that came into view; the column already on screen is not drawn again." },
+    { "metric": "sheet_tiles_drawn_panning_back", "kind": "count", "value": 0, "unit": "tiles", "tolerance": 0,
+      "measured": "feat/place-sheets 2026-11-02 VellumCore SheetTileTests (deterministic)",
+      "note": "Pages rendered per pan after the first draw: going back over tiles already drawn draws nothing; a pan only moves layers. Measured at 2x, where both screens' 44 tiles fit the cache; at 3x they are two over the 96 MB limit, so going back a full screen draws the two least recently shown again." },
+    { "metric": "sheet_tiles_drawn_per_pinch_within_level", "kind": "count", "value": 0, "unit": "tiles", "tolerance": 0,
+      "measured": "feat/place-sheets 2026-11-02 VellumCore SheetTileTests (deterministic)",
+      "note": "Pinching in by 1.25x within one level of detail (half an octave) draws nothing: the level's layer is scaled." },
+    { "metric": "sheet_tile_cache_bytes", "kind": "count", "value": 99090432, "unit": "bytes", "tolerance": 0,
+      "measured": "feat/place-sheets 2026-11-02 VellumCore SheetTileTests (deterministic)",
+      "note": "The most drawn sheet tiles kept, over 60 pans across a sheet at 6 points per inch: 42 tiles of 768 x 768 pixels (3x), the most whole tiles under SheetTileBook.cacheLimit (96 MB). The least recently shown go first; tiles on screen (at most 7 x 5 with half-octave levels) are never let go." },
+    { "metric": "sheet_downloads_per_pdf", "kind": "count", "value": 1, "unit": "requests", "tolerance": 0,
+      "measured": "feat/place-sheets 2026-11-02 VellumCore SheetTileTests (deterministic)",
+      "note": "Picking a PDF three times and placing it on two canvases sends one files/download. A placed sheet is drawn from its canvas folder's copy, so reopening a canvas downloads nothing." },
+    { "metric": "sheet_bytes_downloaded_per_pdf_byte", "kind": "count", "value": 1, "unit": "ratio", "tolerance": 0,
+      "measured": "feat/place-sheets 2026-11-02 VellumCore SheetTileTests (deterministic)",
+      "note": "Bytes downloaded for a placed sheet are the PDF's bytes once: total downloaded over the PDF's size, across the same picks and places." }
+  ]
+}

@@ -207,6 +207,7 @@ final class SelectionTests: XCTestCase {
             case .editText: "editText"
             case .addDimension: "addDimension"
             case .addFrame: "addFrame"
+            case .addSheet: "addSheet"
             }
         })
         XCTAssertEqual(kinds.count, 9, "every kind of event, \(kinds.sorted())")

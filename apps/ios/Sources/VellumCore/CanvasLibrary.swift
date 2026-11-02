@@ -38,8 +38,9 @@ public struct CanvasSummary: Identifiable, Hashable, Sendable {
 }
 
 /// Every canvas on the Duo: one folder per canvas under `root`, named by the canvas's id so renaming never moves it.
-/// Each folder holds `canvas.json` (name and canvas units), `ink.snapshot` and `ink.log` (ADR-0014), and nothing else,
-/// so #12 can mirror the folders to `Dropbox/Vellum` as they are.
+/// Each folder holds `canvas.json` (name and canvas units), `ink.snapshot` and `ink.log` (ADR-0014), and since #11 a
+/// `sheets` folder with the PDFs its sheets show, one file per PDF named by its Dropbox content hash; nothing else, so
+/// #12 can mirror the folders to `Dropbox/Vellum` as they are.
 ///
 /// Making and deleting a canvas are atomic: a new canvas is built in a hidden folder and renamed into place, and a
 /// deleted one is renamed out of sight before it is removed, so a crash never leaves half a canvas in the list.
@@ -140,6 +141,34 @@ public struct CanvasLibrary: Sendable {
     /// Opens a canvas's ink for drawing on and saving.
     public func openInk(_ id: UUID, compactionThreshold: Int = 1 << 20) throws -> InkStore {
         try InkStore(folder: folder(for: id), compactionThreshold: compactionThreshold)
+    }
+
+    // MARK: Sheets' PDFs (#11)
+
+    /// The folder in a canvas's folder that holds its sheets' PDFs.
+    public static let sheetsFolderName = "sheets"
+
+    /// Where a sheet's PDF is kept in a canvas's folder: `sheets/<name>.pdf`.
+    public func sheetPDF(named name: String, in id: UUID) -> URL {
+        folder(for: id).appendingPathComponent(Self.sheetsFolderName, isDirectory: true)
+            .appendingPathComponent(name + ".pdf")
+    }
+
+    /// Keeps a PDF in a canvas's folder, written and flushed to storage, folder and all, before it returns, so the
+    /// sheet placed on it never names a PDF the Duo could lose. A PDF already kept under the name is left as it is: the
+    /// name is the PDF's content hash, so it holds the same bytes. Returns whether it wrote one.
+    @discardableResult
+    public func keepSheetPDF(from source: URL, named name: String, in id: UUID) throws -> Bool {
+        let target = sheetPDF(named: name, in: id)
+        if FileManager.default.fileExists(atPath: target.path) { return false }
+        guard let bytes = try DurableFile.read(source) else { throw CocoaError(.fileNoSuchFile) }
+        let sheets = target.deletingLastPathComponent()
+        if !FileManager.default.fileExists(atPath: sheets.path) {
+            try FileManager.default.createDirectory(at: sheets, withIntermediateDirectories: true)
+            try DurableFile.flushFolder(folder(for: id))
+        }
+        try DurableFile.writeAtomically(bytes, to: target)
+        return true
     }
 
     /// Clears away the hidden folders a crash can leave mid-create or mid-delete.

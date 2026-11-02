@@ -79,6 +79,19 @@ final class InkStoreFailureTests: XCTestCase {
             let copies = session.duplicate(picked, by: .translation(dx: .feet(1), dy: .zero))
             session.delete(CanvasSelection(dimensions: [DimensionID(2)] + copies.dimensions))
             session.undo()
+            // Sheets (#11): the made-up AS NOTED sheet with its scale areas, an NTS sheet that dims, an undo and a redo.
+            let detail = MadeUpSheets.detailSheet
+            let reading = SheetReading.read(detail.texts, paper: detail.paper)
+            let main = reading.suggestedScale ?? .notToScale
+            session.addSheet(Sheet(paper: detail.paper, scale: main, origin: CanvasPoint(x: .feet(40), y: .feet(-5)),
+                                   page: SheetPage(file: "madeup01", name: "Details (example).pdf",
+                                                   path: "/Made up/Details (example).pdf", index: 1,
+                                                   number: reading.sheetNumber),
+                                   areas: reading.areas(placedAt: main)))
+            session.addSheet(Sheet(paper: .letter, scale: .notToScale, origin: CanvasPoint(x: .feet(70), y: .feet(0)),
+                                   invertsBadly: true))
+            session.undo()
+            session.redo()
             unwritten += session.takeEvents()
             if (try? store.append(unwritten)) != nil { unwritten.removeAll() }
         }
@@ -167,6 +180,8 @@ final class InkStoreFailureTests: XCTestCase {
         writer.annotate(into: store)
         XCTAssertEqual(writer.session.dimensions.count, 3)
         XCTAssertEqual(writer.session.frames.count, 2)
+        XCTAssertEqual(writer.session.sheets.count, 2)
+        XCTAssertEqual(writer.session.sheets.first?.areas.count, 2)
 
         let crashes = Crashes(folder: folder, scratch: self.folder.appendingPathComponent("crashes"))
         crashes.expected = writer.session
@@ -282,6 +297,7 @@ final class InkStoreFailureTests: XCTestCase {
         XCTAssertEqual(reopened.recovery.droppedBytes, 0)
         XCTAssertEqual(reopened.session, writer.session)
         XCTAssertEqual(reopened.session.dimensions.count, 3)
+        XCTAssertEqual(reopened.session.sheets.count, 2, "the sheets torn with them are written again too")
     }
 
     /// The same torn append, its trim working: the next append goes straight on.

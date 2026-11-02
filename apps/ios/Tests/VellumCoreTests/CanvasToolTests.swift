@@ -107,13 +107,15 @@ final class CanvasToolPromptTests: XCTestCase {
 
     /// Part way through a measure, dimension or window, the prompt says what comes next (#8), and fits.
     func testThePromptsPartWayThroughFitAndSayWhatComesNext() {
-        let steps: [CanvasTool.Step] = [.start, .secondPoint, .pullOff, .chooseWindowAction]
+        let steps: [CanvasTool.Step] = [.start, .secondPoint, .pullOff, .chooseWindowAction, .placeSheet]
         for tool in CanvasTool.allCases {
             for step in steps {
                 let prompt = tool.prompt(fingerDraws: false, hasSelection: false, step: step)
                 XCTAssertLessThanOrEqual(prompt.count, 28, prompt)
             }
         }
+        XCTAssertEqual(CanvasTool.lasso.prompt(fingerDraws: false, hasSelection: true, step: .placeSheet),
+                       "Tap where the sheet goes", "placing a sheet comes before any tool's prompt (#11)")
         XCTAssertEqual(CanvasTool.measure.prompt(fingerDraws: false, hasSelection: false), "Measure: tap first point")
         XCTAssertEqual(CanvasTool.dimension.prompt(fingerDraws: false, hasSelection: false, step: .secondPoint),
                        "Tap the second point")

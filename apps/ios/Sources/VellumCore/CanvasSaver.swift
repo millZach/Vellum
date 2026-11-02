@@ -122,6 +122,18 @@ public final class CanvasSaver: @unchecked Sendable {
         }
     }
 
+    /// Keeps a sheet's PDF in the canvas's folder (#11), on the append queue, so it is on the Duo, flushed, before any
+    /// change handed over after this call, the sheet's placing included. Throws when it can't be written.
+    public func keepSheetPDF(from source: URL, named name: String) async throws {
+        try await onAppends { [self] in
+            if isDeleted { throw CocoaError(.fileNoSuchFile) }
+            try library.keepSheetPDF(from: source, named: name, in: id)
+        }
+    }
+
+    /// Where a sheet's PDF is kept in the canvas's folder.
+    public func sheetPDF(named name: String) -> URL { library.sheetPDF(named: name, in: id) }
+
     /// Whether the Pencil is on the glass. A compaction's last step waits for it to lift; appends never do.
     public func setPencilDown(_ down: Bool) {
         appends.async { [self] in

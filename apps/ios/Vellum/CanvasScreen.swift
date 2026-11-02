@@ -28,9 +28,13 @@ struct CanvasScreen: View {
                             TopBar(editor: editor, showCanvases: showCanvases)
                                 .layoutPriority(1)
                             Spacer(minLength: 8)
-                            CanvasActions()
+                            CanvasActions(editor: editor)
                         }
-                        if editor.tool == .frame {
+                        if editor.placingSheet != nil {
+                            PlacingSheetPill(editor: editor)
+                                .padding(.top, 8)
+                                .frame(maxWidth: .infinity)
+                        } else if editor.tool == .frame {
                             FramePaperPicker(editor: editor)
                                 .padding(.top, 8)
                         }
@@ -46,6 +50,34 @@ struct CanvasScreen: View {
             }
             .ignoresSafeArea()
         }
+        .alert("Sheet not placed", isPresented: Binding(get: { editor.sheetProblem != nil },
+                                                         set: { if !$0 { editor.sheetProblem = nil } })) {
+            Button("OK", role: .cancel) { editor.sheetProblem = nil }
+        } message: {
+            Text(editor.sheetProblem ?? "")
+        }
+    }
+}
+
+/// While a sheet waits to be placed (#11): what to do, and Cancel, as the prototype's pill says it.
+private struct PlacingSheetPill: View {
+    let editor: CanvasEditor
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Tap where **\(editor.placingSheet?.sheet.page?.title ?? "the sheet")** goes")
+                .lineLimit(1)
+            Button("Cancel") { editor.cancelPlacing() }
+                .buttonStyle(.bordered)
+                .accessibilityHint("Don't place the sheet")
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(Chrome.text)
+        .padding(.leading, 14).padding(.trailing, 6)
+        .frame(height: 40)
+        .chromePanel(cornerRadius: 12)
+        .fixedSize()
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -287,15 +319,74 @@ private struct TopBar: View {
     }
 }
 
-/// Add sheet, Record and Send, at the top right. Each comes with a later ticket; they show where they will be.
+/// Add sheet, Record and Send, at the top right. Add sheet opens the Dropbox browser (#11); Record and Send come with
+/// later tickets and show where they will be.
 private struct CanvasActions: View {
+    let editor: CanvasEditor
+    @State private var addSheet: AddSheetModel?
+
     var body: some View {
         HStack(spacing: 8) {
-            action("Add sheet", systemImage: "plus", hint: "Placing sheets from Dropbox comes in a later update.")
+            Button {
+                open()
+            } label: {
+                Label("Add sheet", systemImage: "plus")
+                    .font(.system(size: 13))
+                    .padding(.horizontal, 11)
+                    .frame(height: 34)
+                    .foregroundStyle(Chrome.text)
+                    .background(Chrome.panel, in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Chrome.border))
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Browse Dropbox for a PDF, pick a page, confirm its scale, then tap where it goes")
             action("Record", systemImage: "record.circle", hint: "Recording meetings comes in a later update.")
             action("Send", systemImage: "paperplane.fill", hint: "Sending to an agent comes in a later update.", primary: true)
         }
+        .sheet(item: $addSheet) { model in
+            AddSheetFlow(model: model)
+        }
+        #if DEBUG
+        .task { await debugOpen() }
+        #endif
     }
+
+    private func makeModel() -> AddSheetModel {
+        let editor = editor
+        let model = AddSheetModel(dropbox: .app, units: editor.canvas.units, covers: { editor.covers($0) })
+        model.onPlace = { [weak model] pending in
+            model?.close?()
+            editor.beginPlacing(pending)
+        }
+        model.close = { addSheet = nil }
+        return model
+    }
+
+    private func open() {
+        editor.cancelPlacing()
+        addSheet = makeModel()
+    }
+
+    #if DEBUG
+    /// `--ui-add-sheet <step>` opens Add sheet at a step for the captures, on the made-up Dropbox
+    /// (`--ui-dropbox sheets`): `browser` (the made-up project's drawings), `grid` (the IFC set's pages), `confirm` (the
+    /// 1/4" plan), `asnoted` (the AS NOTED detail sheet, its scale areas outlined) or `scan` (the scan, asking).
+    private func debugOpen() async {
+        guard let step = DebugLaunch.argument("--ui-add-sheet") else { return }
+        try? await Task.sleep(for: .seconds(1))
+        let model = makeModel()
+        addSheet = model
+        try? await Task.sleep(for: .seconds(0.6))
+        let set = MadeUpSheets.files[0].name, scan = MadeUpSheets.files[2].name
+        switch step {
+        case "grid": await model.debugGo(to: MadeUpSheets.folder, file: set, page: nil)
+        case "confirm": await model.debugGo(to: MadeUpSheets.folder, file: set, page: 0)
+        case "asnoted": await model.debugGo(to: MadeUpSheets.folder, file: set, page: 1)
+        case "scan": await model.debugGo(to: MadeUpSheets.folder, file: scan, page: nil)
+        default: await model.debugGo(to: MadeUpSheets.folder, file: nil, page: nil)
+        }
+    }
+    #endif
 
     private func action(_ title: String, systemImage: String, hint: String, primary: Bool = false) -> some View {
         Button {} label: {

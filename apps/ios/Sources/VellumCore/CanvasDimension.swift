@@ -149,11 +149,8 @@ public struct CanvasDimension: Hashable, Sendable, Identifiable {
 
 extension Canvas {
     /// What a dimension reads on this canvas: its real length, or, when either of its points is on an NTS sheet, the
-    /// printed length marked NTS (CONTEXT.md "NTS sheet").
+    /// printed length marked NTS (CONTEXT.md "NTS sheet"); in a scale area, at the area's scale (#11).
     public func measure(_ dimension: CanvasDimension) -> Measure {
-        let onNotToScaleSheet = sheets.contains {
-            $0.isNotToScale && ($0.contains(dimension.start) || $0.contains(dimension.end))
-        }
-        return onNotToScaleSheet ? .notToScale(PrintedLength(inches: dimension.length.inches)) : .real(dimension.length)
+        Self.measure(dimension.length, between: dimension.start, and: dimension.end, on: sheets)
     }
 }

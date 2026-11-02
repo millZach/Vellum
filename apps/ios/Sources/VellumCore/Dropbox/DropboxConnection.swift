@@ -37,10 +37,24 @@ public final class DropboxConnection {
     private var updating: Task<Void, Never>?
     private var signOutReport: Task<Void, Never>?
 
+    private nonisolated let sessionForDownloads: DropboxSession?
+
     public init(session: DropboxSession?) {
         self.session = session
+        sessionForDownloads = session
         phase = session == nil ? .notSetUp : .checkingSignIn
     }
+
+    /// What a Dropbox folder holds, for Add sheet's browser (#11): its folders and PDFs, kept and refreshed as the
+    /// Drawings tab's folders are.
+    public func contents(of path: String, freshness: DropboxFreshness = .recent) async throws(DropboxError)
+        -> DropboxFolderContents {
+        guard let session else { throw .notSignedIn }
+        return try await session.contents(of: path, freshness: freshness)
+    }
+
+    /// The session Add sheet downloads PDFs through (#11), off the main actor; nil when the build has no app key.
+    public nonisolated var downloads: DropboxSession? { sessionForDownloads }
 
     /// True once the tokens are kept, whether or not the folders have arrived.
     public var isSignedIn: Bool {

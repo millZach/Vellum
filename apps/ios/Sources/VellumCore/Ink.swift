@@ -375,10 +375,15 @@ public struct InkChange: Hashable, Sendable {
     public var removedDimensions: [DimensionID] = []
     public var addedFrames: [Frame] = []
     public var removedFrames: [FrameID] = []
+    /// Sheets placed, or put back by a redo (#11).
+    public var addedSheets: [Sheet] = []
+    /// Sheets taken away by an undo.
+    public var removedSheets: [SheetID] = []
 
     public init(added: [InkStroke] = [], removed: [StrokeID] = [], addedTexts: [TextBox] = [],
                 removedTexts: [TextBoxID] = [], addedDimensions: [CanvasDimension] = [],
-                removedDimensions: [DimensionID] = [], addedFrames: [Frame] = [], removedFrames: [FrameID] = []) {
+                removedDimensions: [DimensionID] = [], addedFrames: [Frame] = [], removedFrames: [FrameID] = [],
+                addedSheets: [Sheet] = [], removedSheets: [SheetID] = []) {
         self.added = added
         self.removed = removed
         self.addedTexts = addedTexts
@@ -387,10 +392,16 @@ public struct InkChange: Hashable, Sendable {
         self.removedDimensions = removedDimensions
         self.addedFrames = addedFrames
         self.removedFrames = removedFrames
+        self.addedSheets = addedSheets
+        self.removedSheets = removedSheets
     }
 
     public static let none = InkChange()
-    public var isEmpty: Bool { added.isEmpty && removed.isEmpty && !touchesText && !touchesAnnotations }
+    public var isEmpty: Bool {
+        added.isEmpty && removed.isEmpty && !touchesText && !touchesAnnotations && !touchesSheets
+    }
+    /// Whether sheets changed.
+    public var touchesSheets: Bool { !addedSheets.isEmpty || !removedSheets.isEmpty }
     /// Whether text boxes changed.
     public var touchesText: Bool { !addedTexts.isEmpty || !removedTexts.isEmpty }
     /// Whether dimensions or frames changed.
@@ -427,6 +438,8 @@ public enum InkEvent: Hashable, Sendable {
     case addDimension(CanvasDimension)
     /// A frame placed (#8).
     case addFrame(Frame)
+    /// A sheet placed (#11): the PDF page, its scale and scale areas, and where it went.
+    case addSheet(Sheet)
 }
 
 /// The ink, text boxes, dimensions and frames on a canvas, with undo and redo: drawing, erasing, and since #7 moving,
@@ -451,12 +464,15 @@ public struct InkSession: Hashable, Sendable {
     public private(set) var dimensions: [CanvasDimension]
     /// The frames, in the order placed (ascending id).
     public private(set) var frames: [Frame]
+    /// The sheets, in the order placed (ascending id), the last placed on top (#11).
+    public private(set) var sheets: [Sheet]
     private(set) var undoStack: [Edit] = []
     private(set) var redoStack: [Edit] = []
     private(set) var nextID: Int
     private(set) var nextTextID: Int
     private(set) var nextDimensionID: Int
     private(set) var nextFrameID: Int
+    private(set) var nextSheetID: Int
     /// Points held only by the history: erased strokes in undo steps, undone strokes in redo steps.
     public private(set) var historyPoints = 0
     /// Whether the top undo step belongs to the eraser sweep in progress, so the sweep's next hit joins it.
@@ -531,32 +547,40 @@ public struct InkSession: Hashable, Sendable {
         case addDimension(CanvasDimension)
         /// A frame placed.
         case addFrame(Frame)
+        /// A sheet placed.
+        case addSheet(Sheet)
     }
 
-    public init(ink: Ink = Ink(), texts: [TextBox] = [], dimensions: [CanvasDimension] = [], frames: [Frame] = []) {
+    public init(ink: Ink = Ink(), texts: [TextBox] = [], dimensions: [CanvasDimension] = [], frames: [Frame] = [],
+                sheets: [Sheet] = []) {
         self.ink = ink
         self.texts = texts.sorted { $0.id < $1.id }
         self.dimensions = dimensions.sorted { $0.id < $1.id }
         self.frames = frames.sorted { $0.id < $1.id }
+        self.sheets = sheets.sorted { $0.id < $1.id }
         nextID = (ink.strokes.last?.id.value ?? 0) + 1
         nextTextID = (self.texts.last?.id.value ?? 0) + 1
         nextDimensionID = (self.dimensions.last?.id.value ?? 0) + 1
         nextFrameID = (self.frames.last?.id.value ?? 0) + 1
+        nextSheetID = (self.sheets.last?.id.value ?? 0) + 1
     }
 
     /// A session restored from a snapshot, with its undo history.
-    init(ink: Ink, texts: [TextBox], dimensions: [CanvasDimension] = [], frames: [Frame] = [], undoStack: [Edit],
-         redoStack: [Edit], nextID: Int, nextTextID: Int, nextDimensionID: Int = 1, nextFrameID: Int = 1) {
+    init(ink: Ink, texts: [TextBox], dimensions: [CanvasDimension] = [], frames: [Frame] = [], sheets: [Sheet] = [],
+         undoStack: [Edit], redoStack: [Edit], nextID: Int, nextTextID: Int, nextDimensionID: Int = 1,
+         nextFrameID: Int = 1, nextSheetID: Int = 1) {
         self.ink = ink
         self.texts = texts.sorted { $0.id < $1.id }
         self.dimensions = dimensions.sorted { $0.id < $1.id }
         self.frames = frames.sorted { $0.id < $1.id }
+        self.sheets = sheets.sorted { $0.id < $1.id }
         self.undoStack = undoStack
         self.redoStack = redoStack
         self.nextID = max(nextID, (ink.strokes.last?.id.value ?? 0) + 1)
         self.nextTextID = max(nextTextID, (self.texts.last?.id.value ?? 0) + 1)
         self.nextDimensionID = max(nextDimensionID, (self.dimensions.last?.id.value ?? 0) + 1)
         self.nextFrameID = max(nextFrameID, (self.frames.last?.id.value ?? 0) + 1)
+        self.nextSheetID = max(nextSheetID, (self.sheets.last?.id.value ?? 0) + 1)
         historyPoints = undoStack.reduce(0) { $0 + Self.heldPoints($1, inUndo: true) }
             + redoStack.reduce(0) { $0 + Self.heldPoints($1, inUndo: false) }
     }
@@ -568,6 +592,14 @@ public struct InkSession: Hashable, Sendable {
     /// Whether the canvas has ever had a dimension or a frame, so its snapshot needs version 3's annotations.
     var hasHadAnnotations: Bool {
         nextDimensionID > 1 || nextFrameID > 1 || !dimensions.isEmpty || !frames.isEmpty
+    }
+
+    /// Whether the canvas has ever had a sheet, so its snapshot needs version 4's sheets.
+    var hasHadSheets: Bool { nextSheetID > 1 || !sheets.isEmpty }
+
+    /// The sheet with this id, if it is on the canvas.
+    public func sheet(_ id: SheetID) -> Sheet? {
+        Self.find(id, in: sheets).map { sheets[$0] }
     }
 
     /// The text box with this id, if it is on the canvas.
@@ -716,6 +748,17 @@ public struct InkSession: Hashable, Sendable {
         return frame
     }
 
+    // MARK: Sheets (#11)
+
+    /// Places a sheet, its corner on the ink grid, as one undo step, and returns it with its id.
+    @discardableResult
+    public mutating func addSheet(_ sheet: Sheet) -> Sheet {
+        var placed = sheet.withID(SheetID(nextSheetID))
+        placed.origin = sheet.origin.onInkGrid
+        perform(.addSheet(placed))
+        return placed
+    }
+
     public mutating func undo() {
         guard canUndo else { return }
         perform(.undo)
@@ -831,6 +874,12 @@ public struct InkSession: Hashable, Sendable {
             Self.insert([frame], into: &frames)
             record(.addFrame(frame))
             return InkChange(addedFrames: [frame])
+        case .addSheet(let sheet):
+            guard self.sheet(sheet.id) == nil else { return .none }
+            nextSheetID = max(nextSheetID, sheet.id.value + 1)
+            Self.insert([sheet], into: &sheets)
+            record(.addSheet(sheet))
+            return InkChange(addedSheets: [sheet])
         case .undo:
             guard let edit = undoStack.popLast() else { return .none }
             sweepHasEntry = false
@@ -879,6 +928,9 @@ public struct InkSession: Hashable, Sendable {
         case .addFrame(let frame):
             Self.remove([frame.id], from: &frames)
             return InkChange(removedFrames: [frame.id])
+        case .addSheet(let sheet):
+            Self.remove([sheet.id], from: &sheets)
+            return InkChange(removedSheets: [sheet.id])
         }
     }
 
@@ -913,6 +965,9 @@ public struct InkSession: Hashable, Sendable {
         case .addFrame(let frame):
             Self.insert([frame], into: &frames)
             return InkChange(addedFrames: [frame])
+        case .addSheet(let sheet):
+            Self.insert([sheet], into: &sheets)
+            return InkChange(addedSheets: [sheet])
         }
     }
 
@@ -1032,9 +1087,10 @@ public struct InkSession: Hashable, Sendable {
     /// the sweep in progress are not part of what is saved.
     public static func == (lhs: InkSession, rhs: InkSession) -> Bool {
         lhs.ink == rhs.ink && lhs.texts == rhs.texts && lhs.dimensions == rhs.dimensions && lhs.frames == rhs.frames
+            && lhs.sheets == rhs.sheets
             && lhs.undoStack == rhs.undoStack && lhs.redoStack == rhs.redoStack && lhs.nextID == rhs.nextID
             && lhs.nextTextID == rhs.nextTextID && lhs.nextDimensionID == rhs.nextDimensionID
-            && lhs.nextFrameID == rhs.nextFrameID
+            && lhs.nextFrameID == rhs.nextFrameID && lhs.nextSheetID == rhs.nextSheetID
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -1042,6 +1098,7 @@ public struct InkSession: Hashable, Sendable {
         hasher.combine(texts)
         hasher.combine(dimensions)
         hasher.combine(frames)
+        hasher.combine(sheets)
         hasher.combine(nextID)
     }
 }

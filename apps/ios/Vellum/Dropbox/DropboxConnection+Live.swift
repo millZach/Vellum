@@ -10,7 +10,7 @@ extension DropboxConnection {
     static let app = live()
 
     /// The connection the app runs with: the app key from Info.plist, the Keychain and URLSession. Debug builds accept
-    /// `--ui-dropbox connect` (a made-up key, signed out) and `--ui-dropbox folders` (made-up folders) for the captures.
+    /// `--ui-dropbox connect` (a made-up key, signed out) and `--ui-dropbox folders` (made-up folders) and `--ui-dropbox sheets` (made-up PDFs, #11) for the captures.
     /// Building it reads nothing: the session reads the Keychain off the main actor when the tab first appears.
     private static func live() -> DropboxConnection {
         #if DEBUG
@@ -21,6 +21,11 @@ extension DropboxConnection {
             case "connect":
                 return DropboxConnection(session: DropboxSession(appKey: key, transport: CaptureDropboxTransport(),
                                                                  store: DropboxMemoryTokenStore()))
+            case "sheets":
+                // The made-up project's drawings for Add sheet (#11, `DebugSheets`).
+                let tokens = DropboxTokens(accessToken: "capture", refreshToken: "capture", expiresAt: .distantFuture)
+                return DropboxConnection(session: DropboxSession(appKey: key, transport: CaptureSheetsTransport(),
+                                                                 store: DropboxMemoryTokenStore(tokens)))
             case "folders":
                 let tokens = DropboxTokens(accessToken: "capture", refreshToken: "capture", expiresAt: .distantFuture)
                 return DropboxConnection(session: DropboxSession(appKey: key, transport: CaptureDropboxTransport(),

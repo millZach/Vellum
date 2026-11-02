@@ -74,7 +74,7 @@ public actor DropboxSession {
     private let listingStore: any DropboxListingStore
     private let now: @Sendable () -> Date
     private let revokeDeadline: Duration
-    private var generation = 0
+    private(set) var generation = 0
 
     private enum Kept { case unread, none, some(DropboxTokens) }
     private typealias Shared<Value: Sendable> = (generation: Int, task: Task<Result<Value, DropboxError>, Never>)
@@ -402,7 +402,7 @@ public actor DropboxSession {
 
     /// An authorized JSON call to Dropbox's API. Renews the access token first when it is about to lapse, and once more
     /// if Dropbox answers 401; a second 401 means the sign-in is gone. A 409 comes back to the caller when it asks.
-    private func authorizedJSON(_ url: URL, _ arguments: [String: any Sendable], started: Int,
+    func authorizedJSON(_ url: URL, _ arguments: [String: any Sendable], started: Int,
                                 acceptingConflict: Bool = false) async throws(DropboxError) -> DropboxHTTPResponse {
         guard let body = try? JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys]) else {
             throw .unexpectedReply
@@ -413,7 +413,7 @@ public actor DropboxSession {
     }
 
     /// An authorized call to Dropbox, the request made from the tokens by `make`, renewed as `authorizedJSON` says.
-    private func authorized(started: Int, acceptingConflict: Bool = false,
+    func authorized(started: Int, acceptingConflict: Bool = false,
                             _ make: (DropboxTokens) -> DropboxHTTPRequest) async throws(DropboxError)
         -> DropboxHTTPResponse {
         try still(started)
@@ -498,7 +498,7 @@ public actor DropboxSession {
     }
 
     /// Throws `notSignedIn` when Zach signed out after the call that noted `started` began.
-    private func still(_ started: Int) throws(DropboxError) {
+    func still(_ started: Int) throws(DropboxError) {
         guard generation == started else { throw .notSignedIn }
     }
 

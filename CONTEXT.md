@@ -52,6 +52,22 @@ _Avoid_: writer, persistence manager, autosaver
 The folder on the Duo that holds one canvas: its name and canvas units (`canvas.json`), its ink snapshot and its ink log (which hold its text boxes, dimensions, frames and sheets too), and a `sheets` folder with the PDFs its sheets show, one per PDF, and nothing else, so #12 can mirror it to Dropbox as it is.
 _Avoid_: document, package, bundle
 
+**Canvas's Dropbox folder**:
+The folder in `Dropbox/Vellum` a canvas folder is mirrored to, named `<name> <short id>` (such as "Boiler 4 walkdown 7f3a") when the canvas is made and never renamed, so the laptop's paths stay put. Its log is kept in log parts.
+_Avoid_: remote copy, cloud copy, backup
+
+**Log part**:
+One upload of an ink log's new records, named by the log's generation and the byte offset it starts at; a generation's parts joined in order are the Duo's ink log (ADR-0014).
+_Avoid_: chunk, segment, delta file
+
+**Sync**:
+Mirroring a canvas folder to its Dropbox folder, uploading only what changed, when Zach leaves the canvas or the app goes to the background; never while he draws. Deleting a canvas moves its Dropbox folder to `Vellum/.deleted` (ADR-0003).
+_Avoid_: backup, upload (one request), save (saving is on the Duo)
+
+**Sync outbox**:
+The uploads and deletes still to do in Dropbox, kept on the Duo with the sync ledger so they survive a crash or a relaunch, and sent when a connection returns (ADR-0010).
+_Avoid_: queue, upload queue, outbox (alone; a job folder is not an outbox)
+
 **Text box**:
 Typed text placed on the canvas, with a position and a size, its letters a real-world height so it zooms with the ink, and a markup colour. It is typed with the keyboard or written with the Pencil, which turns the handwriting into its text.
 _Avoid_: label, note

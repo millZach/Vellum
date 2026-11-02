@@ -1,3 +1,4 @@
+import AuthenticationServices
 import SwiftUI
 import UIKit
 import VellumCore
@@ -437,13 +438,18 @@ private struct FramePaperPicker: View {
 /// whether the canvas is saved.
 private struct StatusBar: View {
     let editor: CanvasEditor
+    /// The Canvases tab's model, for the canvas's sync (#12); nil in previews and on the test canvas.
+    @Environment(CanvasesModel.self) private var canvases: CanvasesModel?
+    @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
         HStack(spacing: 14) {
             // The readouts are their own views, so the pen moving or the zoom changing redraws only them.
             PenReadout(editor: editor)
             ScaleReadout(editor: editor)
+            // The prompt always shows in full (#12): the status wording is kept short enough to leave it room.
             ToolPrompt(tool: editor.tool, hasSelection: !editor.selection.isEmpty, step: editor.toolStep)
+                .fixedSize()
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(countText)
                 .foregroundStyle(Chrome.secondaryText)
@@ -455,17 +461,21 @@ private struct StatusBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Zoom to everything")
-            Text(editor.saveState.title)
-                .foregroundStyle(editor.saveState.isSaved ? Chrome.secondaryText : Chrome.unsaved)
-                .lineLimit(1)
-                .accessibilityLabel("Save status")
-                .accessibilityValue(editor.saveState.title)
+            SyncStatusLabel(line: statusLine,
+                            act: SyncActions(model: canvases, webAuthentication: webAuthenticationSession).run)
         }
         .font(.system(size: 12))
         .foregroundStyle(Chrome.text)
         .padding(.horizontal, 12)
         .frame(height: 34)
         .chromePanel(cornerRadius: 11)
+    }
+
+    /// Saved on the Duo first, then synced to Dropbox (#12).
+    private var statusLine: SyncStatusLine {
+        let sync = editor.saver == nil ? CanvasSyncState.off : canvases?.syncState(of: editor.canvasID) ?? .off
+        return SyncStatusLine.statusBar(save: editor.saveState, sync: sync, edited: editor.hasEdits,
+                                        online: canvases?.syncReport.online ?? true)
     }
 
     private var countText: String {
@@ -557,6 +567,8 @@ enum Chrome {
     static let chipRim = dynamic(light: 0xFFFFFF, dark: 0x26272B)
     /// For a canvas with changes not yet written on the Duo: amber, never green.
     static let unsaved = dynamic(light: 0x9A5B00, dark: 0xE0A458)
+    /// The tint behind "Saved · offline" (#12): the amber, faint.
+    static let unsavedTint = dynamic(light: 0x9A5B00, lightAlpha: 0.11, dark: 0xE0A458, darkAlpha: 0.13)
 
     private static func dynamic(light: UInt32, lightAlpha: CGFloat = 1, dark: UInt32, darkAlpha: CGFloat = 1) -> Color {
         Color(uiColor: UIColor { traits in

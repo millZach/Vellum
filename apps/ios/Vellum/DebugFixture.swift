@@ -117,11 +117,14 @@ enum DebugLaunch {
             await Task.detached {
                 if let root = try? CanvasLibrary.onThisDevice().root { try? FileManager.default.removeItem(at: root) }
                 try? FileManager.default.removeItem(at: CanvasPreviews.folder)
+                // The sync ledger and outbox go with the canvases (#12).
+                if let ledger = try? SyncLedgerFile.onThisDevice() { try? FileManager.default.removeItem(at: ledger.url) }
             }.value
             model.lastOpened = nil
         }
         await model.prepare()
         guard let library = model.library else { return false }
+        if DebugSync.isOn { return await DebugSync.run(model, library: library) }
         if has("--ui-fixture") {
             let fixture = DebugFixture.session
             guard let id = await Task.detached(operation: { save(fixture, named: DebugFixture.name, in: library) }).value
@@ -166,7 +169,7 @@ enum DebugLaunch {
     }
 
     /// Saves a session's ink as a new canvas, with its thumbnail. Returns its id. Off the main thread.
-    nonisolated private static func save(_ session: InkSession, named name: String, in library: CanvasLibrary) -> UUID? {
+    nonisolated static func save(_ session: InkSession, named name: String, in library: CanvasLibrary) -> UUID? {
         var session = session
         guard let made = try? library.create(name: name), let store = try? library.openInk(made.id) else { return nil }
         try? store.append(session.takeEvents())
@@ -178,7 +181,7 @@ enum DebugLaunch {
 
     /// A few made-up canvases for the list capture: the fixture, and pieces of it under other names. Off the main
     /// thread.
-    nonisolated private static func seedList(_ full: InkSession, in library: CanvasLibrary) {
+    nonisolated static func seedList(_ full: InkSession, in library: CanvasLibrary) {
         let names = ["Site visit notes (example)", "Panel 12 redline (example)", "Feedwater bypass sketch (example)"]
         for (i, name) in names.enumerated() {
             var part = InkSession()

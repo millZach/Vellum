@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Observation
 import UIKit
 import VellumCore
@@ -31,6 +32,12 @@ final class CanvasesModel {
     /// their saver keeps the changes and keeps trying.
     private(set) var unsaved: [UUID: SaveState] = [:]
 
+    /// Where each canvas's sync to Dropbox stands (#12), as the sync engine last said.
+    private(set) var syncReport = SyncReport.off
+    /// Mirrors the canvases to `Dropbox/Vellum` off the main thread; nil until launch has found the library.
+    @ObservationIgnored private(set) var sync: CanvasSync?
+    @ObservationIgnored private var connection: ConnectionWatcher?
+
     /// Found off the main thread at launch; nil until then, or when the Duo has no folder for Vellum.
     private(set) var library: CanvasLibrary?
     @ObservationIgnored private(set) var savers: CanvasSavers?
@@ -44,20 +51,68 @@ final class CanvasesModel {
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: Self.lastOpenKey) }
     }
 
-    /// Finds (and makes, the first time) the canvases' folder, off the main thread.
+    /// Finds (and makes, the first time) the canvases' folder, off the main thread, and starts syncing.
     func prepare() async {
         guard library == nil else { return }
-        guard let library = await Task.detached(priority: .userInitiated, operation: { try? CanvasLibrary.onThisDevice() }).value else {
+        guard let found = await Task.detached(priority: .userInitiated, operation: { () -> (CanvasLibrary, SyncLedgerFile?)? in
+            guard let library = try? CanvasLibrary.onThisDevice() else { return nil }
+            return (library, try? SyncLedgerFile.onThisDevice())
+        }).value else {
             problem = "Vellum could not find its folder on this Duo."
             return
         }
+        let (library, ledger) = found
         self.library = library
         let thumbnails = PreviewThumbnails(didWrite: { [weak self] id in
             Task { @MainActor in self?.thumbnailDidChange(id) }
         })
-        savers = CanvasSavers(library: library, thumbnails: thumbnails, report: { [weak self] id, state in
+        let savers = CanvasSavers(library: library, thumbnails: thumbnails, report: { [weak self] id, state in
             Task { @MainActor in self?.saveStateDidChange(id, state) }
         })
+        self.savers = savers
+        startSync(savers: savers, ledger: ledger)
+    }
+
+    // MARK: Syncing to Dropbox (#12)
+
+    /// Starts the sync engine over the app's Dropbox session (or, in Debug captures, the made-up Dropbox), and the
+    /// connection watcher that tells it when the Duo is online. Nothing here waits for it.
+    private func startSync(savers: CanvasSavers, ledger: SyncLedgerFile?) {
+        guard let ledger else { return }
+        let (session, madeUp) = SyncSetup.session()
+        let sync = CanvasSync(session: session, source: savers, ledger: ledger, report: { [weak self] report in
+            Task { @MainActor in self?.syncReport = report }
+        })
+        self.sync = sync
+        if session != nil, !madeUp {
+            // Any path will do, Wi-Fi or cellular, Low Data Mode or not (Zach's decision 2).
+            connection = ConnectionWatcher { online in Task { await sync.setOnline(online) } }
+        }
+        Task { await sync.start() }
+    }
+
+    /// The sync state of a canvas, for the status bar and the list.
+    func syncState(of id: UUID?) -> CanvasSyncState {
+        guard let id else { return .off }
+        return syncReport.state(of: id)
+    }
+
+    /// The list's line about syncing, or nil.
+    var syncBanner: SyncStatusLine? {
+        let names = Dictionary(summaries.map { ($0.id, $0.name) }) { $1 }
+        return SyncStatusLine.listBanner(syncReport, canvases: summaries.map(\.id), names: names)
+    }
+
+    /// Retry, from the status bar or the list.
+    func retrySync() {
+        guard let sync else { return }
+        Task { await sync.retryNow() }
+    }
+
+    /// Zach signed in or out of Dropbox.
+    func dropboxSignInChanged() {
+        guard let sync else { return }
+        Task { await sync.signInChanged() }
     }
 
     /// Reads the list off the main thread.
@@ -119,6 +174,7 @@ final class CanvasesModel {
             openEditor = editor
             selection = id
             lastOpened = id
+            if let sync { Task { await sync.canvasOpened(id) } }
         } catch {
             problem = "That canvas could not be opened: \(error)"
         }
@@ -157,6 +213,8 @@ final class CanvasesModel {
             savers.close(saver) { [weak self] _ in
                 Task { @MainActor in await self?.refresh() }
             }
+            // Queued behind the saver's flush (the sync reads through the same saver); leaving waits for neither.
+            if let sync { Task { await sync.canvasLeft(saver.id) } }
         }
         Task { await refresh() }
     }
@@ -165,6 +223,7 @@ final class CanvasesModel {
         guard let library else { return }
         do {
             _ = try await Task.detached { try library.rename(id, to: name) }.value
+            if let sync { Task { await sync.canvasChanged(id) } }
             await refresh()
         } catch {
             problem = "The canvas could not be renamed: \(error.localizedDescription)"
@@ -175,6 +234,8 @@ final class CanvasesModel {
     func delete(_ id: UUID) async {
         guard let savers else { return }
         do {
+            // Queued first, so a crash after the delete still moves the Dropbox copy to Vellum/.deleted.
+            await sync?.canvasWillBeDeleted(id)
             try await savers.delete(id)
             unsaved[id] = nil
             if lastOpened == id { lastOpened = nil }
@@ -213,13 +274,35 @@ final class CanvasesModel {
     }
 
     /// The app is leaving the screen: flush every canvas still being written to storage while iOS still lets it run.
-    func appWillLeaveScreen() {
+    /// Going to the background (not just inactive, as under Control Center) also syncs every canvas waiting to.
+    func appWillLeaveScreen(background: Bool) {
         // A text box being typed in is saved first, so its text is flushed with everything else.
         openEditor?.finishTextEditing()
         guard let savers else { return }
         let task = BackgroundTask.begin()
-        savers.flushAll { task.end() }
+        let sync = sync
+        savers.flushAll {
+            // Then every canvas waiting to sync, the one on screen too, in the time iOS gives; what doesn't finish
+            // waits in the outbox.
+            guard background, let sync else { return task.end() }
+            Task {
+                await sync.setInBackground(true)
+                await sync.drained()
+                task.end()
+            }
+        }
     }
+
+    /// The app is back on screen: the canvas on screen waits again until Zach leaves it.
+    func appDidBecomeActive() {
+        guard let sync else { return }
+        Task { await sync.setInBackground(false) }
+    }
+
+    #if DEBUG
+    /// For the sync captures (#12): a canvas shown as not fully saved, beside the sync states.
+    func debugMarkUnsaved(_ id: UUID, _ state: SaveState) { unsaved[id] = state }
+    #endif
 
     /// The app is being terminated: flush every canvas, waiting a moment for it. The flushing runs on the savers'
     /// queues; the main thread only waits, since after this there is no later.
@@ -250,5 +333,29 @@ final class BackgroundTask: @unchecked Sendable {
         lock.unlock()
         guard id != .invalid else { return }
         Task { @MainActor in UIApplication.shared.endBackgroundTask(id) }
+    }
+}
+
+/// Tells the sync engine whether the Duo has a connection, from `NWPathMonitor`, on its own queue.
+final class ConnectionWatcher: @unchecked Sendable {
+    private let monitor = NWPathMonitor()
+
+    init(_ changed: @escaping @Sendable (Bool) -> Void) {
+        monitor.pathUpdateHandler = { path in changed(path.status == .satisfied) }
+        monitor.start(queue: DispatchQueue(label: "com.millzach.vellum.connection", qos: .utility))
+    }
+
+    deinit { monitor.cancel() }
+}
+
+/// The Dropbox session sync runs on: the app's own (`DropboxConnection.app`), so signing out stops it; in Debug
+/// builds, the made-up Dropbox when `--ui-sync` asks for it. Returns whether it is made up.
+enum SyncSetup {
+    @MainActor
+    static func session() -> (DropboxSession?, Bool) {
+        #if DEBUG
+        if let session = DebugSync.session() { return (session, true) }
+        #endif
+        return (DropboxConnection.app.downloads, false)
     }
 }

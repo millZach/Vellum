@@ -184,6 +184,33 @@ public final class CanvasSaver: @unchecked Sendable {
         }
     }
 
+    // MARK: Syncing (#12)
+
+    /// Reads what Dropbox lacks of this canvas, on the append queue, so nothing is written, compacted or deleted while
+    /// it is read. Writes out and flushes anything waiting first, so only bytes on the Duo's storage are uploaded. Throws
+    /// `CanvasSyncReadError.gone` for a deleted canvas.
+    func captureForSync(since known: SyncedPosition) async throws -> CanvasSyncCapture {
+        try await onAppends { [self] in
+            if isDeleted { throw CanvasSyncReadError.gone }
+            let folder = library.folder(for: id)
+            if let store {
+                writeOutAndFlush()
+                guard let position = store.syncPosition else { throw CanvasSyncReadError.notReady }
+                return try SyncCaptureReader.read(folder: folder, known: known, live: position)
+            }
+            do {
+                return try SyncCaptureReader.read(folder: folder, known: known, live: nil)
+            } catch CanvasSyncReadError.notReady {
+                // A closed canvas a crash left mid-compaction: opening it sets its files right, as reopening would.
+                guard FileManager.default.fileExists(atPath: folder.path) else { throw CanvasSyncReadError.gone }
+                let opened = try library.openInk(id, compactionThreshold: compactionThreshold)
+                defer { opened.closeFiles() }
+                try opened.flush()
+                return try SyncCaptureReader.read(folder: folder, known: known, live: opened.syncPosition)
+            }
+        }
+    }
+
     // MARK: Deleting
 
     /// Waits for every pending write and the maintenance in progress, lets go of the files and deletes the canvas.
@@ -433,6 +460,17 @@ public final class CanvasSavers: @unchecked Sendable {
         lock.lock()
         if savers[saver.id] === saver { savers[saver.id] = nil }
         lock.unlock()
+    }
+
+    /// Reads a canvas for syncing (#12) through its one saver, so it waits behind what is still being written to it and
+    /// never reads files a compaction or delete is changing.
+    public func captureForSync(_ id: UUID, since known: SyncedPosition) async throws -> CanvasSyncCapture {
+        let saver = hold(id)
+        defer {
+            letGo(id)
+            saver.flushNow { _ in }  // lets go of a saver nothing else holds
+        }
+        return try await saver.captureForSync(since: known)
     }
 
     /// Flushes every canvas with a saver, open or closed and still writing: for when the app leaves the screen.

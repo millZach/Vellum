@@ -130,4 +130,10 @@ enum DropboxEndpoint {
     static let listFolderContinue = URL(string: "https://api.dropboxapi.com/2/files/list_folder/continue")!
     /// A file's bytes (#11): a content endpoint, its argument in the `Dropbox-API-Arg` header.
     static let download = URL(string: "https://content.dropboxapi.com/2/files/download")!
+    /// Writes one file of up to 150 MB (#12): a content endpoint, its argument in the `Dropbox-API-Arg` header.
+    static let upload = URL(string: "https://content.dropboxapi.com/2/files/upload")!
+    /// Moves a file or folder (#12): a deleted canvas's folder into `Vellum/.deleted`.
+    static let move = URL(string: "https://api.dropboxapi.com/2/files/move_v2")!
+    /// Deletes a file or folder (#12): a canvas's log parts of a generation a newer snapshot has replaced.
+    static let delete = URL(string: "https://api.dropboxapi.com/2/files/delete_v2")!
 }

@@ -33,6 +33,9 @@ final class CanvasEditor {
     var penPosition: CanvasPoint?
     /// Whether every change is written on the Duo. "Saving…" only shows when a write takes long enough to notice.
     private(set) var saveState = SaveState.savedOnThisDuo
+    /// Whether the canvas has changed since it was opened: Dropbox gets the changes when Zach leaves it (#12), so the
+    /// status bar stops saying "Synced to Dropbox". Set once, by the first change.
+    private(set) var hasEdits = false
     /// Changes handed to the saver and not yet written.
     @ObservationIgnored private var savesInFlight = 0
     /// Saves the canvas; nil for a canvas that is only in memory (previews).
@@ -96,6 +99,7 @@ final class CanvasEditor {
             guard newValue != canvas.units else { return }
             canvas.units = newValue
             saver?.setUnits(newValue)
+            if !hasEdits { hasEdits = true }
             inkRevision += 1  // the grid follows the units
         }
     }
@@ -514,6 +518,7 @@ final class CanvasEditor {
     private func save() {
         let events = session.takeEvents()
         guard !events.isEmpty, let saver else { return }
+        if !hasEdits { hasEdits = true }
         savesInFlight += 1
         saver.save(events) { [weak self] state in
             Task { @MainActor in self?.didSave(state) }

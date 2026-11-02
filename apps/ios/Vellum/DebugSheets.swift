@@ -134,6 +134,10 @@ enum DebugSheetSource {
               let url = try? await pdfs.pdf(for: file, download: { MadeUpPDF.data(index) }) else { return nil }
         let reader = SheetPDFReader(url: url)
         guard let info = await reader.info(page: page) else { return nil }
+        for line in await reader.lines(page: page) {
+            log(String(format: "  text %@ at %.2f, %.2f size %.2f x %.2f", line.text, line.rect.minX, line.rect.minY,
+                       line.rect.width.inches, line.rect.height.inches))
+        }
         let chosen = scale ?? info.reading.suggestedScale ?? .drawn(.architectural(inchesPerFoot: 0.125))
         let invertsBadly = await reader.invertsBadly(page: page)
         log("read \(info.reading.sheetNumber ?? "no number") \(info.reading.caption), placed at \(chosen), "

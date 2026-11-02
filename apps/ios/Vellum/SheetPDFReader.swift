@@ -47,6 +47,12 @@ actor SheetPDFReader {
         return info
     }
 
+    /// The page's lines of text as read, for the captures' log.
+    func lines(page index: Int) -> [PageText] {
+        guard let page = open()?.page(at: index) else { return [] }
+        return Self.lines(of: page, paper: Self.paper(of: page))
+    }
+
     /// A page drawn to fit `side` points on its long side, for the page grid and the confirm step.
     func thumbnail(page index: Int, side: CGFloat) -> SheetThumbnail? {
         guard let page = open()?.page(at: index) else { return nil }

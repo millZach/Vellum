@@ -60,7 +60,7 @@ public struct SheetReading: Hashable, Sendable {
 
     /// Reads a page's lines of text.
     public static func read(_ lines: [PageText], paper: PaperSize) -> SheetReading {
-        let lines = lines.filter { !$0.text.allSatisfy { $0 == " " } }
+        let lines = joinFragments(lines.filter { !$0.text.allSatisfy { $0 == " " } })
         guard !lines.isEmpty else {
             return SheetReading(paper: paper, titleBlock: .scan, titleBlockLabel: nil, sheetNumber: nil, details: [])
         }
@@ -112,6 +112,31 @@ public struct SheetReading: Hashable, Sendable {
         }
         return SheetReading(paper: paper, titleBlock: titleBlock, titleBlockLabel: title.line.rect, sheetNumber: number,
                             details: details)
+    }
+
+    /// Joins pieces of one printed line that text extraction split apart (`SCALE: 1/4" =` and `1'-0"`, `M-` and `101`):
+    /// lines on the same row whose gap is under about a letter's height. Labels set side by side, inches apart, stay
+    /// separate.
+    static func joinFragments(_ lines: [PageText]) -> [PageText] {
+        var lines = lines.sorted { ($0.rect.midY, $0.rect.minX) < ($1.rect.midY, $1.rect.minX) }
+        var joined = true
+        while joined {
+            joined = false
+            outer: for i in lines.indices {
+                for j in lines.indices where j != i {
+                    let a = lines[i].rect, b = lines[j].rect
+                    let h = max(a.height.inches, b.height.inches, 0.01)
+                    let gap = b.minX - a.maxX
+                    guard abs(a.midY - b.midY) < h * 0.5, gap > -h * 0.5, gap < h * 1.1, b.midX > a.midX else { continue }
+                    let space = gap > h * 0.15 && !lines[i].text.hasSuffix(" ") && !lines[j].text.hasPrefix(" ")
+                    lines[i] = PageText(lines[i].text + (space ? " " : "") + lines[j].text, a.union(b))
+                    lines.remove(at: j)
+                    joined = true
+                    break outer
+                }
+            }
+        }
+        return lines
     }
 
     // MARK: What it means for placing the sheet

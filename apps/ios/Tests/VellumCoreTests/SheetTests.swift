@@ -116,6 +116,21 @@ final class SheetReadingTests: XCTestCase {
                              .at(33, 22.6, "L-1042", width: 1.2, height: 0.42)]).sheetNumber, "L-1042")
     }
 
+    /// PDFKit's character boxes can split one printed line; the pieces are joined, and labels inches apart are not.
+    func testPiecesOfOnePrintedLineAreJoined() {
+        let reading = read([.at(31, 22.6, "SCALE: 1/4\" =", width: 1.2, height: 0.14),
+                            .at(32.25, 22.6, "1'-0\"", width: 0.4, height: 0.14),
+                            .at(33, 23, "M-", width: 0.5, height: 0.42), .at(33.5, 23, "101", width: 0.7, height: 0.42)])
+        XCTAssertEqual(reading.titleBlock, .scale(.architectural(inchesPerFoot: 0.25)))
+        XCTAssertEqual(reading.sheetNumber, "M-101")
+        let notes = read([.at(31, 22.6, "SCALE: AS", width: 0.9, height: 0.14), .at(32, 22.6, "NOTED", width: 0.6, height: 0.14)])
+        XCTAssertEqual(notes.titleBlock, .asNoted)
+        // Two details' scales on one row, inches apart, stay two.
+        let apart = SheetReading.joinFragments([.at(1, 7.6, "SCALE: 1\" = 1'-0\"", width: 1.8, height: 0.16),
+                                                .at(5.8, 7.6, "SCALE: NTS", width: 1.2, height: 0.16)])
+        XCTAssertEqual(apart.count, 2)
+    }
+
     func testDetailNames() {
         XCTAssertEqual(SheetReading.detailName("2  PIPE SUPPORT"), "Detail 2")
         XCTAssertEqual(SheetReading.detailName("DETAIL B - VALVE"), "Detail B")

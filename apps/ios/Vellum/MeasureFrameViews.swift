@@ -143,7 +143,7 @@ final class WindowMenu: UIView {
         closeAction = close
         super.init(frame: .zero)
         backgroundColor = UIColor { traits in
-            traits.userInterfaceStyle == .dark ? UIColor(hex: 0x3A3B40) : UIColor(hex: 0x1D1D1F)
+            UIColor(hex: ChromeColourPair.windowMenuDisabled(dark: traits.userInterfaceStyle == .dark).fill)
         }
         layer.cornerRadius = 10
         layer.shadowColor = UIColor.black.cgColor
@@ -153,9 +153,16 @@ final class WindowMenu: UIView {
         let send = button("Send… (later)", hint: "Not available yet. Sending a window to an agent comes in a later update.",
                           action: nil)
         send.isEnabled = false
-        // Disabled, it stays readable on the dark menu, dimmed.
-        send.configurationUpdateHandler = { button in
-            button.configuration?.baseForegroundColor = UIColor(white: 1, alpha: button.isEnabled ? 1 : 0.45)
+        // Disabled, it is faded blue on the pill (#33). UIKit paints a disabled plain button its own grey whatever the
+        // base colour says, which was nearly invisible in light, so the colour goes on the title and UIKit leaves it.
+        send.automaticallyUpdatesConfiguration = false
+        send.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+            attributes.foregroundColor = UIColor { traits in
+                UIColor(hex: ChromeColourPair.windowMenuDisabled(dark: traits.userInterfaceStyle == .dark).text)
+            }
+            return attributes
         }
         let close = button("✕", hint: "Closes the window", action: #selector(closeTapped(_:)))
         close.accessibilityLabel = "Close"

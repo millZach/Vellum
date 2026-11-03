@@ -399,10 +399,11 @@ private struct CanvasActions: View {
                 .font(.system(size: 13, weight: primary ? .semibold : .regular))
                 .padding(.horizontal, 11)
                 .frame(height: 34)
-                .foregroundStyle(primary ? Color.white : Chrome.text)
-                .background(primary ? Chrome.primary : Chrome.panel, in: RoundedRectangle(cornerRadius: 9))
+                // Disabled, Send is faded blue (#33); it keeps the top bar's shape, beside Record.
+                .foregroundStyle(primary ? Chrome.disabledText : Chrome.text)
+                .background(primary ? Chrome.disabledFill : Chrome.panel, in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(primary ? Color.clear : Chrome.border))
-                .opacity(0.45)
+                .opacity(primary ? 1 : 0.45)
         }
         .buttonStyle(.plain)
         .disabled(true)
@@ -447,7 +448,7 @@ private struct StatusBar: View {
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
             // The readouts are their own views, so the pen moving or the zoom changing redraws only them.
             PenReadout(editor: editor)
             ScaleReadout(editor: editor)
@@ -455,9 +456,14 @@ private struct StatusBar: View {
             ToolPrompt(tool: editor.tool, hasSelection: !editor.selection.isEmpty, step: editor.toolStep)
                 .fixedSize()
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(countText)
-                .foregroundStyle(Chrome.secondaryText)
-                .lineLimit(1)
+            // The count takes the shortest wording that leaves everything else whole (#33).
+            ViewThatFits(in: .horizontal) {
+                ForEach(counts, id: \.self) { Text($0).lineLimit(1) }
+            }
+            .foregroundStyle(Chrome.secondaryText)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(counts[0])
+            .layoutPriority(1)
             Button {
                 editor.zoomToEverything()
             } label: {
@@ -482,14 +488,11 @@ private struct StatusBar: View {
                                         online: canvases?.syncReport.online ?? true)
     }
 
-    private var countText: String {
-        let sheets = editor.canvas.sheets.count, frames = editor.frameCount
-        return "\(sheets) sheet\(sheets == 1 ? "" : "s") · \(frames) frame\(frames == 1 ? "" : "s")"
+    private var counts: [String] {
+        StatusBarText.counts(sheets: editor.canvas.sheets.count, frames: editor.frameCount)
     }
 }
 
-/// The pen's position in canvas units. The canvas view publishes the position at most once a display frame, and the
-/// text is formatted once per update and used for both the label and VoiceOver.
 /// What the tool expects next. Its own view, holding the Draw with finger setting, so turning the switch redraws only
 /// this text.
 private struct ToolPrompt: View {
@@ -508,15 +511,26 @@ private struct ToolPrompt: View {
     }
 }
 
+/// The pen's position in canvas units, on one line at 11 pt monospaced so digits don't jump (#33). The canvas view
+/// publishes the position at most once a display frame, and the text is formatted once per update and used for both the
+/// label and VoiceOver. Its width is set, so the pen moving lays out only this text; `StatusBarText` says when it grows.
 private struct PenReadout: View {
     let editor: CanvasEditor
+    @State private var reserved = StatusBarText.usualPositionCharacters
+    private static let font = UIFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    private static let advance = ("0" as NSString).size(withAttributes: [.font: font]).width
 
     var body: some View {
         let position = editor.penPosition
         let text = position.map(editor.canvas.units.formatPosition)
         Text(text ?? "X –  Y –")
-            .monospacedDigit()
-            .frame(minWidth: 150, alignment: .leading)
+            .font(Font(Self.font))
+            .lineLimit(1)
+            .fixedSize()
+            .frame(width: (CGFloat(reserved) * Self.advance).rounded(.up), alignment: .leading)
+            .onChange(of: text?.count ?? 0) { _, count in
+                reserved = StatusBarText.reservedCharacters(reserved, showing: count)
+            }
             .accessibilityLabel(position == nil ? "No pen position yet" : "Pen position")
             .accessibilityValue(text ?? "")
     }
@@ -525,7 +539,9 @@ private struct PenReadout: View {
 /// The scale bar: the longest round length that fits, labelled exactly.
 private struct ScaleReadout: View {
     let editor: CanvasEditor
-    private static let space = 90.0
+    /// The bar's longest, and the room for its longest label beside it, `500.000 m`. Short, for the pen's position (#33).
+    private static let space = 60.0
+    private static let labelRoom = 66.0
 
     var body: some View {
         let pointsPerInch = editor.viewport.pointsPerInch
@@ -536,7 +552,7 @@ private struct ScaleReadout: View {
                 .frame(width: ScaleBar.points(for: bar.length, pointsPerInch: pointsPerInch), height: 6)
             Text(bar.label).monospacedDigit()
         }
-        .frame(width: Self.space + 70, alignment: .leading)
+        .frame(width: Self.space + Self.labelRoom, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Scale bar")
         .accessibilityValue(bar.label)

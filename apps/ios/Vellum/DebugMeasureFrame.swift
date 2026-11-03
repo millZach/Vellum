@@ -15,12 +15,15 @@ import VellumCore
 ///   is up.
 /// - `--ui-frame`: a 24 × 36 frame dragged round the valve and its bypass (12' × 11'): 1 1/2" = 1'-0".
 /// - `--ui-window`: a window dragged round the tank, its menu up.
+/// - `--ui-long-coordinates`: the pen's position at the longest the status bar plans for (#33),
+///   `X -139'-11 15/16"  Y -139'-11 15/16"`, with the fixture otherwise untouched.
 @MainActor
 enum DebugMeasureFrame {
     private static var started = false
 
     static func attach(_ view: InkCanvasUIView, editor: CanvasEditor) {
-        let wanted = ["--ui-measure", "--ui-dimension", "--ui-loupe", "--ui-frame", "--ui-window"].filter(DebugLaunch.has)
+        let wanted = ["--ui-measure", "--ui-dimension", "--ui-loupe", "--ui-frame", "--ui-window",
+                      "--ui-long-coordinates"].filter(DebugLaunch.has)
         guard !wanted.isEmpty, !started, view.bounds.width > 0 else { return }
         started = true
         Task { @MainActor in
@@ -30,6 +33,10 @@ enum DebugMeasureFrame {
             if wanted.contains("--ui-loupe") { await loupe(view, editor) }
             if wanted.contains("--ui-frame") { await frame(view, editor) }
             if wanted.contains("--ui-window") { await window(view, editor) }
+            if wanted.contains("--ui-long-coordinates") {
+                let inches = -(139.0 * 12 + 11 + 15.0 / 16)
+                editor.penPosition = CanvasPoint(x: .inches(inches), y: .inches(-inches))
+            }
             print("measure-frame: step \(editor.toolStep), shown \(view.debugAnnotationLabels)")
         }
     }

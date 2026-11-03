@@ -184,8 +184,20 @@ final class AnnotationOverlay {
         placeDragged(selection)
     }
 
+    #if DEBUG || BENCHMARK
+    /// Each drawing of the kept layer: how long it took, what it drew and the zoom, for the benchmark's log.
+    private(set) var debugRedraws: [String] = []
+    #endif
+
     private func rebuildAll() {
         guard let viewport else { return }
+        #if DEBUG || BENCHMARK
+        let started = CACurrentMediaTime()
+        defer {
+            debugRedraws.append(String(format: "%.2fms items=%d ppi=%.3f", (CACurrentMediaTime() - started) * 1000,
+                                       items.count, viewport.pointsPerInch))
+        }
+        #endif
         base = viewport
         withoutAnimation {
             for layer in items.values { layer.removeFromSuperlayer() }

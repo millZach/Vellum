@@ -897,6 +897,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     #if DEBUG || BENCHMARK
+    /// Each drawing of the kept layer so far, for the Debug benchmark.
+    var debugKeptRedraws: [String] { annotationOverlay.debugRedraws }
+
     /// Tile drawings still in flight, for the Debug benchmark.
     var pendingRenderCount: Int { renderer.pendingCount + sheetRenderer.pendingCount }
     /// Sheet tiles asked for and kept, for the benchmark's log.

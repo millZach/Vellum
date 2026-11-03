@@ -366,11 +366,14 @@ private struct ConfirmSheet: View {
             if let info {
                 HStack(spacing: 10) {
                     if let chosen = chosen(info) {
+                        // Wraps in the room the buttons leave, whatever its length; the buttons never do.
                         Text("On the canvas it will cover \(coverage(info, chosen)).")
                             .font(.callout).foregroundStyle(.secondary)
                             .accessibilityIdentifier("coverage")
                     }
+                    Spacer(minLength: 0)
                     buttons(info)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 .padding(.horizontal, 18).padding(.vertical, 10)
                 .background(.bar)
@@ -455,7 +458,6 @@ private struct ConfirmSheet: View {
 
     private func buttons(_ info: SheetPDFReader.PageInfo) -> some View {
         HStack(spacing: 10) {
-            Spacer()
             Button("Cancel") { model.close?() }
                 .buttonStyle(.bordered)
             if !info.reading.asksForScale, !changing, info.reading.suggestedScale != nil {
@@ -469,10 +471,21 @@ private struct ConfirmSheet: View {
             } label: {
                 if placing { ProgressView() } else { Text("Place sheet").bold() }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ChromePrimaryButtonStyle())
             .disabled(chosen(info) == nil || placing)
             .accessibilityHint("Then tap the canvas where the sheet goes")
         }
+    }
+
+    /// The same fit as on the canvas, for the preview's size; the preview shows no sheet name.
+    private func previewLayout(_ areas: [ScaleArea], boxes: [CGRect], size: CGSize) -> SheetLabelLayout {
+        SheetLabelLayout.lay(
+            sheet: LabelRect(x: 0, y: 0, width: size.width, height: size.height), sheetName: nil,
+            areas: zip(areas, boxes).map { area, box in
+                SheetLabelLayout.Area(rect: LabelRect(x: box.minX, y: box.minY, width: box.width, height: box.height),
+                                      name: AnnotationOverlay.measureAreaLine(area.name),
+                                      scale: AnnotationOverlay.measureAreaLine(area.scale.description))
+            })
     }
 
     /// The page, with its scale areas outlined for the scale picked.
@@ -485,19 +498,33 @@ private struct ConfirmSheet: View {
                     .overlay {
                         GeometryReader { proxy in
                             let k = proxy.size.width / info.paper.width.inches
+                            let boxes = areas.map { area in
+                                CGRect(x: area.rect.minX * k, y: area.rect.minY * k,
+                                       width: area.rect.width.inches * k, height: area.rect.height.inches * k)
+                            }
+                            let laid = previewLayout(areas, boxes: boxes, size: proxy.size)
                             ForEach(Array(areas.enumerated()), id: \.offset) { item in
-                                let area = item.element
-                                let r = CGRect(x: area.rect.minX * k, y: area.rect.minY * k,
-                                               width: area.rect.width.inches * k, height: area.rect.height.inches * k)
+                                let r = boxes[item.offset]
                                 Rectangle()
                                     .strokeBorder(Palette.scaleAreaColour, style: StrokeStyle(lineWidth: 1.6, dash: [5, 3]))
                                     .background(Palette.scaleAreaColour.opacity(0.08))
-                                    .overlay(alignment: .topLeading) {
-                                        Text(area.label).font(.system(size: 9, weight: .semibold)).foregroundStyle(.white)
-                                            .padding(.horizontal, 3).background(Palette.scaleAreaColour)
-                                    }
                                     .frame(width: r.width, height: r.height)
                                     .position(x: r.midX, y: r.midY)
+                                if let box = laid.areas[item.offset].box {
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        if laid.areas[item.offset].fit == .twoLines { Text(item.element.name) }
+                                        Text(item.element.scale.description)
+                                    }
+                                    .font(.system(size: AnnotationOverlay.areaLabelSize, weight: .semibold))
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                    .foregroundStyle(Color(uiColor: UIColor {
+                                        Palette.scaleAreaText(dark: $0.userInterfaceStyle == .dark)
+                                    }))
+                                    .frame(width: box.width, height: box.height)
+                                    .background(Palette.scaleAreaColour)
+                                    .position(x: box.x + box.width / 2, y: box.y + box.height / 2)
+                                }
                             }
                         }
                     }

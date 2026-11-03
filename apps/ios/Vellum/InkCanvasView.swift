@@ -26,7 +26,7 @@ struct InkCanvasView: UIViewRepresentable {
         view.units = units
         view.fingerDraws = fingerDraws
         view.tool = tool
-        view.viewportDidChange()
+        view.viewportJumped()
     }
 }
 
@@ -325,6 +325,16 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     // MARK: Showing the canvas
+
+    /// Places everything for a view of the canvas that the fingers didn't move: zoom to everything, zoom to a window,
+    /// the view zooming out for a sheet to be placed. No pinch will end to draw the kept dimensions, frames and labels
+    /// again, so they are drawn at the new zoom here (#35). A finger's pan or pinch has already shown its viewport, so
+    /// SwiftUI's update following it finds nothing moved and costs one comparison.
+    func viewportJumped() {
+        let moved = editor.viewport != shownViewport
+        viewportDidChange()
+        if moved, fingersDown == 0, bounds.width > 0 { annotationOverlay.settle() }
+    }
 
     /// Places everything for the editor's view of the canvas, if it changed: one transform per level of tiles, the
     /// grid's few lines, and one transform for the stroke being drawn, so nothing lags a pan or a pinch.
@@ -887,6 +897,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     #if DEBUG || BENCHMARK
+    /// Each drawing of the kept layer so far, for the Debug benchmark.
+    var debugKeptRedraws: [String] { annotationOverlay.debugRedraws }
+
     /// Tile drawings still in flight, for the Debug benchmark.
     var pendingRenderCount: Int { renderer.pendingCount + sheetRenderer.pendingCount }
     /// Sheet tiles asked for and kept, for the benchmark's log.
@@ -1339,7 +1352,7 @@ extension InkCanvasUIView {
         guard let rect = chosenWindow else { return }
         closeWindow()
         editor.zoom(to: rect)
-        viewportDidChange()
+        viewportJumped()
     }
 
     private func makeFrameFromWindow() {

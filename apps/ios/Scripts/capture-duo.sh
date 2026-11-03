@@ -123,10 +123,13 @@ sheet_captures() {
     for step in browser grid confirm asnoted scan; do
       capture "add-sheet-$step" --ui-tab canvases --ui-reset --ui-new-canvas --ui-dropbox sheets --ui-add-sheet "$step"
     done
-    for what in outline quarter asnoted nts scan; do
+    # labels (#35): the D-501 zoomed out, with two-line labels and the scale-alone fallback showing together.
+    for what in outline quarter asnoted labels nts scan; do
       capture "sheet-$what" --ui-tab canvases --ui-reset --ui-new-canvas --ui-sheets "$what"
       tail -30 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
     done
+    # The top bar with the long canvas name, Add sheet on one line beside it (#35).
+    capture "top-bar-long-name" --ui-tab canvases --ui-reset --ui-fixture
     WAIT=$saved_wait
   done
   data=$(xcrun simctl get_app_container "$udid" "$bundle" data)

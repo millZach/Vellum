@@ -60,6 +60,8 @@ final class DebugBenchmark: NSObject {
     private var lines: [String] = []
     private var measurements: [String: Double] = [:]
     private var strokePoint = CGPoint.zero
+    /// The kept layer's drawings during the scenario, each with the frame it fell in.
+    private var keptRedraws: [String] = []
     /// The made-up sheet the sheet scenarios place over the canvas.
     private var sheet: CanvasEditor.PendingSheet?
     private var placedSheet: Sheet?
@@ -306,6 +308,7 @@ final class DebugBenchmark: NSObject {
         warmUp = 30
         work.removeAll()
         intervals.removeAll()
+        keptRedraws.removeAll()
         lastTimestamp = nil
         tickStart = nil
     }
@@ -349,7 +352,11 @@ final class DebugBenchmark: NSObject {
         // it managed are reported.
         let outOfTime = now - scenarioStart > Self.scenarioTimeLimit
         tickStart = now
+        let redrawsBefore = view?.debugKeptRedraws.count ?? 0
         scenario.step(self, outOfTime ? scenario.frames - 1 : frame)
+        if let redraws = view?.debugKeptRedraws, redraws.count > redrawsBefore {
+            keptRedraws += redraws[redrawsBefore...].map { "frame \(frame): \($0)" }
+        }
         frame = outOfTime ? scenario.frames : frame + 1
         if frame == scenario.frames { finishing = scenario }
     }
@@ -370,6 +377,11 @@ final class DebugBenchmark: NSObject {
             + " interval_ms median=\(format(percentile(sortedIntervals, 0.5)))"
             + " p95=\(format(percentile(sortedIntervals, 0.95))) max=\(format(sortedIntervals.last ?? 0))"
             + " long_frames=\(long) display_interval_ms=\(format(expectedInterval * 1000))")
+        // Where a slow frame fell, beside the kept layer's drawings, to tell one from the other.
+        let slowWork = work.enumerated().filter { $0.element > budget }.map { "\($0.offset):\(format($0.element))" }
+        let slowGaps = intervals.enumerated().filter { $0.element > expectedInterval * 1000 * 1.5 }
+            .map { "\($0.offset):\(format($0.element))" }
+        record("  slow work \(slowWork), long gaps \(slowGaps), kept redraws \(keptRedraws)")
         // An optimised build's metrics end in _release, so both builds compare with their own baselines.
         #if DEBUG
         let suffix = ""

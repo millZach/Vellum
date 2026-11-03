@@ -213,6 +213,8 @@ struct CaptureSheetsTransport: DropboxTransport {
 /// - `--ui-sheets asnoted`: the AS NOTED detail sheet placed at 1" = 1'-0" with its two scale areas, Detail 2's
 ///   printed 2'-0" measured inside its area.
 /// - `--ui-sheets nts`: the NTS loop diagram placed at printed size, its 4" dimension measured: 4" NTS.
+/// - `--ui-sheets labels`: the AS NOTED detail sheet placed at 1/2" = 1'-0", so all three details are scale areas, at the
+///   zoom where one has two lines and another its scale alone (#35), found from the measured text.
 /// - `--ui-sheets scan`: the scan placed at 1/8" = 1'-0" beside the 1/4" plan: in dark mode the plan inverts and the
 ///   scan dims.
 @MainActor
@@ -230,7 +232,7 @@ enum DebugSheets {
             case "outline":
                 guard let pending = await DebugSheetSource.pending(file: 1, page: 0) else { return }
                 editor.beginPlacing(pending)
-                view.viewportDidChange()
+                view.viewportJumped()
                 try? await Task.sleep(for: .seconds(0.5))
                 let from = CGPoint(x: view.bounds.midX - 120, y: view.bounds.midY + 60)
                 let to = CGPoint(x: view.bounds.midX + 90, y: view.bounds.midY - 30)
@@ -248,15 +250,27 @@ enum DebugSheets {
                 await placeAndMeasure(view, editor, file: 0, page: 1, dimension: 1)
             case "nts":
                 await placeAndMeasure(view, editor, file: 0, page: 2, dimension: 0)
+            case "labels":
+                let main = Sheet.Scale.drawn(.architectural(inchesPerFoot: 0.5))
+                guard let sheet = await place(view, editor, file: 0, page: 1, scale: main) else { return }
+                editor.zoom(to: sheet.bounds)
+                for _ in 0..<200 {
+                    let fits = AnnotationOverlay.debugLayout(sheet, on: editor.viewport).fits
+                    if fits.contains(.twoLines), fits.contains(.scaleAlone) { break }
+                    editor.viewport.zoom(by: 0.98, about: ScreenPoint(x: Double(view.bounds.midX), y: Double(view.bounds.midY)))
+                }
+                view.viewportJumped()
+                log(String(format: "labels at %.1f points per printed inch", editor.viewport.pointsPerInch * sheet.canvasPerPrinted))
             case "scan":
                 _ = await place(view, editor, file: 1, page: 0, at: CGPoint(x: view.bounds.midX - 150, y: view.bounds.midY))
                 _ = await place(view, editor, file: 2, page: 0, scale: .drawn(.architectural(inchesPerFoot: 0.125)),
                                 at: CGPoint(x: view.bounds.midX + 200, y: view.bounds.midY))
                 editor.zoomToEverything()
-                view.viewportDidChange()
+                view.viewportJumped()
             default:
                 break
             }
+            try? await Task.sleep(for: .seconds(0.2))
             log("\(editor.sheets.count) placed, step \(editor.toolStep), shown \(view.debugAnnotationLabels)")
         }
     }
@@ -266,7 +280,7 @@ enum DebugSheets {
                               scale: Sheet.Scale? = nil, at point: CGPoint? = nil) async -> Sheet? {
         guard let pending = await DebugSheetSource.pending(file: file, page: page, scale: scale) else { return nil }
         editor.beginPlacing(pending)
-        view.viewportDidChange()
+        view.viewportJumped()
         try? await Task.sleep(for: .seconds(0.4))
         let at = point ?? CGPoint(x: view.bounds.midX, y: view.bounds.midY)
         guard view.beginInput(at: at) else { return nil }
@@ -282,7 +296,7 @@ enum DebugSheets {
                                         dimension: Int) async {
         guard let sheet = await place(view, editor, file: file, page: page) else { return }
         editor.zoom(to: sheet.bounds)
-        view.viewportDidChange()
+        view.viewportJumped()
         try? await Task.sleep(for: .seconds(0.6))
         let printed = MadeUpSheets.files[file].pages[page].dimensions[dimension]
         editor.tool = .measure

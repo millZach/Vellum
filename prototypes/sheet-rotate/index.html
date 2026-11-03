@@ -1,0 +1,260 @@
+<!doctype html>
+<!--
+  PROTOTYPE - throwaway. Never merge to main; kept at the tag prototype/sheet-rotate. Ticket #44.
+  Turning a placed sheet on the drafting-rail canvas (ADR-0011). Works on a phone by touch, and at the Duo's 951 x 669.
+  Five questions. Picks go in the URL: ?q1=AB&q2=B&q3=B&q4=A&q5=A&theme=dark
+  q1 How it turns (any mix)  A two-finger twist  B handle  C 90-degree buttons  D typed angle
+  q2 Angles                  A 90-degree steps  B any angle, catches at 90s  C any angle, no catch
+  q3 After placing           A move too  B move and change scale  C turn only  D drag a corner to resize
+  q4 Markups                 A come along  B stay on the canvas  C a switch
+  q5 Labels                  A stay upright  B turn with the sheet
+  Scale areas are on the paper, so they always turn with it. All geometry is made up by hand. Nothing is saved.
+  Plain HTML, CSS and JS, no dependencies.
+-->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Vellum: turn a placed sheet (prototype)</title><link rel="icon" href="data:,">
+<style>
+:root{--ink:#1d1d1f;--mute:#6b6b70;--line:#d9d4c9;--paper:#f3efe6;--grid:#e6e1d5;--panel:#fbf9f5;--card:#fffdf9;--page:#ece8df;--accent:#2f5d8a;--accentBg:#e6edf5;--teal:#0b7f78;--sheet:#ffffff;--sheetLine:#3b3b3f;--area:#6b3fa8;--areaText:#ffffff;--frame:#7a4fb3;--warn:#b3261e;--ok:#14713c;--shadow:0 1px 3px rgba(0,0,0,.14)}
+body.dark{--ink:#e8e6e1;--mute:#a9a9ae;--line:#3a3b40;--paper:#1c1d20;--grid:#2b2c31;--panel:#242529;--card:#1f2023;--page:#141416;--accent:#9cc4ec;--accentBg:#2c3a4a;--teal:#4fd1c7;--sheet:#232428;--sheetLine:#d5d3ce;--area:#c4a2f0;--areaText:#201a2c;--frame:#b892ea;--warn:#ff8a80;--ok:#6fdc9b;--shadow:0 1px 3px rgba(0,0,0,.5)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.4 -apple-system,system-ui,"SF Pro Text","Segoe UI",sans-serif}
+button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+main{max-width:985px;margin:0 auto;padding:12px 12px 40px}
+h1{font-size:20px;margin:0}.top{display:flex;gap:10px;justify-content:space-between;align-items:flex-start}
+.mute{color:var(--mute)}.small{font-size:13px}p{margin:4px 0 8px}
+.tog{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none}
+.tog button{border:0;background:transparent;min-height:44px;padding:0 12px;font-size:14px}
+.tog button[aria-pressed=true]{background:var(--accentBg);color:var(--accent);font-weight:600}
+.q{background:var(--card);border-radius:14px;padding:10px 12px;margin:10px 0;box-shadow:var(--shadow)}
+.q h2{font-size:15.5px;margin:0 0 6px}.q h2 span{font-weight:400;color:var(--mute);font-size:13px}
+.seg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.seg.n3{grid-template-columns:repeat(3,minmax(0,1fr))}.seg.n2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.seg button{border:1.5px solid var(--line);background:transparent;border-radius:10px;padding:7px 9px;text-align:left;font-size:13.5px;min-height:44px}
+.seg button b{color:var(--mute);margin-right:5px}
+.seg button[aria-pressed=true]{border-color:var(--accent);background:var(--accentBg)}.seg button[aria-pressed=true] b{color:var(--accent)}
+.desc{margin:6px 0 0;font-size:13.5px}
+#stage{position:relative;margin:10px auto;width:100%;max-width:951px;border-radius:12px;overflow:hidden;box-shadow:var(--shadow);background:var(--paper);user-select:none;-webkit-user-select:none}
+#cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.panel{position:absolute;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow)}
+#rail{left:8px;top:8px;width:54px;border-radius:14px;display:flex;flex-direction:column;align-items:center;padding:5px 0;gap:3px;z-index:3}
+.rb{width:44px;height:44px;border:0;background:transparent;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0}
+.rb svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.rb.on{background:var(--accentBg);color:var(--accent)}.rb[disabled]{opacity:.35;cursor:default}
+#bar{left:70px;top:8px;right:8px;min-height:44px;border-radius:12px;display:flex;align-items:center;gap:6px;padding:0 6px 0 12px;font-size:14px;z-index:3}
+#bar b{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#strip{position:absolute;left:70px;right:8px;top:58px;display:none;flex-wrap:wrap;gap:5px;z-index:3;pointer-events:none}
+#strip button{pointer-events:auto;min-height:44px;padding:0 11px;border:1px solid var(--line);background:var(--panel);border-radius:10px;font-size:13.5px;box-shadow:var(--shadow);white-space:nowrap}
+#strip button.ang{font:600 14px ui-monospace,Menlo,Consolas,monospace;color:var(--accent);border-color:var(--accent)}
+#strip button.ang[disabled]{color:var(--ink);border-color:var(--line);cursor:default}
+#strip button.on{background:var(--accentBg);color:var(--accent);font-weight:600;border-color:var(--accent)}
+#strip button.done{background:var(--accent);color:var(--card);border-color:var(--accent);font-weight:600}
+#status{left:70px;right:8px;bottom:8px;min-height:34px;border-radius:12px;display:flex;align-items:center;gap:12px;padding:4px 11px;font-size:12.5px;z-index:3}
+#prompt{flex:1 1 auto;min-width:0}#read{flex:none;font:12px ui-monospace,Menlo,Consolas,monospace;text-align:right}
+.warn{color:var(--warn);font-weight:600}.ok{color:var(--ok)}
+.pad{position:absolute;z-index:6;left:50%;top:50%;transform:translate(-50%,-50%);width:212px;padding:8px;border-radius:12px;display:none}
+.pad .show{font:600 18px ui-monospace,Menlo,Consolas,monospace;padding:7px 10px;border:1.5px solid var(--accent);border-radius:8px;margin-bottom:6px;background:var(--accentBg);min-height:40px}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.keys button{height:44px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:17px;padding:0}
+.keys button.ok{background:var(--accent);color:var(--card);border-color:var(--accent);font-size:15px;font-weight:600}
+#scales{position:absolute;z-index:6;left:50%;top:50%;transform:translate(-50%,-50%);width:236px;padding:8px;border-radius:12px;display:none}
+#scales button{display:block;width:100%;min-height:44px;margin:0 0 4px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:14.5px}
+#scales button.on{border-color:var(--accent);background:var(--accentBg);color:var(--accent);font-weight:600}
+#state{background:var(--card);border-radius:12px;padding:9px 12px;font:12.5px/1.55 ui-monospace,Menlo,Consolas,monospace;box-shadow:var(--shadow);overflow-wrap:anywhere}
+ol{margin:6px 0 0;padding-left:20px;font-size:14px}li{margin:3px 0}
+.btn{min-height:44px;border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:0 12px;font-size:14px;margin-top:8px}
+@media(max-width:760px){.seg,.seg.n3,.seg.n2{grid-template-columns:1fr}#rail{width:50px}#bar,#strip,#status{left:64px}#read{font-size:11px}#status{flex-wrap:wrap;gap:2px 10px}#read{text-align:left}}
+</style></head><body><main>
+<div class="top"><div><h1>Vellum: turn a placed sheet</h1>
+<p class="mute small">Prototype for #44, nothing is saved. The sheet and every mark on it are made up. Pick in each question and try the working canvas below.</p></div>
+<div class="tog" id="theme"><button data-t="light">Light</button><button data-t="dark">Dark</button></div></div>
+<div id="qs"></div>
+<div class="q"><h2>Try this</h2><ol>
+<li>With the lasso in hand, tap the sheet to select it. A sheet only turns or moves while it's selected, so a pinch can't turn one by accident. Today the lasso can't pick up a sheet at all.</li>
+<li>Turn it with whatever you picked in question 1. With a mouse, hold Shift and drag to twist.</li>
+<li>Watch the status bar: the printed 24'-0" must still read 24'-0" at every angle.</li>
+<li>Draw with the pen, then turn the sheet again, to see what your own ink does.</li></ol></div>
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <div class="panel" id="rail"></div>
+  <div class="panel" id="bar"><b>Boiler 4 walkdown (example)</b><button class="rb" id="undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 7 4 12l5 5M4 12h10a6 6 0 0 1 6 6"/></svg></button><button class="rb" id="redo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="m15 7 5 5-5 5M20 12H10a6 6 0 0 0-6 6"/></svg></button></div>
+  <div id="strip"></div>
+  <div class="panel" id="status"><span id="prompt"></span><span id="read"></span></div>
+  <div class="panel pad" id="pad"></div>
+  <div class="panel" id="scales"></div>
+</div>
+<button class="btn" id="reset">Start over</button>
+<h2 style="font-size:15.5px;margin:12px 0 4px">What just happened</h2><div id="state"></div>
+</main>
+<script>
+const $=s=>document.querySelector(s),cv=$('#cv'),ctx=cv.getContext('2d'),stage=$('#stage');
+const QS={
+ q1:{multi:true,title:'1. How does it turn?',sub:'pick any mix',o:{A:['Two-finger twist','Select the sheet, put two fingers on it and twist. Two fingers anywhere else still pan and zoom the canvas.'],B:['A handle','Drag the round handle above the selected sheet with the Pencil or a finger. It turns about the sheet\'s centre.'],C:['Turn buttons','Buttons on the selected sheet turn it 90° left or right, one tap per quarter turn.'],D:['Typed angle','Tap the angle on the selected sheet and type it. Angles read counter-clockwise, as AutoCAD and #40 do.']}},
+ q2:{title:'2. Which angles?',o:{A:['90° steps only','It can only stand at 0°, 90°, 180° or 270°. Fixes a sideways PDF, but can\'t line a plan up with a skewed site or north arrow.'],B:['Any angle, catches at 90°','Turns freely and pulls onto a quarter turn when within 3° of one. A guide shows the catch. Type the angle to land just beside one.'],C:['Any angle, no catch','Turns freely. Landing exactly on 90° takes a typed angle.']}},
+ q3:{title:'3. Does "stuck" also mean move or resize?',o:{A:['Turn and move','Drag a selected sheet to move it. Its size never changes.'],B:['Turn, move, change scale','Drag to move. Resizing means picking a different drawing scale, so lengths stay true.'],C:['Turn only','The sheet stays where it was placed.'],D:['Turn, move, drag a corner','A free resize. The sheet\'s scale stops matching its size, so every length on it reads wrong. Try it and watch the status bar.']}},
+ q4:{title:'4. What does your ink on the sheet do?',o:{A:['Comes with the sheet','Ink, text and dimensions with more than half their length on the sheet turn and move with it. Marks mostly off it stay. One undo puts it all back.'],B:['Stays on the canvas','Only the paper turns. Your markups stay put and no longer line up with what they marked.'],C:['A switch on the sheet','"Bring markups" on or off, each time you turn or move. Starts on.']}},
+ q5:{title:'5. Do the labels turn too?',sub:'scale areas always turn: they\'re on the paper',o:{A:['Stay upright','The sheet\'s name and the scale labels stay level, so you can read them at any angle. At an angle there\'s less room, so more of them fall back to the scale alone or hide.'],B:['Turn with the sheet','They stay printed-looking and fit as they do flat, but read sideways or upside down.']}}};
+const params=new URLSearchParams(location.search);
+const pick={q1:params.get('q1')||'ABCD',q2:params.get('q2')||'B',q3:params.get('q3')||'B',q4:params.get('q4')||'A',q5:params.get('q5')||'A'};
+let theme=params.get('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+const has=k=>pick.q1.includes(k);
+function saveURL(){const p=new URLSearchParams(pick);p.set('theme',theme);history.replaceState(null,'','?'+p.toString())}
+const col=n=>getComputedStyle(document.body).getPropertyValue(n).trim();
+
+// Model: feet, y down. The paper is 36 x 24 printed inches. A sheet's angle reads counter-clockwise, as AutoCAD's do.
+const PAPER={w:36,h:24};
+const SCALES=[['1/4" = 1\'-0"',4],['1/2" = 1\'-0"',2],['1" = 1\'-0"',1]]; // canvas feet per printed inch
+const AREAS=[{name:'Detail 1',scale:'1" = 1\'-0"',ftPerIn:1,x:1,y:1.2,w:10,h:13},{name:'Detail 2',scale:'1 1/2" = 1\'-0"',ftPerIn:2/3,x:11,y:1.2,w:8,h:13},{name:'Detail 3',scale:'NTS',ftPerIn:null,x:19,y:1.2,w:8,h:13}];
+const MARK={a:{x:3,y:20},b:{x:15,y:20}}, AREAMARK={a:{x:13.5,y:9},b:{x:16.5,y:9}};
+function fresh(){return{sheet:{cx:0,cy:0,ang:0,ftPerIn:2,stretch:1},items:[
+ {kind:'ink',color:'#d32f2f',w:.5,pts:cloud(-20,11,12.5,5.2)},
+ {kind:'ink',color:'#2563eb',w:.5,pts:[{x:20,y:8},{x:30,y:8},{x:42,y:8}]},
+ {kind:'ink',color:'#16a34a',w:.5,pts:[{x:33,y:-16},{x:45,y:-16},{x:45,y:-6}]},
+ {kind:'text',color:'#d32f2f',text:'Field verify',pts:[{x:-33,y:7.5}]},
+ {kind:'dim',color:'#2563eb',pts:paperToWorld0(MARK.a,4.5),},
+ ],nextId:1}}
+function cloud(cx,cy,rx,ry){const p=[];for(let i=0;i<=56;i++){const t=i/56*Math.PI*2,b=1+.09*Math.sin(t*9);p.push({x:cx+rx*b*Math.cos(t),y:cy+ry*b*Math.sin(t)})}return p}
+function paperToWorld0(a,off){const f=2,x0=-36,y0=-24,ya=y0+a.y*f+off;return[{x:x0+MARK.a.x*f,y:ya},{x:x0+MARK.b.x*f,y:ya}]}
+let doc=fresh(),undoS=[],redoS=[],selected=false,tool='select',view={ppf:5,ox:0,oy:0},W=951,H=669;
+let gesture=null,fingers=new Map(),catching=null,padBuf=null,bring=true,last='Nothing yet. Tap the sheet.',message='';
+const clone=o=>JSON.parse(JSON.stringify(o));
+const push=()=>{undoS.push(clone(doc));redoS=[]};
+const S=p=>({x:p.x*view.ppf+view.ox,y:p.y*view.ppf+view.oy}),M=p=>({x:(p.x-view.ox)/view.ppf,y:(p.y-view.oy)/view.ppf});
+const theta=a=>-a*Math.PI/180;
+const rot=(p,c,t)=>{const s=Math.sin(t),k=Math.cos(t),x=p.x-c.x,y=p.y-c.y;return{x:c.x+x*k-y*s,y:c.y+x*s+y*k}};
+function halfSize(s){return{w:PAPER.w*s.ftPerIn*s.stretch/2,h:PAPER.h*s.ftPerIn*s.stretch/2}}
+function paperToWorld(p,s=doc.sheet){const f=s.ftPerIn*s.stretch,h=halfSize(s);return rot({x:s.cx-h.w+p.x*f,y:s.cy-h.h+p.y*f},{x:s.cx,y:s.cy},theta(s.ang))}
+function worldToLocal(p,s=doc.sheet){const q=rot(p,{x:s.cx,y:s.cy},-theta(s.ang)),h=halfSize(s);return{x:q.x-s.cx+h.w,y:q.y-s.cy+h.h,w:h.w*2,h:h.h*2}}
+function onSheet(p){const l=worldToLocal(p);return l.x>=0&&l.y>=0&&l.x<=l.w&&l.y<=l.h}
+function ftin(f){const neg=f<0;let s=Math.round(Math.abs(f)*12*16),ft=Math.floor(s/192);s-=ft*192;let i=Math.floor(s/16);s-=i*16;let frac='';if(s){let n=s,d=16;while(n%2===0){n/=2;d/=2}frac=(i?' ':'')+n+'/'+d}return(neg?'-':'')+ft+"'-"+(i||!frac?i:'')+frac+'"'}
+function deg(a){a=((a%360)+360)%360;a=Math.round(a*10)/10;if(a>=360)a=0;return a+'°'}
+function comes(it){const n=it.pts.length,on=it.pts.filter(onSheet).length;return on*2>n}
+function bringOn(){return pick.q4==='A'||(pick.q4==='C'&&bring)}
+function reads(){const a=paperToWorld(MARK.a),b=paperToWorld(MARK.b),c=paperToWorld(AREAMARK.a),d=paperToWorld(AREAMARK.b),dist=Math.hypot(a.x-b.x,a.y-b.y),s=doc.sheet,trueMain=12*s.ftPerIn,ad=Math.hypot(c.x-d.x,c.y-d.y)/(s.ftPerIn*s.stretch)*AREAS[1].ftPerIn;return{main:ftin(dist),printed:ftin(trueMain),detail:ftin(s.stretch===1?ad:ad*s.stretch),detailWrong:ftin(Math.hypot(c.x-d.x,c.y-d.y)/s.ftPerIn*AREAS[1].ftPerIn),ok:ftin(dist)===ftin(trueMain)}}
+function mark(ang){const t=theta(ang);return t}
+
+// Starting and running a change. Markups that come along are chosen when the change starts, from where things are.
+function begin(kind){const s=doc.sheet,base={doc:clone(doc),taken:bringOn()?doc.items.map(comes):doc.items.map(()=>false)};push();return Object.assign(base,{kind,moved:false,ang0:s.ang,c0:{x:s.cx,y:s.cy}})}
+function applyTurn(g,ang){const s=doc.sheet,c=g.c0;s.ang=ang;const t=theta(ang)-theta(g.doc.sheet.ang);g.doc.items.forEach((it,i)=>{if(g.taken[i])doc.items[i].pts=it.pts.map(p=>rot(p,c,t))})}
+function applyMove(g,dx,dy){const s=doc.sheet;s.cx=g.c0.x+dx;s.cy=g.c0.y+dy;g.doc.items.forEach((it,i)=>{if(g.taken[i])doc.items[i].pts=it.pts.map(p=>({x:p.x+dx,y:p.y+dy}))})}
+function applyScale(g,f){const c=g.c0;g.doc.items.forEach((it,i)=>{if(g.taken[i])doc.items[i].pts=it.pts.map(p=>({x:c.x+(p.x-c.x)*f,y:c.y+(p.y-c.y)*f}))})}
+function norm(a){return((a%360)+360)%360}
+function shaped(a){catching=null;a=norm(a);if(pick.q2==='A'){return norm(Math.round(a/90)*90)}if(pick.q2==='B'){const n=Math.round(a/90)*90;if(Math.abs(a-n)<=3){catching=norm(n);return norm(n)}}return Math.round(a*10)/10}
+function took(g){const n=g.taken.filter(Boolean).length,total=g.taken.length;return n?`${n} of ${total} markups came with it`:'markups stayed where they were'}
+function turnBy(d){const g=begin('button');applyTurn(g,norm(doc.sheet.ang+d));last=`Turned ${d>0?'left':'right'} to ${deg(doc.sheet.ang)}, ${took(g)}.`;render()}
+
+// Pointers.
+function P(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}
+function handleSpot(){const s=doc.sheet,h=halfSize(s),c=S({x:s.cx,y:s.cy}),t=theta(s.ang),len=h.h*view.ppf+36;let x=c.x+Math.sin(t)*len,y=c.y-Math.cos(t)*len;x=Math.min(W-22,Math.max(84,x));y=Math.min(H-56,Math.max(selected?stripBottom()+20:66,y));return{x,y}}
+function stripBottom(){const t=$('#strip');return t.style.display==='none'?52:t.offsetTop+t.offsetHeight}
+function cornerSpot(){const f=doc.sheet;return S(paperToWorld({x:PAPER.w,y:PAPER.h}))}
+function near(a,b,r){return Math.hypot(a.x-b.x,a.y-b.y)<=r}
+cv.addEventListener('pointerdown',e=>{e.preventDefault();cv.setPointerCapture(e.pointerId);const p=P(e);fingers.set(e.pointerId,p);const r=e.pointerType==='mouse'?14:26;closeAll();
+ if(fingers.size===2){if(gesture&&gesture.kind==='ink'){doc.items.pop();undoS.pop()}else if(gesture&&gesture.doc&&gesture.moved){doc=gesture.doc;undoS.pop()}else if(gesture&&gesture.doc){undoS.pop()}
+  const[a,b]=[...fingers.values()];const onS=onSheet(M(a))&&onSheet(M(b));
+  if(selected&&has('A')&&onS){const g=begin('twist');g.fa=Math.atan2(b.y-a.y,b.x-a.x);gesture=g}else{gesture={kind:'pinch',a,b,d:Math.hypot(a.x-b.x,a.y-b.y),mx:(a.x+b.x)/2,my:(a.y+b.y)/2}}
+  render();return}
+ if(fingers.size>2)return;
+ if(tool==='pen'){push();const it={kind:'ink',color:theme==='dark'?'#ef5350':'#d32f2f',w:.5,pts:[M(p)]};doc.items.push(it);gesture={kind:'ink',it};render();return}
+ if(selected&&has('B')&&near(p,handleSpot(),r+8)){const g=begin('handle'),c=S({x:doc.sheet.cx,y:doc.sheet.cy});g.fa=Math.atan2(p.y-c.y,p.x-c.x);gesture=g;return}
+ if(selected&&pick.q3==='D'&&near(p,cornerSpot(),r+6)){const g=begin('stretch');g.st0=doc.sheet.stretch;g.d0=Math.hypot(p.x-S(g.c0).x,p.y-S(g.c0).y);gesture=g;return}
+ const inside=onSheet(M(p));
+ if(selected&&inside&&e.shiftKey&&has('A')){const g=begin('twist');g.mouse=true;const c=S(g.c0);g.fa=Math.atan2(p.y-c.y,p.x-c.x);gesture=g;return}
+ if(selected&&inside&&pick.q3!=='C'){const g=begin('move');g.p0=p;gesture=g;return}
+ gesture={kind:inside&&!selected?'tapSheet':'pan',p0:p,last:p,moved:false};
+});
+cv.addEventListener('pointermove',e=>{if(!fingers.has(e.pointerId))return;e.preventDefault();const p=P(e);fingers.set(e.pointerId,p);const g=gesture;if(!g)return;
+ if(g.kind==='ink'){g.it.pts.push(M(p))}
+ else if(g.kind==='pinch'&&fingers.size===2){const[a,b]=[...fingers.values()],d=Math.hypot(a.x-b.x,a.y-b.y),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;zoomAt(g.mx,g.my,d/g.d);view.ox+=mx-g.mx;view.oy+=my-g.my;g.d=d;g.mx=mx;g.my=my}
+ else if(g.kind==='twist'){let now;if(g.mouse){const c=S(g.c0);now=Math.atan2(p.y-c.y,p.x-c.x)}else{if(fingers.size<2)return;const[a,b]=[...fingers.values()];now=Math.atan2(b.y-a.y,b.x-a.x)}const dd=(now-g.fa)*180/Math.PI;g.moved=g.moved||Math.abs(dd)>.5;applyTurn(g,shaped(g.ang0-dd))}
+ else if(g.kind==='handle'){const c=S(g.c0);const now=Math.atan2(p.y-c.y,p.x-c.x),dd=(now-g.fa)*180/Math.PI;g.moved=true;applyTurn(g,shaped(g.ang0-dd))}
+ else if(g.kind==='move'){const dx=(p.x-g.p0.x)/view.ppf,dy=(p.y-g.p0.y)/view.ppf;if(!g.moved&&Math.hypot(p.x-g.p0.x,p.y-g.p0.y)<5)return;g.moved=true;applyMove(g,dx,dy)}
+ else if(g.kind==='stretch'){const c=S(g.c0),d=Math.hypot(p.x-c.x,p.y-c.y),f=Math.max(.3,d/g.d0);doc.sheet.stretch=g.st0*f;applyScale(g,f);g.moved=true}
+ else if(g.kind==='pan'||g.kind==='tapSheet'){if(Math.hypot(p.x-g.p0.x,p.y-g.p0.y)>5)g.moved=true;if(g.moved){view.ox+=p.x-g.last.x;view.oy+=p.y-g.last.y}g.last=p}
+ render()});
+function endP(e){if(!fingers.has(e.pointerId))return;e.preventDefault();const g=gesture;
+ if(g&&g.doc&&!g.moved&&fingers.size===1){undoS.pop();doc=g.doc;if(g.kind==='move')last='Selected. Drag to move it.'}
+ else if(g&&g.moved&&g.doc){if(g.kind==='twist'||g.kind==='handle')last=`Turned to ${deg(doc.sheet.ang)}${catching!=null?', caught on the quarter turn':''}, ${took(g)}.`;
+  if(g.kind==='move')last=`Moved, ${took(g)}. The angle stayed ${deg(doc.sheet.ang)}.`;
+  if(g.kind==='stretch')last='Dragged a corner. The sheet is a new size but says the same scale, so its lengths are now wrong.'}
+ if(g&&g.kind==='ink'){last='Drew ink. Select the sheet and turn it to see what this ink does.'}
+ if(g&&g.kind==='tapSheet'&&!g.moved){selected=true;tool='select';last='Selected the sheet.'}
+ if(g&&g.kind==='pan'&&!g.moved&&selected){selected=false;last='Let go of the sheet.'}
+ fingers.delete(e.pointerId);if(fingers.size<2&&g&&(g.kind==='pinch'||g.kind==='twist')&&!g.mouse){gesture=null}else if(!fingers.size)gesture=null;
+ catching=null;render()}
+cv.addEventListener('pointerup',endP);cv.addEventListener('pointercancel',endP);
+cv.addEventListener('wheel',e=>{e.preventDefault();const p=P(e);if(e.ctrlKey||e.metaKey){zoomAt(p.x,p.y,Math.exp(-e.deltaY*.01))}else{view.ox-=e.deltaX;view.oy-=e.deltaY}render()},{passive:false});
+function zoomAt(x,y,f){const n=Math.min(60,Math.max(1.5,view.ppf*f));f=n/view.ppf;view.ox=x-(x-view.ox)*f;view.oy=y-(y-view.oy)*f;view.ppf=n}
+
+// The panels.
+function closeAll(){if(padBuf!==null||$('#scales').style.display==='block'){padBuf=null;$('#pad').style.display='none';$('#scales').style.display='none'}}
+function drawQs(){const w=$('#qs');w.innerHTML='';for(const k of Object.keys(QS)){const q=QS[k],d=document.createElement('div');d.className='q';const n=Object.keys(q.o).length;d.innerHTML=`<h2>${q.title}${q.sub?` <span>(${q.sub})</span>`:''}</h2><div class="seg ${n===3?'n3':n===2?'n2':''}"></div><p class="desc"></p>`;const seg=d.querySelector('.seg');
+  for(const o of Object.keys(q.o)){const b=document.createElement('button');const on=q.multi?pick[k].includes(o):pick[k]===o;b.setAttribute('aria-pressed',on);b.innerHTML=`<b>${o}</b>${q.o[o][0]}`;b.onclick=()=>{if(q.multi){let v=pick[k].includes(o)?pick[k].replace(o,''):pick[k]+o;pick[k]=[...v].sort().join('')}else pick[k]=o;saveURL();if(pick.q3!=='D'&&doc.sheet.stretch!==1){doc.sheet.stretch=1}drawQs();render()};seg.appendChild(b)}
+  d.querySelector('.desc').innerHTML=q.multi?[...pick[k]].map(o=>`<b>${o}:</b> ${q.o[o][1]}`).join('<br>')||'<span class="warn">Nothing picked, so the sheet can\'t turn.</span>':q.o[pick[k]][1];w.appendChild(d)}
+ document.querySelectorAll('#theme button').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.t===theme);b.onclick=()=>{theme=b.dataset.t;document.body.classList.toggle('dark',theme==='dark');saveURL();drawQs();render()}})}
+function drawRail(){const icons={select:'<path d="M12 4c5 0 8.5 2.6 8.5 6s-3.5 6-8.5 6c-1.4 0-2.7-.2-3.9-.6M5.6 14C4.2 12.9 3.5 11.5 3.5 10c0-3.4 3.5-6 8.5-6M8.5 15.5c-1.8.2-2.8 1.3-2.5 2.6.3 1.2 1.7 1.9 3 1.4"/>',pen:'<path d="M4 20l1-4L16 5l3 3L8 19zM14 7l3 3"/>'};const r=$('#rail');r.innerHTML='';for(const t of['select','pen']){const b=document.createElement('button');b.className='rb'+(tool===t?' on':'');b.setAttribute('aria-label',t==='select'?'Lasso':'Pen');b.innerHTML=`<svg viewBox="0 0 24 24">${icons[t]}</svg>`;b.onclick=()=>{tool=t;if(t==='pen')selected=false;last=t==='pen'?'Pen in hand. Draw on the sheet.':'Lasso in hand. Tap the sheet.';render()};r.appendChild(b)}}
+function drawStrip(){const w=$('#strip');w.innerHTML='';w.style.display=selected?'flex':'none';if(!selected)return;
+ const add=(html,cls,fn,dis)=>{const b=document.createElement('button');b.innerHTML=html;if(cls)b.className=cls;if(dis)b.disabled=true;if(fn)b.onclick=fn;w.appendChild(b);return b};
+ add(deg(doc.sheet.ang),'ang',has('D')?()=>{padBuf='';drawPad()}:null,!has('D'));
+ if(has('C')){add('⟲ 90° left','',()=>turnBy(90));add('⟳ 90° right','',()=>turnBy(-90))}
+ if(pick.q3==='B')add('Change scale','',()=>{drawScales()});
+ if(pick.q4==='C')add('Bring markups: '+(bring?'on':'off'),bring?'on':'',()=>{bring=!bring;render()});
+ add('Done','done',()=>{selected=false;last='Let go of the sheet.';render()})}
+function drawPad(){const p=$('#pad');p.style.display='block';p.innerHTML=`<div class="small mute" style="margin-bottom:4px">Angle, counter-clockwise</div><div class="show">${padBuf||'&nbsp;'}°</div><div class="keys">${['7','8','9','4','5','6','1','2','3','.','0','⌫'].map(k=>`<button data-k="${k}">${k}</button>`).join('')}<button data-k="x">Cancel</button><button class="ok" data-k="ok" style="grid-column:span 2">Set angle</button></div>`;
+ p.querySelectorAll('button').forEach(b=>b.onclick=()=>{const k=b.dataset.k;if(k==='x'){closeAll();return}if(k==='ok'){const v=parseFloat(padBuf);closeAll();if(isFinite(v)){const g=begin('typed');let a=norm(v);let note='';if(pick.q2==='A'){const n=norm(Math.round(a/90)*90);if(n!==a)note=` (${v}° isn't a 90° step)`;a=n}applyTurn(g,a);last=`Typed: stands at ${deg(a)}${note}, ${took(g)}.`;render()}return}if(k==='⌫')padBuf=padBuf.slice(0,-1);else if(k!=='.'||!padBuf.includes('.'))padBuf+=k;drawPad()})}
+function drawScales(){const p=$('#scales');p.style.display='block';p.innerHTML='<div class="small mute" style="margin-bottom:5px">Drawing scale. The sheet takes the size this scale gives it.</div>'+SCALES.map(([n,f])=>`<button data-f="${f}" class="${doc.sheet.ftPerIn===f?'on':''}">${n}</button>`).join('');
+ p.querySelectorAll('button').forEach(b=>b.onclick=()=>{const f=+b.dataset.f;closeAll();if(f===doc.sheet.ftPerIn)return;const g=begin('scale'),r=f/doc.sheet.ftPerIn;doc.sheet.ftPerIn=f;applyScale(g,r);last=`Scale changed: the sheet is a new size and its lengths read the new scale, ${took(g)}.`;render()})}
+document.addEventListener('pointerdown',e=>{if(e.target===cv)return;const inPanel=e.target.closest&&e.target.closest('#pad,#scales,#strip');if(!inPanel)closeAll()});
+$('#undo').onclick=()=>{if(!undoS.length)return;redoS.push(clone(doc));doc=undoS.pop();last='Undid that.';render()};
+$('#redo').onclick=()=>{if(!redoS.length)return;undoS.push(clone(doc));doc=redoS.pop();last='Redid that.';render()};
+$('#reset').onclick=()=>{doc=fresh();undoS=[];redoS=[];selected=false;tool='select';closeAll();fit();last='Started over.';render()};
+
+// Drawing.
+function grid(c){const step=view.ppf>9?5:10,x0=M({x:0,y:0}),x1=M({x:W,y:H});c.strokeStyle=col('--grid');c.lineWidth=1;c.beginPath();for(let x=Math.floor(x0.x/step)*step;x<=x1.x;x+=step){const s=Math.round(S({x,y:0}).x)+.5;c.moveTo(s,0);c.lineTo(s,H)}for(let y=Math.floor(x0.y/step)*step;y<=x1.y;y+=step){const s=Math.round(S({x:0,y}).y)+.5;c.moveTo(0,s);c.lineTo(W,s)}c.stroke()}
+function polygon(p){const a=p.map(S);return a}
+function inPoly(pt,poly){for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length];if((b.x-a.x)*(pt.y-a.y)-(b.y-a.y)*(pt.x-a.x)<0)return false}return true}
+function boxFits(cx,cy,w,h,poly){return[[-1,-1],[1,-1],[1,1],[-1,1]].every(([i,j])=>inPoly({x:cx+i*w/2,y:cy+j*h/2},poly))}
+const clear=(a,list)=>list.every(b=>Math.abs(a.x-b.x)*2>=a.w+b.w||Math.abs(a.y-b.y)*2>=a.h+b.h);
+function textW(c,t,sz){c.font=`600 ${sz}px -apple-system,system-ui,"Segoe UI",sans-serif`;return Math.ceil(c.measureText(t).width)}
+function uprightSpot(corner,poly,w,h,taken){const n=poly.length,cx=poly.reduce((s,p)=>s+p.x,0)/n,cy=poly.reduce((s,p)=>s+p.y,0)/n;const sx=cx>=corner.x?1:-1,sy=cy>=corner.y?1:-1;const bx=corner.x+sx*(w/2+.5),by=corner.y+sy*(h/2+.5);for(let t=0;t<=.96;t+=.04){const x=bx+(cx-bx)*t,y=by+(cy-by)*t;if(boxFits(x,y,w,h,poly)&&clear({x,y,w,h},taken))return{x,y}}return null}
+function drawSheet(c){const s=doc.sheet,f=s.ftPerIn*s.stretch*view.ppf,t=theta(s.ang),ctr=S({x:s.cx,y:s.cy});c.save();c.translate(ctr.x,ctr.y);c.rotate(t);const w=PAPER.w*f,h=PAPER.h*f;c.translate(-w/2,-h/2);
+ c.fillStyle=col('--sheet');c.shadowColor='rgba(0,0,0,.25)';c.shadowBlur=6;c.fillRect(0,0,w,h);c.shadowBlur=0;c.strokeStyle=col('--sheetLine');c.lineWidth=1;c.strokeRect(.5*f,.5*f,35*f,23*f);
+ // Linework on the paper.
+ c.lineWidth=1;for(const[x,y,a,b]of[[2.6,4,7,6],[13,6,4,3],[21,5,4,6],[3,16.5,10,2]]){c.strokeRect(x*f,y*f,a*f,b*f)}
+ c.beginPath();c.moveTo(6.1*f,4*f);c.lineTo(6.1*f,10*f);c.moveTo(21*f,8*f);c.lineTo(25*f,8*f);c.stroke();
+ c.strokeRect(29*f,20*f,6.2*f,3.5*f);c.fillStyle=col('--sheetLine');c.font=`${Math.max(6,Math.min(11,.52*f))}px system-ui`;c.fillText('D-501',32.8*f,23*f);c.fillText('EXAMPLE PLANT',29.3*f,21*f);
+ // The printed dimensions a measure must keep reading.
+ c.lineWidth=1.2;for(const[m,lab]of[[MARK,'24\'-0"'],[AREAMARK,'2\'-0"']]){c.beginPath();c.moveTo(m.a.x*f,m.a.y*f);c.lineTo(m.b.x*f,m.b.y*f);c.moveTo(m.a.x*f,(m.a.y-.4)*f);c.lineTo(m.a.x*f,(m.a.y+.4)*f);c.moveTo(m.b.x*f,(m.b.y-.4)*f);c.lineTo(m.b.x*f,(m.b.y+.4)*f);c.stroke();c.textAlign='center';c.fillText(lab,(m.a.x+m.b.x)/2*f,(m.a.y-.5)*f);c.textAlign='left'}
+ // Scale areas are on the paper, so they turn with it.
+ c.strokeStyle=col('--area');c.lineWidth=1.6;c.setLineDash([6,4]);for(const a of AREAS)c.strokeRect(a.x*f,a.y*f,a.w*f,a.h*f);c.setLineDash([]);
+ c.restore()}
+function label(c,lines,x,y,w,h,fill,fg){c.fillStyle=fill;c.fillRect(x-w/2,y-h/2,w,h);c.fillStyle=fg;c.textBaseline='top';const lh=(h-4)/lines.length;lines.forEach((l,i)=>{c.fillText(l,x-w/2+4,y-h/2+2+i*lh)});c.textBaseline='alphabetic'}
+function drawLabels(c){const s=doc.sheet,name=`D-501 · ${SCALES.find(z=>z[1]===s.ftPerIn)[0]} + 3 scale areas`,f=s.ftPerIn*s.stretch*view.ppf;const bg=theme==='dark'?'rgba(28,29,32,.92)':'rgba(243,239,230,.92)';const fg=col('--ink'),aFill=col('--area'),aText=col('--areaText');
+ const sz=10;const nameW=textW(c,name,11)+8,nameH=18;const placed=[];
+ if(pick.q5==='B'){const ctr=S({x:s.cx,y:s.cy}),w=PAPER.w*f,h=PAPER.h*f;c.save();c.translate(ctr.x,ctr.y);c.rotate(theta(s.ang));c.translate(-w/2,-h/2);if(nameW<=w&&nameH<=h){c.font='600 11px -apple-system,system-ui,"Segoe UI",sans-serif';label(c,[name],nameW/2+2,nameH/2+2,nameW,nameH,bg,fg);placed.push({x:nameW/2+2,y:nameH/2+2,w:nameW,h:nameH})}
+  for(const a of AREAS){const bx=a.x*f,by=a.y*f,bw=a.w*f,bh=a.h*f;const nw=textW(c,a.name,sz)+8,sw=textW(c,a.scale,sz)+8,tw=Math.max(nw,sw);const opt=[[[a.name,a.scale],tw,30],[[a.scale],sw,17]];for(const[l,w2,h2]of opt){let y=by+h2/2;const cand=()=>({x:bx+w2/2,y,w:w2,h:h2});while(!clear(cand(),placed)&&y+h2/2<by+bh)y+=4;if(w2<=bw&&y+h2/2<=by+bh&&clear(cand(),placed)){c.font=`600 ${sz}px -apple-system,system-ui,"Segoe UI",sans-serif`;label(c,l,bx+w2/2,y,w2,h2,aFill,aText);placed.push(cand());break}}}
+  c.restore();return}
+ const poly=[{x:0,y:0},{x:PAPER.w,y:0},{x:PAPER.w,y:PAPER.h},{x:0,y:PAPER.h}].map(p=>S(paperToWorld(p)));const sheetPoly=orient(poly);
+ const sp=uprightSpot(poly[0],sheetPoly,nameW,nameH,placed);if(sp){c.font='600 11px -apple-system,system-ui,"Segoe UI",sans-serif';label(c,[name],sp.x,sp.y,nameW,nameH,bg,fg);placed.push({x:sp.x,y:sp.y,w:nameW,h:nameH})}
+ for(const a of AREAS){const pl=[{x:a.x,y:a.y},{x:a.x+a.w,y:a.y},{x:a.x+a.w,y:a.y+a.h},{x:a.x,y:a.y+a.h}].map(p=>S(paperToWorld(p)));const op=orient(pl);const nw=textW(c,a.name,sz)+8,sw=textW(c,a.scale,sz)+8,tw=Math.max(nw,sw);for(const[l,w2,h2]of[[[a.name,a.scale],tw,30],[[a.scale],sw,17]]){const q=uprightSpot(pl[0],op,w2,h2,placed);if(q){c.font=`600 ${sz}px -apple-system,system-ui,"Segoe UI",sans-serif`;label(c,l,q.x,q.y,w2,h2,aFill,aText);placed.push({x:q.x,y:q.y,w:w2,h:h2});break}}}}
+function orient(p){let a=0;for(let i=0;i<p.length;i++){const u=p[i],v=p[(i+1)%p.length];a+=u.x*v.y-v.x*u.y}return a<0?[...p].reverse():p}
+function drawItems(c){const taking=selected&&bringOn();for(const it of doc.items){const P=it.pts.map(S);if(taking&&comes(it)){c.strokeStyle=col('--accent');c.globalAlpha=.25;c.lineWidth=7;c.lineJoin='round';c.lineCap='round';if(it.kind==='text'){const m=c.measureText(it.text);c.font='600 13px system-ui';c.strokeRect(P[0].x-3,P[0].y-14,c.measureText(it.text).width+6,18)}else{c.beginPath();P.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y));c.stroke()}c.globalAlpha=1}
+  c.strokeStyle=it.color;c.fillStyle=it.color;c.lineJoin='round';c.lineCap='round';
+  if(it.kind==='ink'){c.lineWidth=Math.max(1.4,it.w*view.ppf);c.beginPath();P.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y));c.stroke()}
+  if(it.kind==='text'){c.font='600 13px system-ui';c.fillText(it.text,P[0].x,P[0].y)}
+  if(it.kind==='dim'){const[a,b]=P;const d=Math.hypot(it.pts[0].x-it.pts[1].x,it.pts[0].y-it.pts[1].y);c.lineWidth=1.4;c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);c.stroke();const n=Math.atan2(b.y-a.y,b.x-a.x)+Math.PI/2;for(const q of[a,b]){c.beginPath();c.moveTo(q.x+Math.cos(n)*5,q.y+Math.sin(n)*5);c.lineTo(q.x-Math.cos(n)*5,q.y-Math.sin(n)*5);c.stroke()}const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;c.save();c.translate(mx,my);let r=Math.atan2(b.y-a.y,b.x-a.x);if(r>Math.PI/2||r<-Math.PI/2)r+=Math.PI;c.rotate(r);c.font='600 12px system-ui';c.textAlign='center';const L=ftin(d),tw=c.measureText(L).width;c.fillStyle=col('--paper');c.fillRect(-tw/2-3,-8,tw+6,16);c.fillStyle=it.color;c.textBaseline='middle';c.fillText(L,0,0);c.restore();c.textAlign='left';c.textBaseline='alphabetic'}}}
+function frameBox(c){const a=S({x:20,y:18}),b=S({x:52,y:40});c.strokeStyle=col('--frame');c.lineWidth=1.4;c.setLineDash([7,4]);c.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);c.setLineDash([]);c.fillStyle=col('--frame');c.font='600 11px system-ui';c.fillText('Frame A',a.x+3,b.y+14)}
+function drawSel(c){if(!selected)return;const s=doc.sheet,pl=[{x:0,y:0},{x:PAPER.w,y:0},{x:PAPER.w,y:PAPER.h},{x:0,y:PAPER.h}].map(p=>S(paperToWorld(p)));c.strokeStyle=col('--accent');c.lineWidth=2;c.beginPath();pl.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y));c.closePath();c.stroke();
+ const ctr=S({x:s.cx,y:s.cy});if(catching!=null){c.strokeStyle=col('--teal');c.lineWidth=1.4;c.setLineDash([8,5]);c.beginPath();const t=theta(catching),l=Math.max(W,H);c.moveTo(ctr.x-Math.cos(t)*l,ctr.y-Math.sin(t)*l);c.lineTo(ctr.x+Math.cos(t)*l,ctr.y+Math.sin(t)*l);c.moveTo(ctr.x+Math.sin(t)*l,ctr.y-Math.cos(t)*l);c.lineTo(ctr.x-Math.sin(t)*l,ctr.y+Math.cos(t)*l);c.stroke();c.setLineDash([])}
+ if(has('B')){const h=handleSpot(),top=S(paperToWorld({x:PAPER.w/2,y:0}));c.strokeStyle=col('--accent');c.lineWidth=1.4;c.beginPath();c.moveTo(top.x,top.y);c.lineTo(h.x,h.y);c.stroke();c.fillStyle=col('--panel');c.beginPath();c.arc(h.x,h.y,13,0,7);c.fill();c.stroke();c.fillStyle=col('--accent');c.font='15px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText('↻',h.x,h.y);c.textAlign='left';c.textBaseline='alphabetic'}
+ if(pick.q3==='D'){const q=cornerSpot();c.fillStyle=col('--warn');c.beginPath();c.arc(q.x,q.y,9,0,7);c.fill()}}
+function promptText(){if(gesture&&(gesture.kind==='twist'||gesture.kind==='handle'))return catching!=null?`Caught at ${deg(catching)}`:`Turning: ${deg(doc.sheet.ang)}`;if(tool==='pen')return'Draw with the Pencil';if(!selected)return'Lasso: tap the sheet';const w=[];if(has('A'))w.push('twist with two fingers');if(has('B'))w.push('drag the handle');if(pick.q3!=='C')w.push('drag to move');return w.length?w.join(', ').replace(/^./,x=>x.toUpperCase()):'Sheet selected'}
+function render(){const dpr=window.devicePixelRatio||1;if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr)}drawRail();drawStrip();ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=col('--paper');ctx.fillRect(0,0,W,H);grid(ctx);frameBox(ctx);drawSheet(ctx);drawItems(ctx);drawLabels(ctx);drawSel(ctx);
+ const r=reads();$('#undo').disabled=!undoS.length;$('#redo').disabled=!redoS.length;$('#prompt').textContent=promptText();
+ const wrong=doc.sheet.stretch!==1&&!r.ok;$('#read').innerHTML=wrong?`<span class="warn">Printed ${r.printed}, measures ${r.main}</span>`:`Printed ${r.printed} <span class="ok">measures ${r.main}</span>`;
+ const taken=doc.items.map(it=>comes(it)).filter(Boolean).length;
+ $('#state').innerHTML=[`<b>Last:</b> ${last}`,`<b>Angle:</b> ${deg(doc.sheet.ang)} counter-clockwise, about the sheet's centre`,`<b>Scale:</b> ${SCALES.find(z=>z[1]===doc.sheet.ftPerIn)[0]}${doc.sheet.stretch!==1?` <span class="warn">but drawn ${Math.round(doc.sheet.stretch*100)}% of that size</span>`:''}`,`<b>Measure on the sheet:</b> the 24'-0" line reads ${r.main}; in Detail 2, at its own scale, the printed 2'-0" reads ${wrong?r.detailWrong:'2\'-0"'}${wrong?' (wrong)':''}`,`<b>Markups on the sheet right now:</b> ${taken} of ${doc.items.length}. The frame never moves: it stays square to the canvas.`,`<b>Picks:</b> ${Object.keys(pick).map(k=>k+'='+(pick[k]||'none')).join(' ')}`].join('<br>');
+ window.__vellum={doc,selected,pick,view,W,H,reads:r}}
+function fit(){const room=Math.min(W-90,H-120),ppf=Math.max(1.5,Math.min(room/86.6,(W-90)/72));view.ppf=ppf;view.ox=(W+60)/2;view.oy=(H+6)/2}
+function size(){const w=stage.clientWidth;W=w;H=w>=760?Math.round(w*669/951):Math.max(400,Math.min(Math.round(innerHeight*.62),560));stage.style.height=H+'px'}
+let was=-1;addEventListener('resize',()=>{const o=W;size();if(o!==W)fit();render()});
+document.body.classList.toggle('dark',theme==='dark');size();fit();drawQs();saveURL();render();
+</script></body></html>

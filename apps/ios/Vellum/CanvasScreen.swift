@@ -347,7 +347,8 @@ private struct CanvasActions: View {
             Button {} label: {
                 Label("Send", systemImage: "paperplane.fill").font(.system(size: 13, weight: .semibold))
             }
-            .buttonStyle(ChromePrimaryButtonStyle())
+            // The old width, so the canvas name keeps its room.
+            .buttonStyle(ChromePrimaryButtonStyle(horizontalPadding: 11))
             .disabled(true)
             .accessibilityHint("Not available yet. Sending to an agent comes in a later update.")
         }
@@ -544,9 +545,10 @@ private struct PenReadout: View {
 /// The scale bar: the longest round length that fits, labelled exactly.
 private struct ScaleReadout: View {
     let editor: CanvasEditor
-    /// The bar's longest, and the room for its longest label beside it, `500.000 m`. Short, for the pen's position (#33).
+    /// The bar's longest, and the room for a label beside it. Short, for the pen's position (#33). The very longest
+    /// label, `500.000 m` far zoomed out, runs a few points into the gap after it rather than being cut.
     private static let space = 60.0
-    private static let labelRoom = 66.0
+    private static let labelRoom = 60.0
 
     var body: some View {
         let pointsPerInch = editor.viewport.pointsPerInch
@@ -609,13 +611,14 @@ enum Chrome {
 
 /// A primary button: white on the chrome's primary blue, and faded blue when disabled (#35). Its label stays on one line.
 struct ChromePrimaryButtonStyle: ButtonStyle {
+    var horizontalPadding: CGFloat = 14
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .lineLimit(1)
             .fixedSize()
-            .padding(.horizontal, 14)
+            .padding(.horizontal, horizontalPadding)
             .frame(minHeight: 34)
             .foregroundStyle(isEnabled ? Color.white : Chrome.disabledText)
             .background(isEnabled ? Chrome.primary : Chrome.disabledFill, in: Capsule())

@@ -153,16 +153,11 @@ final class WindowMenu: UIView {
         let send = button("Send… (later)", hint: "Not available yet. Sending a window to an agent comes in a later update.",
                           action: nil)
         send.isEnabled = false
-        // Disabled, it is faded blue on the pill (#33). UIKit paints a disabled plain button its own grey whatever the
-        // base colour says, which was nearly invisible in light, so the colour goes on the title and UIKit leaves it.
+        // Disabled, it is faded blue on the pill (#33). Left to update itself, UIKit paints a disabled plain button its
+        // own grey whatever the base colour says, which was nearly invisible in light.
         send.automaticallyUpdatesConfiguration = false
-        send.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.systemFont(ofSize: 12, weight: .medium)
-            attributes.foregroundColor = UIColor { traits in
-                UIColor(hex: ChromeColourPair.windowMenuDisabled(dark: traits.userInterfaceStyle == .dark).text)
-            }
-            return attributes
+        send.configuration?.baseForegroundColor = UIColor { traits in
+            UIColor(hex: ChromeColourPair.windowMenuDisabled(dark: traits.userInterfaceStyle == .dark).text)
         }
         let close = button("✕", hint: "Closes the window", action: #selector(closeTapped(_:)))
         close.accessibilityLabel = "Close"

@@ -38,7 +38,7 @@ final class StatusBarTextTests: XCTestCase {
 
     func testTheWidthNeverShrinksAndGrowsForAnythingLonger() {
         XCTAssertEqual(StatusBarText.reservedCharacters(36, showing: 12), 36)
-        XCTAssertEqual(StatusBarText.reservedCharacters(31, showing: 32), 36)
+        XCTAssertEqual(StatusBarText.reservedCharacters(34, showing: 35), 36)
         XCTAssertEqual(StatusBarText.reservedCharacters(36, showing: 40), 40)
     }
 

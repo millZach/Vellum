@@ -343,7 +343,13 @@ private struct CanvasActions: View {
             .buttonStyle(.plain)
             .accessibilityHint("Browse Dropbox for a PDF, pick a page, confirm its scale, then tap where it goes")
             action("Record", systemImage: "record.circle", hint: "Recording meetings comes in a later update.")
-            action("Send", systemImage: "paperplane.fill", hint: "Sending to an agent comes in a later update.", primary: true)
+            // Faded blue while disabled, as Place sheet is (#33).
+            Button {} label: {
+                Label("Send", systemImage: "paperplane.fill").font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(ChromePrimaryButtonStyle())
+            .disabled(true)
+            .accessibilityHint("Not available yet. Sending to an agent comes in a later update.")
         }
         .lineLimit(1)
         // Each action stays on one line (#35); the canvas name gives way first.
@@ -393,17 +399,16 @@ private struct CanvasActions: View {
     }
     #endif
 
-    private func action(_ title: String, systemImage: String, hint: String, primary: Bool = false) -> some View {
+    private func action(_ title: String, systemImage: String, hint: String) -> some View {
         Button {} label: {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 13, weight: primary ? .semibold : .regular))
+                .font(.system(size: 13))
                 .padding(.horizontal, 11)
                 .frame(height: 34)
-                // Disabled, Send is faded blue (#33); it keeps the top bar's shape, beside Record.
-                .foregroundStyle(primary ? Chrome.disabledText : Chrome.text)
-                .background(primary ? Chrome.disabledFill : Chrome.panel, in: RoundedRectangle(cornerRadius: 9))
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(primary ? Color.clear : Chrome.border))
-                .opacity(primary ? 1 : 0.45)
+                .foregroundStyle(Chrome.text)
+                .background(Chrome.panel, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Chrome.border))
+                .opacity(0.45)
         }
         .buttonStyle(.plain)
         .disabled(true)

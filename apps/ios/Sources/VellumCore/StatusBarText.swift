@@ -3,7 +3,7 @@
 public enum StatusBarText {
     /// The characters kept for the pen's position at first: any position under 100' either way in feet and inches,
     /// such as `X -99'-11 15/16"  Y -99'-11 15/16"`.
-    public static let usualPositionCharacters = 31
+    public static let usualPositionCharacters = 34
 
     /// The characters for a position of three-digit feet, `X -139'-11 15/16"  Y -139'-11 15/16"`.
     public static let longPositionCharacters = 36

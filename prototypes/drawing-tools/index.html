@@ -1,0 +1,526 @@
+<!doctype html>
+<!--
+  PROTOTYPE - throwaway. Never merge to main; kept at the tag prototype/drawing-tools.
+  Exact drawing, more snap points and more shapes on the drafting-rail canvas screen (ADR-0011), unfolded Duo 951 x 669.
+  Settled by Zach, not asked here: exact drawing, snap points and shapes are in; edit commands (trim, offset, fillet) are
+  out; everything stays ink, as a snapped stroke does today; built after #33 and #32, before Milestone 2.
+
+  Four questions. Picks go in the URL: ?q1=A&q2=B&q3=A&q4=A&theme=dark
+  q1 Exact lengths     A draw, then correct  B number pad docked  C command bar
+  q2 Straight angles   A lock button         B catches by itself  C hold a finger down
+  q3 Snap points       A all on, nearest     B chips to switch    C hold still to change
+  q4 Shapes on screen  A strip under the top bar  B flyout from the rail  C each on the rail
+
+  One geometry made up by hand, in feet. Mouse, finger or Pencil uses the tool; two fingers or the wheel pan and zoom.
+  Plain HTML, CSS and JS, no dependencies.
+-->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vellum: drawing tools (prototype)</title><link rel="icon" href="data:,">
+<style>
+:root{--ink:#1d1d1f;--mute:#6b6b70;--line:#d9d4c9;--paper:#f3efe6;--grid:#ece8dd;--grid2:#e0dbcf;--panel:#fbf9f5;--card:#fffdf9;--page:#ece8df;--accent:#2f5d8a;--accentBg:#e6edf5;--teal:#0b8a83;--shadow:0 1px 5px rgba(0,0,0,.12)}
+body.dark{--ink:#e8e6e1;--mute:#a9a9ae;--line:#3a3b40;--paper:#1c1d20;--grid:#26272b;--grid2:#303136;--panel:#242529;--card:#1f2023;--page:#141416;--accent:#9cc4ec;--accentBg:#2c3a4a;--teal:#4fd1c7;--shadow:0 1px 5px rgba(0,0,0,.5)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.4 -apple-system,system-ui,"SF Pro Text","Segoe UI",sans-serif}
+button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+main{max-width:985px;margin:0 auto;padding:14px 14px 40px}
+h1{font-size:20px;margin:0}.top{display:flex;gap:12px;justify-content:space-between;align-items:flex-start}
+.mute{color:var(--mute)}.small{font-size:13px}
+p{margin:4px 0 8px}
+.tog{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none}
+.tog button{border:0;background:transparent;min-height:34px;padding:0 11px;font-size:14px}
+.tog button[aria-pressed=true]{background:var(--accentBg);color:var(--accent);font-weight:600}
+.q{background:var(--card);border-radius:14px;padding:10px 12px;margin:10px 0;box-shadow:var(--shadow)}
+.q h2{font-size:15.5px;margin:0 0 6px}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.seg button{border:1.5px solid var(--line);background:transparent;border-radius:10px;padding:6px 9px;text-align:left;font-size:13.5px;min-height:40px}
+.seg button b{color:var(--mute);margin-right:5px}
+.seg button[aria-pressed=true]{border-color:var(--accent);background:var(--accentBg)}
+.seg button[aria-pressed=true] b{color:var(--accent)}
+.desc{margin:6px 0 0;font-size:13.5px}
+#fit{position:relative;margin:12px 0;border-radius:12px;overflow:hidden;box-shadow:var(--shadow);width:100%}
+#stage{position:absolute;left:0;top:0;width:951px;height:669px;transform-origin:0 0;background:var(--paper);user-select:none;-webkit-user-select:none;overflow:hidden}
+#stage canvas{position:absolute;inset:0;width:951px;height:669px;display:block;touch-action:none}
+.panel{position:absolute;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow)}
+#rail{left:9px;top:8px;width:54px;height:652px;border-radius:14px;display:flex;flex-direction:column;align-items:center;padding:6px 0}
+#tools{flex:1 1 auto;min-height:0;overflow-y:auto;scrollbar-width:none;display:flex;flex-direction:column;align-items:center;gap:2px;width:100%}
+#tools::-webkit-scrollbar{display:none}
+.rb{flex:none;width:42px;height:38px;border:0;background:transparent;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0}
+.rb svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.rb[disabled]{opacity:.38;cursor:not-allowed}
+.rb.on{background:var(--accentBg);color:var(--accent)}
+.rdiv{flex:none;width:32px;height:1px;background:var(--line);margin:4px 0}
+#chips{flex:none;display:flex;flex-direction:column;gap:9px;padding:8px 0 6px;align-items:center}
+.cc{width:26px;height:26px;border-radius:50%;border:2px solid transparent;padding:0;background-clip:padding-box;outline:1px solid var(--line);outline-offset:1px}
+.cc.on{outline:2px solid var(--ink)}
+#bar{left:72px;top:8px;height:40px;border-radius:12px;display:flex;align-items:center;gap:13px;padding:0 12px;font-size:14px}
+#bar b{font-size:14px}#bar .ic{font-size:16px;border:0;background:transparent;padding:2px 4px}
+#right{position:absolute;right:92px;top:8px;display:flex;gap:7px;font-size:13px}
+#right span{padding:9px 11px;border:1px solid var(--line);background:var(--panel);border-radius:9px}
+#sys{position:absolute;right:2px;top:0;bottom:0;width:70px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+#sys i{font-style:normal;writing-mode:vertical-rl;font-size:11px;color:var(--mute);opacity:.7}
+#strips{position:absolute;left:72px;top:53px;max-width:786px;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+.strip{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);display:flex;align-items:center;padding:2px;gap:1px;font-size:12.5px}
+.strip label{padding:0 7px;color:var(--mute);font-size:12px}
+.strip button{border:0;background:transparent;border-radius:8px;padding:0 8px;height:28px;font-size:12.5px;display:flex;gap:5px;align-items:center;white-space:nowrap}
+.strip button svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.strip button.on{background:var(--accentBg);color:var(--accent);font-weight:600}
+#fly{position:absolute;left:66px;display:none;flex-direction:column;padding:3px;gap:1px;border-radius:12px}
+#fly button{border:0;background:transparent;border-radius:8px;height:34px;padding:0 10px 0 7px;display:flex;align-items:center;gap:7px;font-size:13px;white-space:nowrap}
+#fly button svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#fly button.on{background:var(--accentBg);color:var(--accent);font-weight:600}
+#status{left:72px;bottom:9px;width:786px;height:34px;border-radius:12px;display:flex;align-items:center;gap:16px;padding:0 11px;font-size:12.5px;white-space:nowrap;overflow:hidden}
+#coords{font:11px ui-monospace,Menlo,Consolas,monospace;width:178px;flex:none;overflow:hidden}
+#sb{flex:none;display:flex;align-items:center;gap:5px}#sb i{display:block;height:6px;border:1.5px solid var(--ink);border-top:0}
+#prompt{flex:1 1 auto;color:var(--mute);text-align:center;overflow:hidden;text-overflow:ellipsis}
+#count{flex:none;color:var(--mute)}
+.pad{position:absolute;z-index:6;width:162px;padding:7px;border-radius:12px;display:none}
+.pad .fld{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:32px;margin-bottom:4px;padding:0 8px;border:1.5px solid var(--line);border-radius:8px;background:transparent;font-size:13px;gap:6px}
+.pad .fld span{color:var(--mute);font-size:12px}
+.pad .fld b{font:600 13px ui-monospace,Menlo,Consolas,monospace;white-space:nowrap}
+.pad .fld.on{border-color:var(--accent);background:var(--accentBg)}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-top:5px}
+.keys button{height:32px;border:1px solid var(--line);border-radius:7px;background:var(--card);font-size:15px;padding:0}
+.keys button.ok{grid-column:span 3;background:var(--accent);color:var(--card);border-color:var(--accent);font-size:14px;font-weight:600}
+#chip{position:absolute;z-index:5;display:none;transform:translate(-50%,-50%);padding:4px 9px;height:28px;border-radius:9px;border:1px solid var(--accent);background:var(--panel);color:var(--accent);font:600 12px ui-monospace,Menlo,Consolas,monospace;white-space:nowrap;box-shadow:var(--shadow)}
+#cmd{left:72px;width:786px;bottom:49px;height:70px;border-radius:12px;padding:5px 8px;display:none;flex-direction:column;gap:4px}
+#cmdline{font:12.5px ui-monospace,Menlo,Consolas,monospace;display:flex;gap:8px;height:24px;align-items:center;white-space:nowrap;overflow:hidden}
+#cmdline .h{color:var(--mute);flex:none}#cmdline .b{font-weight:600}#cmdline .c{display:inline-block;width:1.5px;height:14px;background:var(--accent);margin-left:-7px}
+#cmdkeys{display:flex;gap:3px}#cmdkeys button{flex:1 1 0;min-width:0;height:30px;border:1px solid var(--line);border-radius:7px;background:var(--card);font-size:14px;padding:0}
+#cmdkeys button.ok{flex:2 1 0;background:var(--accent);color:var(--card);border-color:var(--accent);font-size:13px;font-weight:600}
+#done{position:absolute;z-index:5;right:100px;bottom:50px;display:none;border:1px solid var(--accent);background:var(--accent);color:var(--card);border-radius:9px;height:34px;padding:0 14px;font-size:13.5px;font-weight:600}
+#hold{position:absolute;z-index:5;left:72px;bottom:50px;display:none;border:1.5px dashed var(--mute);background:var(--panel);border-radius:12px;height:56px;width:128px;font-size:12.5px;touch-action:none}
+#hold.on{border:1.5px solid var(--accent);background:var(--accentBg);color:var(--accent);font-weight:600}
+#state{background:var(--card);border-radius:12px;padding:9px 12px;font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace;box-shadow:var(--shadow);overflow-wrap:anywhere}
+ol{margin:6px 0 0;padding-left:20px;font-size:14px}li{margin:2px 0}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0 0}.row .btn{min-height:34px;border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:0 11px;font-size:13.5px}
+@media(max-width:620px){.seg{grid-template-columns:1fr}}
+</style></head><body><main>
+<div class="top"><div><h1>Vellum: drawing tools</h1>
+<p class="mute small">Prototype, nothing is saved. Lines, boxes, circles, arcs and polygons stay ink, as snapped strokes do today. Pick A, B or C in each question and use the working canvas below, laid out at the real 951 &times; 669. It opens on the ones I recommend. Mouse, finger or Pencil draws; two fingers or the wheel pan and zoom.</p></div>
+<div class="tog" id="theme"><button data-t="light">Light</button><button data-t="dark">Dark</button></div></div>
+<div id="qs"></div>
+<div id="fit"><div id="stage">
+  <canvas id="cv" width="951" height="669"></canvas>
+  <div class="panel" id="rail"><div id="tools"></div><div id="chips"></div></div>
+  <div class="panel" id="bar"><span>&#8249;</span><b>Field sketch (made up)</b><span>ft-in</span><button class="ic" id="undo" aria-label="Undo">&#8630;</button><button class="ic" id="redo" aria-label="Redo">&#8631;</button></div>
+  <div id="right"><span>+ Add sheet</span></div>
+  <div id="sys"><i>Duo's side bar</i></div>
+  <div id="strips"></div>
+  <div class="panel" id="fly"></div>
+  <button id="chip"></button>
+  <div class="panel pad" id="pad"></div>
+  <div class="panel" id="cmd"><div id="cmdline"></div><div id="cmdkeys"></div></div>
+  <button id="done">Done</button>
+  <button id="hold">Hold here to lock the angle</button>
+  <div class="panel" id="status"><span id="coords"></span><span id="sb"><i></i><span></span></span><span id="prompt"></span><span id="count"></span></div>
+</div></div>
+<div class="row"><button class="btn" id="clear">Clear what I drew</button><span class="small mute" id="note"></span></div>
+<h2 style="font-size:15.5px;margin:12px 0 2px">What just happened</h2><div id="state"></div>
+<h2 style="font-size:15.5px;margin:14px 0 2px">Try these</h2>
+<ol>
+<li>Pick <b>Line</b>. Draw one, then make it exactly 12'-6" at 30&deg;.</li>
+<li>Start a line on the middle of the skid's top edge and end it on the side of the tank, where it just touches (Tangent).</li>
+<li>Pick <b>Rectangle</b> and make an 8' &times; 4' box. Then snap a line to where the two pipes cross (Intersection).</li>
+<li>Try <b>Polyline</b> (tap each bend, then Done), <b>Arc</b> (start, end, then the bulge) and <b>Polygon</b> (6 sides by default).</li>
+<li>On <b>Draw it</b>, sketch by hand as you do today: it still straightens when you lift.</li>
+</ol>
+</main>
+<script>
+"use strict";
+const $=s=>document.querySelector(s), W=951, H=669, cv=$('#cv'), ctx=cv.getContext('2d');
+const Q={
+ q1:{t:'1. How do you enter an exact length or angle?',o:{
+  A:['Draw, then correct','Draw as you do today. A small tag shows the length and angle, and tapping it opens a number pad that fixes the shape. Nothing covers the canvas until you ask. Best for sketching. The tag goes away when you start the next thing, because ink keeps no shape to come back to.'],
+  B:['Number pad docked','A pad stays open at the right while the tool is in hand. Type first or draw first; a typed value holds while you aim. Quickest for many exact lines, but it takes about 17% of the canvas width.'],
+  C:['Command bar','The AutoCAD way: type @12\'6<30 on a line above the status bar, with its own key row so the iPhone keyboard stays away. @W,H makes a box, a bare number is a length or diameter. It takes 70 points of height while the tool is in hand.']}},
+ q2:{t:'2. How do lines stay straight?',o:{
+  A:['Lock button','Like ORTHO. A strip sets Free, 90°, 45° or 15°, and it stays until you change it. Always exact, but one more thing to remember is on, and you can\'t draw a free angle without turning it off.'],
+  B:['Catches by itself','A line within 4° of 0°, 45° or 90° pulls onto it and shows a guide. No button to think about. You can\'t hold a line at, say, 88° by hand; type that one.'],
+  C:['Hold a finger down','Rest a finger of your other hand on the screen while the Pencil draws, like holding Shift: 45° steps. Needs both hands. Here, hold the dashed box or the Shift key.']}},
+ q3:{t:'3. How do you get the snap point you want?',o:{
+  A:['All on, nearest wins','Every kind is always on and the nearest point within 20 points of the tip wins, shown in the loupe with its name. Nothing to set. When points crowd together, zoom in.'],
+  B:['Chips to switch','Like OSNAP settings. A strip switches each kind on and off. You stay in control when a drawing is crowded, but it\'s the most to manage and takes a strip of screen.'],
+  C:['Hold still to change','Nearest wins, but keep the tip still for about half a second and it moves on to the next point in reach, like AutoCAD\'s Tab key. No extra screen. Harder to discover.']}},
+ q4:{t:'4. Where do the new shapes go?',o:{
+  A:['Strip under the top bar','The line and shape tool shows a strip, in the same place as the Frame paper picker. Every shape is one tap, and the rail stays as you know it.'],
+  B:['Flyout from the rail','Tap line and shape again and a list opens beside the rail; the button then shows the shape you picked. Nothing stays on screen, but changing shape takes two taps. Tapping it again today picks the line weight, so that would have to move.'],
+  C:['Each on the rail','One button per shape, one tap from any tool. They don\'t fit: the 16 tools need 660 points and the rail has 493 above the colours, so the tools scroll and Measure, Dimension, Frame and Window start out of sight. Shown here as it would be.']}}
+};
+const params=new URLSearchParams(location.search);
+const pick={q1:'A',q2:'B',q3:'A',q4:'A'};
+for(const k in pick){const v=params.get(k);if(v&&Q[k].o[v])pick[k]=v}
+let theme=params.get('theme')==='dark'?'dark':'light';
+const seed=()=>[
+ build('rect',{p1:{x:-24,y:-6},w:14,h:8,sx:1,sy:1},'#1d1d1f'),
+ build('circle',{c:{x:8,y:0},d:10},'#1d1d1f'),
+ build('line',{p1:{x:-14,y:9},len:32,ang:0},'#1d1d1f'),
+ build('line',{p1:{x:-4,y:16},len:12,ang:270},'#1d1d1f'),
+];
+const INKS=[['Red','#cf3027','#ff6b5e'],['Green','#1f9d55','#4cd07d'],['Blue','#2563eb','#6ea0ff'],['Black','#1d1d1f','#e8e6e1']];
+let ink='#1d1d1f';
+const SHAPES={auto:['Draw it','M3 17c3-9 5 3 8-3s4-7 10-9'],line:['Line','M4 19 L20 5 M4 19h.01 M20 5h.01'],polyline:['Polyline','M3 19 L9 8 L15 15 L21 5'],rect:['Rectangle','M4 6h16v12H4z'],circle:['Circle','M12 4a8 8 0 1 0 .01 0'],arc:['Arc','M4 18 A10 10 0 0 1 20 18'],polygon:['Polygon','M12 3 L20 8 L20 16 L12 21 L4 16 L4 8Z']};
+const RAIL=[['Pen','M5 20 L9 6 L12 3 L15 6 L19 20 M9 6h6'],['Highlighter','M4 20h16 M7 16 L16 5 L20 9 L10 19 H6z'],['Eraser','M8 20 L3 14 L13 4 L21 12 L13 20z'],'LINE','-',['Lasso','M12 4c5 0 9 2.5 9 6s-4 6-9 6-9-2.5-9-6 4-6 9-6z M8 16c-1 2 0 4 2 4'],['Text box','M4 5h16v14H4z M9 16l3-8 3 8 M10 13h4'],'-',['Measure','M2 9h20v6H2z M6 9v3 M10 9v3 M14 9v3 M18 9v3'],['Dimension','M3 12h18 M7 8l-4 4 4 4 M17 8l4 4-4 4'],['Frame','M3 6h18v12H3z M6 9h12v6H6z'],['Window','M4 5h16v14H4z']];
+let view={ox:475,oy:335,ppf:14},shapes=[],redo=[],sub='line',draft=null,vals={},active=null,chipFor=null,padOpen=false,cmdBuf='',cmdHist='',lockStep=45,holdDown=false,fingers=new Map(),gesture=null,pinch=null,tip=null,snap=null,cand=[],candIdx=0,holdTimer=null,message='',last='',fly=false;
+const kinds={End:1,Corner:1,Centre:1,Mid:1,Intersection:1,Perpendicular:1,Tangent:1};
+const RANK=['Intersection','Centre','Corner','End','Mid','Perpendicular','Tangent'];
+
+// ---------- lengths ----------
+function ftin(f){const neg=f<0;let s=Math.round(Math.abs(f)*12*16),ft=Math.floor(s/192);s-=ft*192;let i=Math.floor(s/16),n=s-i*16,fr='';
+ if(n){let d=16;while(n%2===0){n/=2;d/=2}fr=' '+n+'/'+d}
+ return (neg?'-':'')+ft+"'-"+i+fr+'"'}
+function deg(a){a=((a%360)+360)%360;if(a>359.95)a=0;return (Math.round(a*10)/10)+'°'}
+function parseLen(s){if(s==null)return null;s=String(s).trim();if(!s)return null;let neg=false;if(s[0]==='-'){neg=true;s=s.slice(1)}
+ const m=s.match(/^(?:(\d*\.?\d+)')?\s*-?\s*(\d*\.?\d+)?(?:[ -]?(\d+)\/(\d+))?\s*(")?$/);if(!m)return null;
+ const[,ft,num,a,b,inch]=m;if(ft==null&&num==null&&a==null)return null;
+ const frac=a?(+a/+b):0;let v;
+ if(ft!=null)v=+ft+((+(num||0))+frac)/12;else if(inch)v=((+(num||0))+frac)/12;else v=(+(num||0))+frac;
+ return neg?-v:v}
+
+// ---------- geometry ----------
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+const angDeg=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI;
+const polar=(p,l,a)=>({x:p.x+l*Math.cos(a*Math.PI/180),y:p.y+l*Math.sin(a*Math.PI/180)});
+const S=p=>({x:view.ox+p.x*view.ppf,y:view.oy-p.y*view.ppf});
+const M=s=>({x:(s.x-view.ox)/view.ppf,y:(view.oy-s.y)/view.ppf});
+function build(kind,p,color){let pts=[],closed=false,extra={};
+ if(kind==='line'){pts=[p.p1,polar(p.p1,p.len,p.ang)]}
+ else if(kind==='rect'){const a=p.p1,c={x:a.x+p.w*p.sx,y:a.y+p.h*p.sy};pts=[a,{x:c.x,y:a.y},c,{x:a.x,y:c.y},a];closed=true}
+ else if(kind==='circle'){for(let i=0;i<=72;i++)pts.push(polar(p.c,p.d/2,i*5));closed=true;extra={c:p.c,r:p.d/2}}
+ else if(kind==='polygon'){const R=p.side/(2*Math.sin(Math.PI/p.n));for(let i=0;i<=p.n;i++)pts.push(polar(p.c,R,p.rot+i*360/p.n));closed=true;extra={center:p.c}}
+ else if(kind==='polyline'){pts=p.pts.slice();closed=!!p.closed}
+ else if(kind==='arc'){const g=arcFit(p);if(g){pts=g.pts;extra={c:g.c,r:g.r,arc:true}}else pts=[p.p1,p.p2]}
+ return {kind,p,pts,closed,color:color||ink,...extra}}
+function arcFit(p){const{p1:a,p2:b}=p;let c,r;const mid={x:(a.x+b.x)/2,y:(a.y+b.y)/2},ch=dist(a,b);if(ch<1e-6)return null;
+ const n={x:-(b.y-a.y)/ch,y:(b.x-a.x)/ch};
+ let side=p.side;
+ if(p.r!=null){r=Math.max(p.r,ch/2);const h=Math.sqrt(Math.max(0,r*r-ch*ch/4));c={x:mid.x-n.x*h*side,y:mid.y-n.y*h*side}}
+ else{const q=p.b;const d=(q.x-mid.x)*n.x+(q.y-mid.y)*n.y;if(Math.abs(d)<1e-3)return null;side=d>0?1:-1;
+  const sag=Math.abs(d);r=(ch*ch/4+sag*sag)/(2*sag);const off=r-sag;c={x:mid.x-n.x*off*side,y:mid.y-n.y*off*side}}
+ let s=Math.atan2(a.y-c.y,a.x-c.x),e=Math.atan2(b.y-c.y,b.x-c.x);
+ const crossS=(a.x-c.x)*(b.y-c.y)-(a.y-c.y)*(b.x-c.x);
+ // pick the sweep that passes on `side` of the chord
+ let cw=side>0;let sw=e-s;if(cw){while(sw>0)sw-=2*Math.PI}else{while(sw<0)sw+=2*Math.PI}
+ void crossS;
+ const pts=[];for(let i=0;i<=48;i++){const t=s+sw*i/48;pts.push({x:c.x+r*Math.cos(t),y:c.y+r*Math.sin(t)})}
+ const m=pts[24];const chk=(m.x-mid.x)*n.x+(m.y-mid.y)*n.y;
+ if((chk>0)!==(side>0)){sw=sw>0?sw-2*Math.PI:sw+2*Math.PI;pts.length=0;for(let i=0;i<=48;i++){const t=s+sw*i/48;pts.push({x:c.x+r*Math.cos(t),y:c.y+r*Math.sin(t)})}}
+ return{c,r,pts,side}}
+function straightSegs(s){if(s.kind==='circle'||s.kind==='arc')return[];const o=[];for(let i=0;i+1<s.pts.length;i++)o.push([s.pts[i],s.pts[i+1]]);return o}
+function segX(a,b,c,d){const r={x:b.x-a.x,y:b.y-a.y},q={x:d.x-c.x,y:d.y-c.y},den=r.x*q.y-r.y*q.x;if(Math.abs(den)<1e-9)return null;
+ const t=((c.x-a.x)*q.y-(c.y-a.y)*q.x)/den,u=((c.x-a.x)*r.y-(c.y-a.y)*r.x)/den;if(t<-1e-6||t>1+1e-6||u<-1e-6||u>1+1e-6)return null;return{x:a.x+t*r.x,y:a.y+t*r.y}}
+function segCirc(a,b,c,R){const dx=b.x-a.x,dy=b.y-a.y,A=dx*dx+dy*dy,B=2*(dx*(a.x-c.x)+dy*(a.y-c.y)),C=(a.x-c.x)**2+(a.y-c.y)**2-R*R,D=B*B-4*A*C;if(D<0||A===0)return[];
+ const q=Math.sqrt(D),o=[];for(const t of[(-B-q)/(2*A),(-B+q)/(2*A)])if(t>=0&&t<=1)o.push({x:a.x+t*dx,y:a.y+t*dy});return o}
+function candidates(s,anchor){const out=[],R=20,add=(k,p)=>{if(!kinds[k])return;const q=S(p),d=Math.hypot(q.x-s.x,q.y-s.y);if(d<=R)out.push({kind:k,p,d})};
+ const all=shapes;
+ for(const sh of all){const segs=straightSegs(sh);
+  if(sh.kind==='circle'||sh.kind==='arc')add('Centre',sh.c);
+  if(sh.center)add('Centre',sh.center);
+  if(sh.kind!=='circle'){if(!sh.closed){add('End',sh.pts[0]);add('End',sh.pts[sh.pts.length-1])}
+   if(sh.kind!=='arc')for(let i=sh.closed?0:1;i<sh.pts.length-(sh.closed?1:1);i++)add('Corner',sh.pts[i])}
+  for(const[a,b]of segs)add('Mid',{x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+  if(anchor){for(const[a,b]of segs){const dx=b.x-a.x,dy=b.y-a.y,L=dx*dx+dy*dy;if(!L)continue;const t=((anchor.x-a.x)*dx+(anchor.y-a.y)*dy)/L;if(t>0.001&&t<0.999){const f={x:a.x+t*dx,y:a.y+t*dy};if(dist(f,anchor)>1e-3)add('Perpendicular',f)}}
+   if(sh.c&&!sh.arc){const d=dist(anchor,sh.c);if(d>sh.r+1e-6){const base=angDeg(sh.c,anchor),al=Math.acos(sh.r/d)*180/Math.PI;add('Tangent',polar(sh.c,sh.r,base+al));add('Tangent',polar(sh.c,sh.r,base-al));add('Perpendicular',polar(sh.c,sh.r,base))}}}
+ }
+ for(let i=0;i<all.length;i++)for(let j=i+1;j<all.length;j++){const A=all[i],B=all[j],sa=straightSegs(A),sb=straightSegs(B);
+  for(const u of sa)for(const v of sb){const x=segX(u[0],u[1],v[0],v[1]);if(x)add('Intersection',x)}
+  if(A.c&&!A.arc)for(const v of sb)for(const x of segCirc(v[0],v[1],A.c,A.r))add('Intersection',x);
+  if(B.c&&!B.arc)for(const u of sa)for(const x of segCirc(u[0],u[1],B.c,B.r))add('Intersection',x)}
+ const seen=[],res=[];out.sort((a,b)=>(a.d-b.d)||(RANK.indexOf(a.kind)-RANK.indexOf(b.kind)));
+ for(const c of out){if(seen.some(q=>dist(q,c.p)<1e-3))continue;seen.push(c.p);res.push(c)}
+ return res}
+
+// ---------- the tip resolved to a point ----------
+const USES_ANGLE=k=>k==='line'||k==='polyline'||k==='polygon';
+function currentAnchor(){if(!draft||!draft.placed.length)return null;return draft.placed[draft.placed.length-1]}
+function stepFor(){if(pick.q2==='A')return lockStep;if(pick.q2==='C'&&(holdDown||fingersHolding()))return 45;return 0}
+function fingersHolding(){let pen=false,touch=false;for(const f of fingers.values()){if(f.type==='pen')pen=true;if(f.type==='touch')touch=true}return pen&&touch}
+function resolve(sc,cycle){const anchor=currentAnchor();cand=candidates(sc,anchor);if(!cycle)candIdx=0;
+ snap=cand.length?cand[Math.min(candIdx,cand.length-1)%cand.length]:null;
+ let p=snap?snap.p:M(sc),guide=null;
+ const kind=draft?draft.kind:sub;
+ if(anchor&&USES_ANGLE(kind)&&vals.ang==null){
+  const a=angDeg(anchor,p),L=dist(anchor,p),step=stepFor();
+  if(step){const n=Math.round(a/step)*step;p=polar(anchor,L*Math.cos((a-n)*Math.PI/180),n);guide=n;if(snap)snap={...snap,projected:true}}
+  else if(pick.q2==='B'&&!snap){const n=Math.round(a/45)*45;if(Math.abs(a-n)<=4){p=polar(anchor,L*Math.cos((a-n)*Math.PI/180),n);guide=n}}
+ }
+ return{p,guide}}
+
+// ---------- drawing a shape ----------
+function paramsFor(kind,pts){const a=pts[0],b=pts[1]||a;
+ switch(kind){
+  case'line':{const L=vals.len!=null?vals.len:dist(a,b),an=vals.ang!=null?vals.ang:angDeg(a,b);return{p1:a,len:L,ang:an}}
+  case'rect':{const dx=b.x-a.x,dy=b.y-a.y;return{p1:a,w:vals.w!=null?vals.w:Math.abs(dx),h:vals.h!=null?vals.h:Math.abs(dy),sx:dx<0?-1:1,sy:dy<0?-1:1}}
+  case'circle':return{c:a,d:vals.d!=null?vals.d:2*dist(a,b)};
+  case'polygon':{const n=vals.n||6,rr=dist(a,b);return{c:a,n,side:vals.side!=null?vals.side:2*rr*Math.sin(Math.PI/n),rot:angDeg(a,b)}}
+  case'arc':{if(pts.length<3)return{p1:a,p2:b,b:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}};const q={p1:pts[0],p2:pts[1],b:pts[2]};if(vals.r!=null){const f=arcFit(q);q.r=vals.r;q.side=f?f.side:1}return q}
+  case'polyline':return{pts};
+ }}
+function endOfTyped(from,cur){const L=vals.len!=null?vals.len:dist(from,cur),an=vals.ang!=null?vals.ang:(dist(from,cur)>1e-6?angDeg(from,cur):0);return polar(from,L,an)}
+function preview(){if(!draft)return null;const cur=draft.cur;
+ if(draft.kind==='auto')return null;
+ if(!draft.placed.length)return null;
+ let pts=draft.placed.slice();
+ if(draft.kind==='polyline'){if(cur)pts.push(endOfTyped(pts[pts.length-1],cur));return build('polyline',{pts},ink)}
+ if(cur)pts.push(cur);else if(pts.length<2&&!anyVal())return null;else if(pts.length<2)pts.push(pts[0]);
+ return build(draft.kind,paramsFor(draft.kind,pts),ink)}
+const anyVal=()=>Object.values(vals).some(v=>v!=null);
+function need(kind){return kind==='arc'?3:2}
+function commit(kind,p){const sh=build(kind,p,ink);shapes.push(sh);redo=[];draft=null;last=describe(sh);vals={};fieldText={};active=null;chipFor=pick.q1==='A'?sh:null;padOpen=false;message='';return sh}
+function placePoint(p){
+ if(!draft)draft={kind:sub==='auto'?'line':sub,placed:[],cur:null};
+ const k=draft.kind;
+ if(k==='polyline'){
+  if(draft.placed.length){const end=endOfTyped(draft.placed[draft.placed.length-1],p);
+   if(draft.placed.length>2&&dist(S(end),S(draft.placed[0]))<12){draft.placed.push(draft.placed[0]);finishPoly(true);return}
+   if(dist(S(end),S(draft.placed[draft.placed.length-1]))<6){finishPoly(false);return}
+   draft.placed.push(end)}else draft.placed.push(p);
+  vals={};fieldText={};draft.cur=null;chipFor=pick.q1==='A'&&draft.placed.length>1?{poly:true}:null;return}
+ draft.placed.push(p);
+ if(draft.placed.length>=need(k))commit(k,paramsFor(k,draft.placed));}
+function finishPoly(closed){if(!draft||draft.kind!=='polyline')return;if(draft.placed.length<2){draft=null;return}commit('polyline',{pts:draft.placed.slice(),closed})}
+function describe(s){const p=s.p,pointsNote=s.pts.length+' points';
+ switch(s.kind){
+  case'line':return `line, ${ftin(p.len)} at ${deg(p.ang)}, ink with ${pointsNote}`;
+  case'rect':return `rectangle, ${ftin(p.w)} × ${ftin(p.h)}, ink with ${pointsNote}`;
+  case'circle':return `circle, diameter ${ftin(p.d)}, ink with ${pointsNote}`;
+  case'polygon':return `polygon, ${p.n} sides of ${ftin(p.side)}, ink with ${pointsNote}`;
+  case'arc':return `arc, radius ${ftin(s.r||0)}, ink with ${pointsNote}`;
+  case'polyline':return `polyline, ${s.pts.length-1} segments, total ${ftin(s.pts.slice(1).reduce((t,q,i)=>t+dist(q,s.pts[i]),0))}, ink with ${pointsNote}`;
+ }}
+function recognise(free){const a=free[0],b=free[free.length-1];let L=0;for(let i=1;i<free.length;i++)L+=dist(free[i],free[i-1]);
+ if(L<0.01)return;
+ if(dist(a,b)>.2*L||free.length<8){const e=resolve(S(b),false).p;commit('line',{p1:a,len:dist(a,e),ang:angDeg(a,e)});return}
+ const xs=free.map(q=>q.x),ys=free.map(q=>q.y),x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys),c={x:(x0+x1)/2,y:(y0+y1)/2};
+ const rs=free.map(q=>dist(q,c)),mean=rs.reduce((t,v)=>t+v,0)/rs.length,sd=Math.sqrt(rs.reduce((t,v)=>t+(v-mean)**2,0)/rs.length);
+ if(sd/mean<.14)commit('circle',{c,d:2*mean});else commit('rect',{p1:{x:x0,y:y0},w:x1-x0,h:y1-y0,sx:1,sy:1})}
+
+// ---------- typed values ----------
+let fieldText={};
+function fieldsFor(kind){switch(kind){
+ case'rect':return[['w','Width'],['h','Height']];
+ case'circle':return[['d','Diameter']];
+ case'polygon':return[['n','Sides'],['side','Side']];
+ case'arc':return[['r','Radius']];
+ default:return[['len','Length'],['ang','Angle']]}}
+const kindNow=()=>draft?draft.kind:(sub==='auto'?'line':sub);
+function setField(key,t){fieldText[key]=t;
+ if(key==='ang'){const v=parseFloat(t);vals.ang=isNaN(v)?null:v}
+ else if(key==='n'){const v=parseInt(t,10);vals.n=(v>=3&&v<=24)?v:null}
+ else{const v=parseLen(t);vals[key]=v!=null&&v>0?v:null}}
+function padKey(k){
+ if(pick.q1==='C'){if(k==='⌫')cmdBuf=cmdBuf.slice(0,-1);else if(k==='↵')runCmd();else cmdBuf+=k;render();return}
+ const fs=chipFor&&padOpen?editFields():fieldsFor(kindNow());
+ if(!active||!fs.some(f=>f[0]===active))active=fs[0][0];
+ if(k==='↵'){enter();return}
+ const t=fieldText[active]||'';
+ if(k==='⌫')setField(active,t.slice(0,-1));else setField(active,t+k);
+ render()}
+function editFields(){const s=chipFor;if(s&&s.poly)return[['len','Length'],['ang','Angle']];return fieldsFor(s.kind)}
+function enter(){
+ if(chipFor&&padOpen){applyEdit();return}
+ if(!draft||!draft.placed.length){message='Tap the first point; the values wait for it';render();return}
+ const k=draft.kind;
+ if(k==='polyline'){const from=draft.placed[draft.placed.length-1];draft.placed.push(endOfTyped(from,draft.cur||polar(from,1,0)));vals={};fieldText={};active=null;draft.cur=null;render();return}
+ if(k==='arc'){if(draft.placed.length<2){message='Tap the arc\'s end point';render();return}
+  const a=draft.placed[0],b=draft.placed[1];const q=draft.placed.slice();if(q.length<3)q.push(draft.cur||{x:(a.x+b.x)/2-(b.y-a.y)*.2,y:(a.y+b.y)/2+(b.x-a.x)*.2});
+  commit('arc',paramsFor('arc',q));render();return}
+ const cur=draft.cur||polar(draft.placed[0],1,0);
+ commit(k,paramsFor(k,[draft.placed[0],cur]));render()}
+function applyEdit(){const s=chipFor;
+ if(s.poly){const pl=draft.placed,from=pl[pl.length-2],to=pl[pl.length-1];const L=vals.len!=null?vals.len:dist(from,to),an=vals.ang!=null?vals.ang:angDeg(from,to);pl[pl.length-1]=polar(from,L,an)}
+ else{const p={...s.p};
+  if(s.kind==='line'){if(vals.len!=null)p.len=vals.len;if(vals.ang!=null)p.ang=vals.ang}
+  if(s.kind==='rect'){if(vals.w!=null)p.w=vals.w;if(vals.h!=null)p.h=vals.h}
+  if(s.kind==='circle'&&vals.d!=null)p.d=vals.d;
+  if(s.kind==='polygon'){if(vals.n!=null)p.n=vals.n;if(vals.side!=null)p.side=vals.side}
+  if(s.kind==='arc'&&vals.r!=null){const f=arcFit(p);p.r=vals.r;p.side=f?f.side:1}
+  const n=build(s.kind,p,s.color),i=shapes.indexOf(s);if(i>=0)shapes[i]=n;chipFor=n;last=describe(n)}
+ vals={};fieldText={};active=null;padOpen=false;render()}
+function runCmd(){const raw=cmdBuf.trim();cmdBuf='';if(!raw){render();return}
+ const k=kindNow(),hist=()=>{cmdHist=raw};
+ const bad=()=>{message="Can't read "+raw;render()};
+ if(!draft||!draft.placed.length){const m=raw.split(',');if(m.length!==2)return bad();const x=parseLen(m[0]),y=parseLen(m[1]);if(x==null||y==null)return bad();draft={kind:k,placed:[{x,y}],cur:null};hist();message='';render();return}
+ const from=draft.placed[draft.placed.length-1];let m;
+ if(k==='line'||k==='polyline'){
+  if((m=raw.match(/^@(.+)<(.+)$/))){const L=parseLen(m[1]),a=parseFloat(m[2]);if(L==null||isNaN(a))return bad();vals.len=L;vals.ang=a}
+  else if((m=raw.match(/^@(.+),(.+)$/))){const dx=parseLen(m[1]),dy=parseLen(m[2]);if(dx==null||dy==null)return bad();vals.len=Math.hypot(dx,dy);vals.ang=Math.atan2(dy,dx)*180/Math.PI}
+  else{const L=parseLen(raw);if(L==null)return bad();vals.len=L}
+  hist();enter();return}
+ if(k==='rect'){m=raw.replace(/^@/,'').split(',');if(m.length!==2)return bad();const w=parseLen(m[0]),h=parseLen(m[1]);if(w==null||h==null)return bad();commit('rect',{p1:from,w:Math.abs(w),h:Math.abs(h),sx:w<0?-1:1,sy:h<0?-1:1});hist();render();return}
+ const L=parseLen(raw);if(L==null)return bad();hist();
+ if(k==='circle')vals.d=L;if(k==='polygon')vals.side=L;if(k==='arc')vals.r=L;enter()}
+
+// ---------- pointer input ----------
+function toStage(e){const r=cv.getBoundingClientRect(),s=r.width/W;return{x:(e.clientX-r.left)/s,y:(e.clientY-r.top)/s}}
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);const s=toStage(e);fingers.set(e.pointerId,{...s,type:e.pointerType});
+ const touches=[...fingers.values()].filter(f=>f.type==='touch');
+ if(touches.length===2&&!gesture){const[a,b]=touches;pinch={d:Math.hypot(a.x-b.x,a.y-b.y),mx:(a.x+b.x)/2,my:(a.y+b.y)/2};return}
+ if(gesture&&e.pointerType==='pen'&&gesture.type==='touch'&&!gesture.moved){clearTimeout(holdTimer);gesture=null}
+ if(gesture){render();return}
+ if(padOpen){padOpen=false;vals={};fieldText={};active=null}
+ if(!(draft&&draft.kind==='polyline'))chipFor=null;
+ fly=false;message='';
+ gesture={id:e.pointerId,down:s,moved:false,free:[],type:e.pointerType};
+ tip=s;const r=resolve(s);gesture.pt=r.p;
+ if(draft)draft.cur=r.p;
+ armHold();render()});
+cv.addEventListener('pointermove',e=>{const s=toStage(e);if(fingers.has(e.pointerId))fingers.set(e.pointerId,{...s,type:e.pointerType});
+ if(pinch){const t=[...fingers.values()].filter(f=>f.type==='touch');if(t.length>=2){const[a,b]=t,d=Math.hypot(a.x-b.x,a.y-b.y),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;zoomAt(pinch.mx,pinch.my,d/pinch.d);view.ox+=mx-pinch.mx;view.oy+=my-pinch.my;pinch={d,mx,my};render()}return}
+ tip=s;
+ if(gesture&&gesture.id===e.pointerId){
+  const far=Math.hypot(s.x-gesture.down.x,s.y-gesture.down.y)>6;
+  if(far&&!gesture.moved){gesture.moved=true;
+   if(sub==='auto'&&!draft){gesture.auto=true;draft={kind:'auto',placed:[],cur:null}}
+   else if(!draft||!draft.placed.length){if(!draft)draft={kind:sub==='auto'?'line':sub,placed:[],cur:null};draft.placed.push(gesture.pt)}}
+  if(gesture.auto){gesture.free.push(M(s));resolve(s);render();return}
+  if(gesture.lastMove&&Math.hypot(s.x-gesture.lastMove.x,s.y-gesture.lastMove.y)>4){armHold();candIdx=0}
+  gesture.lastMove=gesture.lastMove&&Math.hypot(s.x-gesture.lastMove.x,s.y-gesture.lastMove.y)<=4?gesture.lastMove:s;
+  const r=resolve(s,candIdx>0);gesture.pt=r.p;gesture.guide=r.guide;if(draft)draft.cur=r.p;render();return}
+ if(!gesture&&e.pointerType==='mouse'){const r=resolve(s);if(draft)draft.cur=r.p;hoverGuide=r.guide;render()}});
+let hoverGuide=null;
+function armHold(){clearTimeout(holdTimer);if(pick.q3!=='C')return;holdTimer=setTimeout(function again(){if(!gesture||gesture.auto)return;if(cand.length>1){candIdx=(candIdx+1)%cand.length;const r=resolve(tip,true);gesture.pt=r.p;gesture.guide=r.guide;if(draft)draft.cur=r.p;render()}holdTimer=setTimeout(again,700)},550)}
+function endPointer(e){const mine=gesture&&gesture.id===e.pointerId&&!pinch;if(!mine)fingers.delete(e.pointerId);
+ if(pinch){if([...fingers.values()].filter(f=>f.type==='touch').length<2)pinch=null;return}
+ if(!mine){render();return}
+ clearTimeout(holdTimer);const g=gesture;gesture=null;
+ if(e.type==='pointercancel'){fingers.delete(e.pointerId);render();return}
+ if(g.auto){fingers.delete(e.pointerId);const free=g.free;draft=null;recognise(free);snap=null;cand=[];render();return}
+ const r=resolve(toStage(e),candIdx>0);fingers.delete(e.pointerId);placePoint(r.p);tip=toStage(e);candIdx=0;
+ if(draft)draft.cur=null;snap=null;cand=[];render()}
+cv.addEventListener('pointerup',endPointer);cv.addEventListener('pointercancel',endPointer);
+function zoomAt(x,y,f){const n=Math.min(180,Math.max(1.5,view.ppf*f));f=n/view.ppf;view.ox=x-(x-view.ox)*f;view.oy=y-(y-view.oy)*f;view.ppf=n}
+cv.addEventListener('wheel',e=>{e.preventDefault();const s=toStage(e);if(e.ctrlKey||Math.abs(e.deltaY)>=40&&!e.shiftKey&&Number.isInteger(e.deltaY))zoomAt(s.x,s.y,Math.exp(-e.deltaY*.002));else{view.ox-=e.deltaX;view.oy-=e.deltaY}render()},{passive:false});
+addEventListener('keydown',e=>{if(e.key==='Shift'&&pick.q2==='C'){holdDown=true;relock();return}
+ if(e.key==='Escape'){draft=null;vals={};fieldText={};padOpen=false;chipFor=null;render();return}
+ if(e.metaKey||e.ctrlKey||e.altKey)return;
+ const typing=pick.q1==='C'||pick.q1==='B'||(pick.q1==='A'&&padOpen);if(!typing)return;
+ if(/^[0-9.'"\/ @<,\-]$/.test(e.key)){e.preventDefault();padKey(e.key)}
+ else if(e.key==='Backspace'){e.preventDefault();padKey('⌫')}else if(e.key==='Enter'){e.preventDefault();padKey('↵')}
+ else if(e.key==='Tab'&&pick.q1!=='C'){e.preventDefault();const fs=chipFor&&padOpen?editFields():fieldsFor(kindNow());const i=fs.findIndex(f=>f[0]===active);active=fs[(i+1)%fs.length][0];render()}});
+addEventListener('keyup',e=>{if(e.key==='Shift'&&pick.q2==='C'){holdDown=false;relock()}});
+function relock(){if(tip&&draft&&draft.placed.length){const r=resolve(tip);draft.cur=r.p;if(gesture)gesture.pt=r.p}render()}
+
+// ---------- chrome ----------
+const icon=d=>`<svg viewBox="0 0 24 24"><path d="${d}"/></svg>`;
+function pickSub(k){sub=k;draft=null;vals={};fieldText={};active=null;chipFor=null;padOpen=false;fly=false;cmdBuf='';message='';last=last;render()}
+function drawRail(){const t=$('#tools');t.innerHTML='';
+ for(const r of RAIL){if(r==='-'){const d=document.createElement('div');d.className='rdiv';t.append(d);continue}
+  if(r==='LINE'){
+   if(pick.q4==='C'){for(const k in SHAPES){const b=document.createElement('button');b.className='rb'+(sub===k?' on':'');b.innerHTML=icon(SHAPES[k][1]);b.title=SHAPES[k][0];b.setAttribute('aria-label',SHAPES[k][0]);b.onclick=()=>pickSub(k);t.append(b)}}
+   else{const b=document.createElement('button');b.className='rb on';b.id='lineBtn';b.innerHTML=icon(SHAPES[pick.q4==='B'?sub:'line'][1]);b.setAttribute('aria-label','Line and shape');b.onclick=()=>{if(pick.q4==='B'){fly=!fly;render()}};t.append(b)}
+   continue}
+  const b=document.createElement('button');b.className='rb';b.disabled=true;b.title=r[0]+' works in the app; not in this prototype';b.innerHTML=icon(r[1]);b.setAttribute('aria-label',r[0]);t.append(b)}
+ const c=$('#chips');c.innerHTML='';for(const[n,l,d]of INKS){const col=theme==='dark'?d:l,b=document.createElement('button');b.className='cc'+(inkKey===n?' on':'');b.style.background=col;b.setAttribute('aria-label',n+' ink');b.onclick=()=>{inkKey=n;ink=col;render()};c.append(b)}}
+let inkKey='Black';
+function drawStrips(){const w=$('#strips');w.innerHTML='';const row=[];
+ if(pick.q4==='A'){const s=document.createElement('div');s.className='strip';for(const k in SHAPES){const b=document.createElement('button');b.className=sub===k?'on':'';b.innerHTML=icon(SHAPES[k][1])+SHAPES[k][0];b.onclick=()=>pickSub(k);s.append(b)}row.push(s)}
+ if(pick.q2==='A'){const s=document.createElement('div');s.className='strip';s.innerHTML='<label>Angle lock</label>';for(const[l,v]of[['Free',0],['90°',90],['45°',45],['15°',15]]){const b=document.createElement('button');b.textContent=l;b.className=lockStep===v?'on':'';b.onclick=()=>{lockStep=v;render()};s.append(b)}row.push(s)}
+ if(pick.q3==='B'){const s=document.createElement('div');s.className='strip';s.innerHTML='<label>Snap to</label>';for(const k of Object.keys(kinds)){const b=document.createElement('button');b.textContent=k==='Perpendicular'?'Perp.':k==='Intersection'?'Cross':k;b.className=kinds[k]?'on':'';b.setAttribute('aria-label',k);b.onclick=()=>{kinds[k]=kinds[k]?0:1;render()};s.append(b)}row.push(s)}
+ row.forEach(r=>w.append(r));
+ const f=$('#fly');f.style.display=fly&&pick.q4==='B'?'flex':'none';
+ if(fly&&pick.q4==='B'){f.innerHTML='';for(const k in SHAPES){const b=document.createElement('button');b.className=sub===k?'on':'';b.innerHTML=icon(SHAPES[k][1])+SHAPES[k][0];b.onclick=()=>pickSub(k);f.append(b)}const l=$('#lineBtn').getBoundingClientRect(),st=$('#stage').getBoundingClientRect(),sc=st.width/W;f.style.top=Math.max(8,(l.top-st.top)/sc-4)+'px'}}
+function padHTML(fs,title){let h=title?`<div class="small mute" style="margin:0 0 5px">${title}</div>`:'';
+ if(!active||!fs.some(f=>f[0]===active))active=fs[0][0];
+ for(const[k,l]of fs){const v=fieldText[k]||'';h+=`<button class="fld${active===k?' on':''}" data-f="${k}"><span>${l}</span><b>${v||placeholderFor(k)}</b></button>`}
+ h+='<div class="keys">'+['7','8','9','4','5','6','1','2','3',"'",'0','"','/','.','⌫'].map(k=>`<button data-k="${k==='"'?'&quot;':k}">${k}</button>`).join('')+'<button class="ok" data-k="↵">Enter</button></div>';return h}
+function placeholderFor(k){if(!(chipFor&&padOpen)&&draft&&draft.cur&&draft.placed.length&&(k==='len'||k==='ang')){const a=draft.placed[draft.placed.length-1];return k==='len'?ftin(dist(a,draft.cur)):deg(angDeg(a,draft.cur))}
+ if(chipFor&&padOpen&&!chipFor.poly){const p=chipFor.p;const m={len:p.len,w:p.w,h:p.h,d:p.d,side:p.side,r:chipFor.r};if(k==='ang')return deg(p.ang);if(k==='n')return String(p.n);if(m[k]!=null)return ftin(m[k])}
+ if(chipFor&&padOpen&&chipFor.poly){const pl=draft.placed,a=pl[pl.length-2],b=pl[pl.length-1];return k==='ang'?deg(angDeg(a,b)):ftin(dist(a,b))}
+ return k==='n'?'6':'&mdash;'}
+function wirePad(el){el.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{active=b.dataset.f;render()});el.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>padKey(b.dataset.k))}
+function chipSpot(s){if(s.poly){const pl=draft.placed,a=pl[pl.length-2],b=pl[pl.length-1];return S({x:(a.x+b.x)/2,y:(a.y+b.y)/2})}
+ const p=s.p;if(s.kind==='line')return S(polar(p.p1,p.len/2,p.ang));if(s.kind==='rect')return S({x:p.p1.x+p.w*p.sx/2,y:p.p1.y+p.h*p.sy/2});if(s.kind==='circle'||s.kind==='polygon')return S(p.c);if(s.kind==='arc')return S(s.pts[24]||s.pts[0]);const pts=s.pts,a=pts[pts.length-2],b=pts[pts.length-1];return S({x:(a.x+b.x)/2,y:(a.y+b.y)/2})}
+function chipText(s){if(s.poly){const pl=draft.placed,a=pl[pl.length-2],b=pl[pl.length-1];return ftin(dist(a,b))+'  '+deg(angDeg(a,b))}
+ const p=s.p;switch(s.kind){case'line':return ftin(p.len)+'  '+deg(p.ang);case'rect':return ftin(p.w)+' × '+ftin(p.h);case'circle':return '⌀ '+ftin(p.d);case'polygon':return p.n+' × '+ftin(p.side);case'arc':return 'R '+ftin(s.r||0);default:return describe(s).split(',')[1]||''}}
+function stripBottom(){const w=$('#strips');return w.children.length?w.offsetTop+w.offsetHeight:48}
+function drawInput(){const pad=$('#pad'),chip=$('#chip'),cmd=$('#cmd');
+ chip.style.display='none';pad.style.display='none';cmd.style.display='none';
+ if(pick.q1==='A'){
+  if(chipFor&&!gesture&&!padOpen){const q=chipSpot(chipFor);chip.textContent=chipText(chipFor);chip.style.display='block';chip.style.left=Math.max(120,Math.min(q.x,780))+'px';chip.style.top=Math.max(stripBottom()+20,Math.min(q.y-22,600))+'px';chip.onclick=()=>{padOpen=true;vals={};fieldText={};active=null;render()}}
+  if(chipFor&&padOpen){const q=chipSpot(chipFor);pad.innerHTML=padHTML(editFields());wirePad(pad);pad.style.display='block';const h=pad.offsetHeight||300;pad.style.left=Math.max(70,Math.min(q.x+16,696))+'px';pad.style.top=Math.max(stripBottom()+5,Math.min(q.y-h/2,620-h))+'px'}
+ }else if(pick.q1==='B'){pad.innerHTML=padHTML(fieldsFor(kindNow()),SHAPES[kindNow()][0]);wirePad(pad);pad.style.display='block';pad.style.left='696px';pad.style.top=(stripBottom()+5)+'px'}
+ else{cmd.style.display='flex';const k=kindNow(),st=!draft||!draft.placed.length,hint=st?'first point: tap, or x,y':k==='line'||k==='polyline'?'next: tap, or @length<angle':k==='rect'?'corner: tap, or @W,H':k==='circle'?'tap, or diameter':k==='polygon'?'tap, or side':'tap, or radius';
+  $('#cmdline').innerHTML=(cmdHist?`<span class="h">${esc(cmdHist)} &#8629;</span>`:'')+`<span class="h">${SHAPES[k][0]}: ${hint}:</span><span class="b">${esc(cmdBuf)}</span><span class="c"></span>`;
+  const keys=$('#cmdkeys');if(!keys.children.length){keys.innerHTML=['1','2','3','4','5','6','7','8','9','0',"'",'"','/','.',',','@','<','-','⌫'].map(k=>`<button data-k="${k==='"'?'&quot;':k==='<'?'&lt;':k}">${k==='<'?'&lt;':k}</button>`).join('')+'<button class="ok" data-k="↵">Enter</button>';keys.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>padKey(b.dataset.k))}}
+ $('#done').style.display=draft&&draft.kind==='polyline'&&draft.placed.length>1&&!gesture?'block':'none';
+ const hold=$('#hold');hold.style.display=pick.q2==='C'?'block':'none';hold.style.bottom=(pick.q1==='C'?125:50)+'px';hold.classList.toggle('on',holdDown)}
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+function promptText(){if(message)return message;
+ if(!draft||(!draft.placed.length&&draft.kind!=='auto')){switch(sub){case'auto':return'Draw a line, box or circle';case'polyline':return'Tap the first point';case'circle':case'polygon':return'Tap or drag from the centre';case'arc':return'Tap the arc\'s start';case'rect':return'Tap or drag a corner';default:return'Tap or drag: first point'}}
+ const n=draft.placed.length;switch(draft.kind){case'polyline':return n>1?'Tap the next bend, or Done':'Tap the next bend';case'arc':return n===1?'Tap the arc\'s end':'Tap or drag the bulge';case'rect':return'Tap the opposite corner';case'circle':return'Tap a point on the edge';case'polygon':return'Tap a corner';case'auto':return'Lift to straighten';default:return'Tap the second point'}}
+function drawStatus(){const m=tip?M(tip):{x:0,y:0};$('#coords').textContent=`X ${ftin(m.x)} Y ${ftin(m.y)}`;
+ const steps=[1,2,5,10,20,50,100,200];let f=steps.find(v=>v*view.ppf>=60)||200;$('#sb i').style.width=f*view.ppf+'px';$('#sb span').textContent=f+"'-0\"";
+ $('#prompt').textContent=promptText();$('#count').textContent='Saved on this Duo'}
+
+// ---------- the canvas ----------
+const col=v=>getComputedStyle(document.body).getPropertyValue(v).trim();
+function drawInk(c,s,w){c.strokeStyle=shownInk(s.color);c.lineWidth=w;c.lineJoin='round';c.lineCap='round';c.beginPath();s.pts.forEach((p,i)=>{const q=S(p);i?c.lineTo(q.x,q.y):c.moveTo(q.x,q.y)});c.stroke()}
+function shownInk(k){for(const[,l,d]of INKS)if(k===l||k===d)return theme==='dark'?d:l;return k}
+function marker(c,sn,x,y,sz){c.save();c.strokeStyle=col('--teal');c.lineWidth=2;c.beginPath();
+ switch(sn.kind){
+  case'End':c.rect(x-sz,y-sz,2*sz,2*sz);break;
+  case'Corner':c.rect(x-sz,y-sz,2*sz,2*sz);break;
+  case'Mid':c.moveTo(x,y-sz-1);c.lineTo(x+sz+1,y+sz);c.lineTo(x-sz-1,y+sz);c.closePath();break;
+  case'Centre':c.arc(x,y,sz,0,7);break;
+  case'Intersection':c.moveTo(x-sz,y-sz);c.lineTo(x+sz,y+sz);c.moveTo(x+sz,y-sz);c.lineTo(x-sz,y+sz);break;
+  case'Perpendicular':c.moveTo(x-sz,y-sz);c.lineTo(x-sz,y+sz);c.lineTo(x+sz,y+sz);c.moveTo(x-sz,y);c.lineTo(x,y);c.lineTo(x,y+sz);break;
+  default:c.arc(x,y,sz,0,7);c.moveTo(x-sz-2,y-sz);c.lineTo(x+sz+2,y-sz)}
+ c.stroke();c.restore()}
+function render(){
+ document.body.classList.toggle('dark',theme==='dark');
+ drawRail();drawStrips();
+ const c=ctx;c.setTransform(1,0,0,1,0,0);const dpr=Math.max(1,Math.min(3,(devicePixelRatio||1)*($('#fit').clientWidth/W)));
+ if(cv.width!==Math.round(W*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr)}
+ c.setTransform(dpr,0,0,dpr,0,0);
+ scene(c);
+ const pv=preview();
+ // guide
+ const guide=gesture?gesture.guide:hoverGuide;
+ const anch=currentAnchor();
+ if(anch&&guide!=null&&(draft&&USES_ANGLE(draft.kind))&&draft.cur){const q=S(anch),a=guide*Math.PI/180;c.save();c.strokeStyle=col('--teal');c.setLineDash([5,5]);c.lineWidth=1;c.beginPath();c.moveTo(q.x-1200*Math.cos(a),q.y+1200*Math.sin(a));c.lineTo(q.x+1200*Math.cos(a),q.y-1200*Math.sin(a));c.stroke();c.restore()}
+ if(gesture&&gesture.auto){c.save();c.strokeStyle=shownInk(ink);c.lineWidth=2.4;c.lineCap='round';c.beginPath();gesture.free.forEach((p,i)=>{const q=S(p);i?c.lineTo(q.x,q.y):c.moveTo(q.x,q.y)});c.stroke();c.restore()}
+ if(pv&&pv.pts.length>1){c.save();drawInk(c,pv,2.4);c.restore()}
+ if(draft&&draft.placed.length&&!gesture&&pv==null){const q=S(draft.placed[0]);c.fillStyle=col('--teal');c.beginPath();c.arc(q.x,q.y,3.5,0,7);c.fill()}
+ if(draft)for(const p of draft.placed){const q=S(p);c.fillStyle=col('--teal');c.beginPath();c.arc(q.x,q.y,3,0,7);c.fill()}
+ // live label
+ if(anch&&draft&&draft.cur&&USES_ANGLE(draft.kind)&&draft.kind!=='polygon'){const e=endOfTyped(anch,draft.cur);label(c,S(e),ftin(dist(anch,e))+'  '+deg(angDeg(anch,e)))}
+ else if(draft&&draft.placed.length&&draft.cur&&pv){const t={rect:()=>ftin(pv.p.w)+' × '+ftin(pv.p.h),circle:()=>'⌀ '+ftin(pv.p.d),polygon:()=>pv.p.n+' × '+ftin(pv.p.side),arc:()=>pv.r?'R '+ftin(pv.r):''}[draft.kind];if(t&&t())label(c,S(draft.cur),t())}
+ // snap marker and names
+ if(snap&&(gesture||(tip&&draft&&!gesture))){const q=S(snap.p);if(pick.q3==='C'&&cand.length>1)for(const o of cand){if(o!==snap){const z=S(o.p);c.save();c.globalAlpha=.4;marker(c,o,z.x,z.y,4);c.restore()}}marker(c,snap,q.x,q.y,6)}
+ if(gesture&&!gesture.auto&&tip)loupe(c,tip);
+ drawInput();drawStatus();
+ const names={q1:pick.q1+' '+Q.q1.o[pick.q1][0],q2:pick.q2+' '+Q.q2.o[pick.q2][0],q3:pick.q3+' '+Q.q3.o[pick.q3][0],q4:pick.q4+' '+Q.q4.o[pick.q4][0]};
+ $('#state').innerHTML=`picks: ${esc(names.q1)} / ${esc(names.q2)} / ${esc(names.q3)} / ${esc(names.q4)}<br>tool: ${SHAPES[sub][0]}${draft?`, ${draft.placed.length} point(s) placed`:''}${anyVal()?', typed '+esc(JSON.stringify(fieldText)):''}<br>snap: ${snap?snap.kind+' at '+ftin(snap.p.x)+', '+ftin(snap.p.y):'none'}${cand.length>1?` (${cand.length} in reach)`:''}<br>last drawn: ${last?esc(last):'nothing yet'}<br>on the canvas: ${shapes.length} strokes, zoom ${view.ppf.toFixed(1)} points per foot`;
+ const u=new URLSearchParams();for(const k in pick)u.set(k,pick[k]);u.set('theme',theme);history.replaceState(null,'','?'+u);
+ renderQs()}
+function scene(c){c.fillStyle=col('--paper');c.fillRect(0,0,W,H);
+ const steps=[1,5,10,50,100];const st=steps.find(v=>v*view.ppf>=12)||100;c.lineWidth=1;
+ const x0=Math.floor(-view.ox/view.ppf/st)*st,x1=(W-view.ox)/view.ppf,y1=view.oy/view.ppf,y0=Math.floor(-(H-view.oy)/view.ppf/st)*st;
+ for(let x=x0;x<=x1;x+=st){const q=view.ox+x*view.ppf;c.strokeStyle=(Math.round(x/st)%5===0)?col('--grid2'):col('--grid');c.beginPath();c.moveTo(q,0);c.lineTo(q,H);c.stroke()}
+ for(let y=y0;y<=y1;y+=st){const q=view.oy-y*view.ppf;c.strokeStyle=(Math.round(y/st)%5===0)?col('--grid2'):col('--grid');c.beginPath();c.moveTo(0,q);c.lineTo(W,q);c.stroke()}
+ for(const s of shapes)drawInk(c,s,2.4)}
+function label(c,q,t){c.save();c.font='600 12px ui-monospace,Menlo,Consolas,monospace';const w=c.measureText(t).width+12;let x=Math.max(66,Math.min(q.x+14,W-w-100)),y=Math.max(90,q.y-34);c.fillStyle=col('--ink');c.globalAlpha=.9;c.beginPath();c.roundRect(x,y,w,21,6);c.fill();c.globalAlpha=1;c.fillStyle=col('--paper');c.fillText(t,x+6,y+15);c.restore()}
+function loupe(c,t){const R=60;let lx=t.x,ly=t.y-104;if(ly-R<stripBottom()+4){lx=t.x+(t.x>W/2?-104:104);ly=Math.max(t.y,stripBottom()+R+4)}lx=Math.max(R+4,Math.min(W-R-4,lx));
+ const target=snap?S(snap.p):t;
+ c.save();c.beginPath();c.arc(lx,ly,R,0,7);c.clip();c.save();c.translate(lx,ly);c.scale(3,3);c.translate(-target.x,-target.y);scene(c);const pv=preview();if(pv&&pv.pts.length>1)drawInk(c,pv,2.4);c.restore();
+ if(snap)marker(c,snap,lx,ly,7);else{c.strokeStyle=col('--teal');c.lineWidth=1.5;c.beginPath();c.moveTo(lx-8,ly);c.lineTo(lx+8,ly);c.moveTo(lx,ly-8);c.lineTo(lx,ly+8);c.stroke()}c.restore();
+ c.save();c.strokeStyle=col('--line');c.lineWidth=2;c.beginPath();c.arc(lx,ly,R,0,7);c.stroke();
+ if(snap){const n=snap.kind+(pick.q3==='C'&&cand.length>1?` ${Math.min(candIdx,cand.length-1)+1} of ${cand.length}`:'');c.font='600 12px -apple-system,system-ui,sans-serif';const w=c.measureText(n).width+14;c.fillStyle=col('--teal');c.beginPath();c.roundRect(lx-w/2,ly+R-24,w,20,6);c.fill();c.fillStyle=theme==='dark'?'#10201f':'#fff';c.textAlign='center';c.fillText(n,lx,ly+R-9)}c.restore()}
+
+// ---------- questions and page ----------
+let qsBuilt='';
+function renderQs(){const key=JSON.stringify(pick);if(qsBuilt===key)return;qsBuilt=key;const w=$('#qs');w.innerHTML='';
+ for(const k in Q){const d=document.createElement('section');d.className='q';const q=Q[k];let h=`<h2>${q.t}</h2><div class="seg" role="group" aria-label="${esc(q.t)}">`;for(const o in q.o)h+=`<button data-q="${k}" data-o="${o}" aria-pressed="${pick[k]===o}"><b>${o}</b>${esc(q.o[o][0])}</button>`;h+=`</div><p class="desc">${esc(q.o[pick[k]][1])}</p>`;d.innerHTML=h;w.append(d)}
+ w.querySelectorAll('[data-q]').forEach(b=>b.onclick=()=>{pick[b.dataset.q]=b.dataset.o;fly=false;padOpen=false;chipFor=null;$('#cmdkeys').innerHTML='';render()});
+ $('#note').textContent='A bare number means feet here, so 12 is 12\' and 6" is 6 inches. A keyboard works too.'}
+function fit(){const f=$('#fit'),s=Math.min(1,f.clientWidth/W);$('#stage').style.transform=`scale(${s})`;f.style.height=H*s+'px';render()}
+addEventListener('resize',fit);
+$('#undo').onclick=()=>{if(draft){if(draft.placed.length>1&&draft.kind==='polyline'){draft.placed.pop();chipFor=null}else draft=null}else if(shapes.length){redo.push(shapes.pop());chipFor=null;padOpen=false}render()};
+$('#redo').onclick=()=>{if(redo.length){shapes.push(redo.pop());render()}};
+$('#clear').onclick=()=>{shapes=seed();redo=[];draft=null;chipFor=null;padOpen=false;vals={};fieldText={};last='';render()};
+$('#done').onclick=()=>{finishPoly(false);render()};
+const hb=$('#hold');hb.addEventListener('pointerdown',e=>{e.preventDefault();holdDown=true;relock()});for(const ev of['pointerup','pointercancel','pointerleave'])hb.addEventListener(ev,()=>{holdDown=false;relock()});
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{theme=b.dataset.t;syncTheme();render()});
+function syncTheme(){document.querySelectorAll('#theme button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.t===theme));document.body.classList.toggle('dark',theme==='dark');ink=theme==='dark'?'#e8e6e1':'#1d1d1f';if(inkKey!=='Black'){const r=INKS.find(i=>i[0]===inkKey);ink=theme==='dark'?r[2]:r[1]}}
+syncTheme();shapes=seed();renderQs();fit();
+</script></body></html>

@@ -49,6 +49,8 @@ final class DebugBenchmark: NSObject {
     private var warmUp = 0
     private var scenarioStart: CFTimeInterval = 0
     private static let scenarioTimeLimit: CFTimeInterval = 20
+    /// How long to wait for background tile renders after a scenario. A wait that reaches it is not a measurement.
+    private static let settleLimit: CFTimeInterval = 5
     private var tickStart: CFTimeInterval?
     private var lastTimestamp: CFTimeInterval?
     private var work: [Double] = []
@@ -65,6 +67,16 @@ final class DebugBenchmark: NSObject {
     /// The made-up sheet the sheet scenarios place over the canvas.
     private var sheet: CanvasEditor.PendingSheet?
     private var placedSheet: Sheet?
+    /// The speed probe's time before each scenario.
+    private var probes: [Double] = []
+    private static let probePath: CGPath = {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: 128))
+        for i in 1..<4000 {
+            path.addLine(to: CGPoint(x: CGFloat(i).truncatingRemainder(dividingBy: 256), y: 128 + 100 * sin(CGFloat(i) / 7)))
+        }
+        return path
+    }()
 
     private init(view: InkCanvasUIView, editor: CanvasEditor) {
         self.view = view
@@ -259,6 +271,25 @@ final class DebugBenchmark: NSObject {
 
     /// Places the made-up sheet in the middle of the canvas, with no saver (the test canvas is never saved), and
     /// zooms to it.
+    /// How fast this runner is just now, from work that no change to Vellum can touch: a fixed path stroked into a
+    /// bitmap, five times, the median in milliseconds. `Scripts/perf-compare.py` scales the Release timing baselines by it.
+    private func speedProbe() -> Double {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return 0 }
+        var times: [Double] = []
+        for _ in 0..<5 {
+            let start = CACurrentMediaTime()
+            guard let context = CGContext(data: nil, width: 768, height: 768, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                              | CGBitmapInfo.byteOrder32Little.rawValue) else { return 0 }
+            context.addPath(Self.probePath)
+            context.setLineWidth(1)
+            context.strokePath()
+            _ = context.makeImage()
+            times.append((CACurrentMediaTime() - start) * 1000)
+        }
+        return percentile(times.sorted(), 0.5)
+    }
+
     private func placeSheet() {
         guard let pending = sheet, placedSheet == nil else { return zoomToSheet() }
         editor.zoomToEverything()
@@ -303,6 +334,7 @@ final class DebugBenchmark: NSObject {
 
     private func beginScenario() {
         guard scenarioIndex < scenarios.count else { finish(); return }
+        probes.append(speedProbe())
         scenarios[scenarioIndex].setUp(self)
         frame = 0
         warmUp = 30
@@ -331,8 +363,11 @@ final class DebugBenchmark: NSObject {
 
         if let settleStart {
             // Waiting for background tile renders to finish after a scenario.
-            if (view?.pendingRenderCount ?? 0) == 0 || now - settleStart > 5 {
-                record("  settled_ms=\(format((now - settleStart) * 1000))")
+            let pending = view?.pendingRenderCount ?? 0
+            if pending == 0 || now - settleStart > Self.settleLimit {
+                // Cut off, the number is only a lower bound, and it is written so that nothing reads it as a time.
+                record(pending == 0 ? "  settled_ms=\(format((now - settleStart) * 1000))"
+                                    : "  settled_ms>=\(format(Self.settleLimit * 1000)) still_pending=\(pending)")
                 self.settleStart = nil
                 scenarioIndex += 1
                 beginScenario()
@@ -396,6 +431,10 @@ final class DebugBenchmark: NSObject {
     private func finish() {
         link?.invalidate()
         if let observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
+        #if !DEBUG
+        measurements["speed_probe_ms_release"] = percentile(probes.sorted(), 0.5)
+        #endif
+        record("speed_probe_ms=\(format(percentile(probes.sorted(), 0.5)))")
         // The timings in the form Scripts/perf-compare.py reads, for comparing with docs/perf/baselines.
         let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let entries = measurements.keys.sorted().map { ["metric": $0, "value": (measurements[$0]! * 100).rounded() / 100] as [String: Any] }

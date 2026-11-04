@@ -12,13 +12,15 @@ import VellumCore
 /// - `--ui-lasso` (on the fixture): a lasso loop round the bypass and the valve, leaving them selected with the
 ///   selection's box, handles and menu.
 /// - `--ui-lasso-move` (on the fixture): the same, then the selection dragged down and to the right.
+/// - `--ui-lasso-offscreen` (on a new canvas): a long stroke drawn, zoomed in until its far end is off screen, selected
+///   whole and dragged until only what started off screen shows, with the Pencil left down: moved ink is drawn whole.
 /// - `--ui-text` (on a new canvas): two text boxes placed with the text box tool and typed into.
 @MainActor
 enum DebugSelection {
     private static var started = false
 
     static func attach(_ view: InkCanvasUIView, editor: CanvasEditor) {
-        let wanted = ["--ui-snap", "--ui-lasso", "--ui-lasso-move", "--ui-text"].filter(DebugLaunch.has)
+        let wanted = ["--ui-snap", "--ui-lasso", "--ui-lasso-move", "--ui-lasso-offscreen", "--ui-text"].filter(DebugLaunch.has)
         guard !wanted.isEmpty, !started, view.bounds.width > 0 else { return }
         started = true
         Task { @MainActor in
@@ -27,6 +29,7 @@ enum DebugSelection {
             if wanted.contains("--ui-lasso") || wanted.contains("--ui-lasso-move") {
                 await lasso(view, editor, move: wanted.contains("--ui-lasso-move"))
             }
+            if wanted.contains("--ui-lasso-offscreen") { await lassoOffscreen(view, editor) }
             if wanted.contains("--ui-text") { await text(view, editor) }
         }
     }
@@ -103,6 +106,33 @@ enum DebugSelection {
         }
         await draw(path, on: view, hold: 0)
         print("lasso: moved, \(editor.selection.count) still selected, undo steps \(editor.canUndo)")
+    }
+
+    private static func lassoOffscreen(_ view: InkCanvasUIView, _ editor: CanvasEditor) async {
+        editor.tool = .pen
+        editor.colour = .red
+        let midY = view.bounds.midY
+        let wave = (0...160).map { i -> CGPoint in
+            let t = CGFloat(i) / 160
+            return CGPoint(x: 150 + 650 * t, y: midY + 12 * sin(t * 60))
+        }
+        await draw(wave, on: view, hold: 0)
+        view.zoomBy(3, about: CGPoint(x: 200, y: midY))
+        try? await Task.sleep(for: .milliseconds(500))
+        // The loop goes round the whole stroke, off screen too.
+        editor.tool = .lasso
+        let corners = [ScreenPoint(x: -500, y: -500), ScreenPoint(x: 4000, y: -500), ScreenPoint(x: 4000, y: 1200),
+                       ScreenPoint(x: -500, y: 1200)]
+        editor.selectInLoop(corners.map { editor.viewport.canvasPoint(for: $0) })
+        print("lasso offscreen: \(editor.selection.strokes.count) strokes selected")
+        var tip = CGPoint(x: 300, y: midY)
+        guard view.beginInput(at: tip) else { return }
+        for _ in 0..<65 {
+            try? await Task.sleep(for: .milliseconds(16))
+            tip.x -= 20
+            view.moveInput(samples: [tip], predicted: [])
+        }
+        print("lasso offscreen: dragged 1300 points, Pencil still down")
     }
 
     private static func text(_ view: InkCanvasUIView, _ editor: CanvasEditor) async {

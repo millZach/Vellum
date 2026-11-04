@@ -5,7 +5,7 @@ How Vellum keeps the speed it has won (ADR-0015, AGENTS.md "Speed is the product
 ## Two kinds of metric
 
 1. **Work counts (`"kind": "count"`) are budgets.** Deterministic counts of work measured by VellumCore tests on made-up fixtures: paths rebuilt per redraw, points inspected per eraser sample, requests per action, bytes written per stroke, copies per edit. They run on Forge's Linux Swift and in CI. A count above its budget fails the test. Tolerance is 0.
-2. **Timings (`"kind": "time"`) are compared.** Wall-clock numbers measured in CI: frame times on the 10,000-stroke canvas, storage append and reopen times, sign-out with a stalled network. CI records them in the job log, the job summary and an artifact, and `apps/ios/Scripts/perf-compare.py` emits a GitHub warning annotation when one is more than its tolerance (25%) worse than its baseline. Timings never fail the build, because hosted runners are noisy, but a warning is explained in the PR.
+2. **Timings (`"kind": "time"`) are compared.** Wall-clock numbers measured in CI: frame times on the 10,000-stroke canvas, storage append and reopen times, sign-out with a stalled network. CI records them in the job log, the job summary and an artifact, and `apps/ios/Scripts/perf-compare.py` emits a GitHub warning annotation when one is more than its tolerance worse than its baseline on that runner (see "Comparing timings in CI"). Timings never fail the build, because hosted runners are noisy, but a warning is explained in the PR.
 
 ## Where they live
 
@@ -38,6 +38,8 @@ Each file is `{ "area": "...", "entries": [ ... ] }`, and each entry:
 
 `before` is optional: the value before the change that set the baseline, so the first baseline shows the improvement.
 
+A timing may also carry `"scaled_by"`, naming a `"kind": "reference"` entry (its baseline is stated for the runner whose reference reads that entry's value), and `"warn": false`, which records it without warning.
+
 ## Rules
 
 - **The file is the single source.** A budget test reads its area's file (found from `#filePath`, so it works on Linux and macOS) rather than repeating the number.
@@ -52,3 +54,15 @@ python3 apps/ios/Scripts/perf-compare.py <area> <measurements.json>
 ```
 
 The measurements file is `{ "measurements": [ { "metric": "...", "value": n }, ... ] }`. The script prints a table (and appends it to the job summary), warns for each timing more than its tolerance worse, and always exits 0. The canvas-rendering timings come from the Debug-only benchmark (`apps/ios/Vellum/DebugBenchmark.swift`), which `apps/ios/Scripts/capture-duo.sh` runs on the iPhone Duo simulator: the Debug build in the **Duo simulator captures** job, the optimised (Release, BENCHMARK) build in the **Duo release benchmark** job (split off in #8, when the captures outgrew one job).
+
+### How the canvas timings are judged (#32)
+
+Hosted runners do not come in a fast and a slow kind that a baseline could pick between. Their speed runs continuously between the two ends and moves within a job, so one run can be fast in one scenario and slow in the next. So:
+
+- **The speed probe says how fast the runner is just now.** Before each scenario the benchmark strokes a fixed path into a bitmap five times and takes the median; the median over the scenarios is `speed_probe_ms_release`. No Vellum code is in it, so a change to Vellum cannot slow it, and a slowdown across every scenario still shows. A timing's baseline is stated for the runner in the `reference` entry, and the comparison is against baseline × measured probe / reference probe. A measurements file without the probe is compared unscaled. The Debug timings are not scaled: the probe read fast in the captures job while the frame times stayed at their usual level, so scaling there raised ten false warnings on its first run. Debug only logs the probe.
+- **The Release job runs three launches and keeps each timing's median** (`Scripts/perf-passes.py`). They are separate launches on a fresh canvas, because the scenarios change the canvas (the eraser removes strokes). Each launch takes about 90 seconds inside its own 240-second wait. `BENCHMARK_PASSES` changes the number.
+- **What warns.** Release p50 at 25% worse and Release p95 at 40%, since a p95 moves more between runs. Debug p50 at 25%: the captures job runs one Debug launch, whose p95 one stall can set. Everything else only records (`"warn": false`), every max included: one 30-80 ms stall on the main thread sets a max on any commit (#42).
+- **A baseline is the upper quartile of several samples.** Release: at least six samples, each the median of three launches and scaled to the reference runner by its probe. Debug: at least a dozen runs of the captures job itself, unscaled. Re-baseline the same way when the runner image, Xcode or simulator runtime changes, or when a change means to move a timing.
+- **`settled_ms` is not a timing to compare.** The benchmark stops waiting for tiles after 5 seconds and then logs `settled_ms>=5000.00 still_pending=N`, a lower bound and not a measurement. It stays in the log only.
+
+Scored leaving each sample's own job out of its baseline, over 12 Release samples: 3 of the 12 raised any warning (0.7 warnings of 20 on average), a single p50 made 50% worse warned 75% of the time, and with everything 50% worse every sample warned. The same quartile with no probe caught a single p50 49% of the time. So a warning is a question, not a verdict: rerun the job before reading much into a lone one.

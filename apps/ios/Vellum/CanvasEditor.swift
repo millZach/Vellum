@@ -187,6 +187,7 @@ final class CanvasEditor {
         willChangeHistory?()
         endEraserSweep()
         cancelLift()
+        dropSheet(to: nil, motion: nil)
         session.undo()
         syncInk()
     }
@@ -195,6 +196,7 @@ final class CanvasEditor {
         willChangeHistory?()
         endEraserSweep()
         cancelLift()
+        dropSheet(to: nil, motion: nil)
         session.redo()
         syncInk()
     }
@@ -340,7 +342,7 @@ final class CanvasEditor {
     /// units, or for an NTS sheet its paper at printed size.
     func covers(_ sheet: Sheet) -> String {
         if sheet.isNotToScale { return "\(sheet.paper.name) at printed size" }
-        let size = sheet.bounds.size
+        let size = sheet.size
         return "\(canvas.units.format(size.width)) × \(canvas.units.format(size.height))"
     }
 
@@ -350,7 +352,7 @@ final class CanvasEditor {
         select(.empty)
         placingSheet = pending
         toolStep = .placeSheet
-        let size = pending.sheet.bounds.size
+        let size = pending.sheet.size
         let centre = viewport.centre
         let room = CanvasRect(origin: CanvasPoint(x: centre.x - size.width * 0.8, y: centre.y - size.height * 0.8),
                               size: CanvasSize(width: size.width * 1.6, height: size.height * 1.6))
@@ -362,7 +364,7 @@ final class CanvasEditor {
     /// The sheet waiting to be placed, centred on a canvas point, as it would go there.
     func sheetToPlace(centredAt point: CanvasPoint) -> Sheet? {
         guard var sheet = placingSheet?.sheet else { return nil }
-        let size = sheet.bounds.size
+        let size = sheet.size
         sheet.origin = CanvasPoint(x: point.x - size.width / 2, y: point.y - size.height / 2).onInkGrid
         return sheet
     }
@@ -399,6 +401,72 @@ final class CanvasEditor {
         placingSheet = nil
         if toolStep == .placeSheet { toolStep = .start }
         onPlacingChange?()
+    }
+
+    // MARK: Turning, moving and changing the scale of a sheet (#44)
+
+    /// The sheet the lasso has picked up, while it has.
+    var selectedSheet: Sheet? { selection.sheet.flatMap { session.sheet($0) } }
+
+    /// The topmost sheet under a canvas point.
+    func sheet(at point: CanvasPoint) -> Sheet? { session.sheets.last { $0.contains(point) } }
+
+    /// What a turn, move or scale change under way started from: the sheet, and the markups chosen then to come along,
+    /// their strokes out of the index until it ends.
+    struct SheetLift {
+        let sheet: Sheet
+        let markups: CanvasSelection
+        let strokes: [InkStroke]
+    }
+
+    @ObservationIgnored private var sheetLift: SheetLift?
+
+    /// Starts a turn, move or scale change of the selected sheet: chooses what comes along (more than half its length on
+    /// the sheet, through the index), and takes those strokes out of the index, so the tiles redraw without them.
+    func liftSheet() -> SheetLift? {
+        cancelLift()
+        dropSheet(to: nil, motion: nil)
+        guard let sheet = selectedSheet else { return nil }
+        let markups = sheet.markups(in: inkIndex, texts: session.texts, dimensions: session.dimensions)
+        let strokes = markups.strokes.compactMap { inkIndex.stroke($0) }
+        let lift = SheetLift(sheet: sheet, markups: markups, strokes: strokes)
+        sheetLift = lift
+        if !strokes.isEmpty { onInkChange?(inkIndex.apply(InkChange(removed: strokes.map(\.id)))) }
+        return lift
+    }
+
+    /// Ends a turn, move or scale change: the sheet where it went and its markups moved by `motion`, as one undo step
+    /// saved as ids and the motion. Nil, or nothing changed, puts the strokes back as they were.
+    func dropSheet(to after: Sheet?, motion: SheetMotion?) {
+        guard let lift = sheetLift else { return }
+        sheetLift = nil
+        if let after, let motion, session.changeSheet(to: after, markups: lift.markups, motion: motion) {
+            syncInk()
+        } else if !lift.strokes.isEmpty {
+            onInkChange?(inkIndex.apply(InkChange(added: lift.strokes)))
+        }
+    }
+
+    /// The scales the selected sheet can change to, as Add sheet's confirm step offers them, its details' first. Reads the
+    /// page off the main thread.
+    func scalesOffered(for sheet: Sheet) async -> [Sheet.Scale] {
+        let reading = await reading(of: sheet)
+        return SheetReading.offeredScales(details: reading?.detailScales ?? [], units: canvas.units)
+    }
+
+    /// The selected sheet at another drawing scale, with the size it gives it: its markups scale with it about its centre,
+    /// as one undo step. Its page is read again, so a detail now at another scale than the sheet's becomes a scale area
+    /// (ADR-0002); a page that can't be read keeps the areas it has.
+    func changeSelectedSheetScale(to scale: Sheet.Scale) async -> (sheet: Sheet, motion: SheetMotion)? {
+        guard let sheet = selectedSheet, scale != sheet.scale else { return nil }
+        let reading = await reading(of: sheet)
+        guard let current = selectedSheet, current.id == sheet.id else { return nil }
+        return current.rescaled(to: scale, areas: reading?.areas(placedAt: scale))
+    }
+
+    private func reading(of sheet: Sheet) async -> SheetReading? {
+        guard let url = pdfURL(for: sheet), let index = sheet.page?.index else { return nil }
+        return await SheetPDFReader(url: url).info(page: index)?.reading
     }
 
     // MARK: Measures, dimensions, frames and windows (#8)
@@ -487,6 +555,8 @@ final class CanvasEditor {
         // Nothing to follow when the change did nothing (an empty stroke, undo with nothing to undo).
         guard !session.unsavedEvents.isEmpty else { return }
         let change = session.lastChange
+        // First, so a dimension drawn again below reads against the sheets as they now stand (#44).
+        if change.touchesSheets { canvas.sheets = session.sheets }
         inkDidChange?(change)
         onInkChange?(inkIndex.apply(change))
         if change.touchesText { onTextsChange?(change) }
@@ -494,19 +564,19 @@ final class CanvasEditor {
             onAnnotationsChange?(change)
             if frameCount != session.frames.count { frameCount = session.frames.count }
         }
-        if change.touchesSheets {
-            canvas.sheets = session.sheets
-            onSheetsChange?(change)
-        }
+        if change.touchesSheets { onSheetsChange?(change) }
         if let after = session.selectionAfterLastChange {
-            select(after)
+            // A sheet is picked up only with the lasso in hand, so undoing its turn with the pen selects nothing.
+            if after.sheet == nil || tool == .lasso { select(after) }
         } else if !selection.isEmpty, !change.removed.isEmpty || !change.removedTexts.isEmpty
-                    || !change.removedDimensions.isEmpty || !change.removedFrames.isEmpty {
+                    || !change.removedDimensions.isEmpty || !change.removedFrames.isEmpty
+                    || !change.removedSheets.isEmpty {
             // Whatever a change took away is no longer selected.
             select(CanvasSelection(strokes: selection.strokes.filter { inkIndex.contains($0) },
                                    texts: selection.texts.filter { session.text($0) != nil },
                                    dimensions: selection.dimensions.filter { session.dimension($0) != nil },
-                                   frames: selection.frames.filter { session.frame($0) != nil }))
+                                   frames: selection.frames.filter { session.frame($0) != nil },
+                                   sheet: selection.sheet.flatMap { session.sheet($0)?.id }))
         }
         if !sweeping { inkRevision += 1 }
         if canUndo != session.canUndo { canUndo = session.canUndo }

@@ -13,6 +13,10 @@ import VellumCore
 ///
 /// In dark mode a line drawing is drawn inverted, light lines on the dark ground, and a page that inverts badly is
 /// drawn dimmed (`SheetDisplay`, ADR-0011); changing mode draws the tiles again in the new one.
+///
+/// A sheet's angle (#44) is one more transform, on the layer holding its paper and levels. Tiles are keyed by the paper, so
+/// they keep through a turn, a move and a scale change. While one is under way the sheet is a `preview`: each frame moves
+/// that transform and draws nothing, and only every few degrees or screen points are the tiles newly in view asked for.
 @MainActor
 final class SheetRenderer {
     typealias Key = SheetTileBook.Key
@@ -20,6 +24,10 @@ final class SheetRenderer {
     let layer = CALayer()
     private var book: SheetTileBook
     private var sheets: [Sheet] = []
+    /// Sheets being turned or moved, as they stand now, in place of how they are saved.
+    private var previews: [SheetID: Sheet] = [:]
+    /// Where a sheet being turned or moved stood when its tiles were last asked for.
+    private var plannedPreview: Sheet?
     private var viewport: Viewport?
     /// Where each sheet's PDF is, asked when its first tile is drawn.
     private let pdfURL: @MainActor (Sheet) -> URL?
@@ -59,11 +67,10 @@ final class SheetRenderer {
     /// How a sheet shows in the mode now.
     func display(of sheet: Sheet) -> SheetDisplay { SheetDisplay.display(dark: isDark, invertsBadly: sheet.invertsBadly) }
 
-    /// The rectangles of the canvas covered by sheets whose paper shows light, for ink colours over them
-    /// (`SheetDisplay.paperIsLight`, `MarkupColour.rgb(dark:overLightPaper:)`). Empty in light mode, where the canvas is
-    /// light anyway.
-    var lightPaper: [CanvasRect] {
-        isDark ? sheets.filter { display(of: $0).paperIsLight }.map(\.bounds) : []
+    /// The sheets whose paper shows light, for ink colours over them (`SheetDisplay.paperIsLight`,
+    /// `MarkupColour.rgb(dark:overLightPaper:)`). Empty in light mode, where the canvas is light anyway.
+    var lightPaper: [Sheet] {
+        isDark ? sheets.filter { display(of: $0).paperIsLight } : []
     }
 
     // MARK: The sheets
@@ -86,6 +93,35 @@ final class SheetRenderer {
         if let viewport { show(viewport) }
     }
 
+    /// A turn or move under way: the sheet as it stands this frame. One transform; nothing already drawn is drawn again.
+    func preview(_ sheet: Sheet) {
+        previews[sheet.id] = sheet
+        guard let viewport, let holder = holders[sheet.id] else { return }
+        withoutAnimation { place(holder, sheet, viewport) }
+        let turned = plannedPreview.map { was -> Double in
+            let difference = SheetAngle.normalized(sheet.angle - was.angle)
+            return min(difference, 360 - difference)
+        } ?? .infinity
+        let moved = plannedPreview.map { was -> Double in
+            (was.origin.distance(to: sheet.origin).inches) * viewport.pointsPerInch
+        } ?? .infinity
+        if turned >= Self.previewPlanDegrees || moved >= Self.previewPlanPoints {
+            plannedPreview = sheet
+            show(viewport)
+        }
+    }
+
+    /// The turn or move ended: the sheet is as the session says, which `setSheets` hears when it changed.
+    func endPreview() {
+        previews.removeAll()
+        plannedPreview = nil
+        if let viewport { show(viewport) }
+    }
+
+    /// How far a sheet being turned or moved goes before the tiles newly in view are asked for.
+    private static let previewPlanDegrees = 5.0
+    private static let previewPlanPoints = 64.0
+
     private func makeHolder(for sheet: Sheet) -> SheetLayers {
         let holder = SheetLayers()
         holders[sheet.id] = holder
@@ -100,12 +136,13 @@ final class SheetRenderer {
         self.viewport = viewport
         guard !sheets.isEmpty else { return }
         let dark = isDark
-        let plan = book.plan(sheets, viewport: viewport) { SheetDisplay.display(dark: dark, invertsBadly: $0.invertsBadly) }
+        let standing = previews.isEmpty ? sheets : sheets.map { previews[$0.id] ?? $0 }
+        let plan = book.plan(standing, viewport: viewport) { SheetDisplay.display(dark: dark, invertsBadly: $0.invertsBadly) }
         tilesDrawn = book.tilesDrawn
         withoutAnimation {
             for key in plan.evict { holders[key.sheet]?.removeTile(key) }
             let shown = Dictionary(plan.showing.map { ($0.sheet, $0) }, uniquingKeysWith: { a, _ in a })
-            for sheet in sheets {
+            for sheet in standing {
                 guard let holder = holders[sheet.id] else { continue }
                 place(holder, sheet, viewport)
                 guard let showing = shown[sheet.id] else {
@@ -126,14 +163,27 @@ final class SheetRenderer {
     private func place(_ holder: SheetLayers, _ sheet: Sheet, _ viewport: Viewport) {
         let origin = viewport.screenPoint(for: sheet.origin)
         let ppi = viewport.pointsPerInch
-        let bounds = sheet.bounds
-        holder.paper.frame = CGRect(x: origin.x, y: origin.y, width: bounds.size.width.inches * ppi,
-                                    height: bounds.size.height.inches * ppi)
+        let size = sheet.size
+        holder.paper.frame = CGRect(x: origin.x, y: origin.y, width: size.width.inches * ppi,
+                                    height: size.height.inches * ppi)
+        // The shadow's shape is given, so the render server need not work it out afresh from the layer at each angle.
+        let paperBounds = CGRect(origin: .zero, size: holder.paper.bounds.size)
+        if holder.paper.shadowPath?.boundingBox != paperBounds { holder.paper.shadowPath = CGPath(rect: paperBounds, transform: nil) }
+        holder.container.setAffineTransform(Self.turn(sheet, viewport))
         for (level, container) in holder.levels {
             let k = ppi * sheet.canvasPerPrinted / SheetTileBook.scale(level: level)
             container.container.transform = CATransform3DMakeAffineTransform(
                 CGAffineTransform(a: k, b: 0, c: 0, d: k, tx: origin.x, ty: origin.y))
         }
+    }
+
+    /// The sheet's angle on screen: a turn about its centre, counter-clockwise, with y running down the screen.
+    private static func turn(_ sheet: Sheet, _ viewport: Viewport) -> CGAffineTransform {
+        guard sheet.angle != 0 else { return .identity }
+        let centre = viewport.screenPoint(for: sheet.centre)
+        let (c, s) = SheetAngle.cosineAndSine(sheet.angle)
+        return CGAffineTransform(a: c, b: -s, c: s, d: c, tx: centre.x - centre.x * c - centre.y * s,
+                                 ty: centre.y + centre.x * s - centre.y * c)
     }
 
     /// Dark mode changed, or the screen: every tile is drawn again for the new mode.
@@ -220,6 +270,9 @@ private final class SheetLayers {
         container.anchorPoint = .zero
         container.position = .zero
         paper.anchorPoint = .zero
+        // A turned sheet's edge stays smooth. Tiles leave theirs off, so no seam shows between them at an angle.
+        paper.allowsEdgeAntialiasing = true
+        paper.edgeAntialiasingMask = [.layerLeftEdge, .layerRightEdge, .layerTopEdge, .layerBottomEdge]
         paper.shadowColor = UIColor.black.cgColor
         paper.shadowOpacity = 0.18
         paper.shadowRadius = 4

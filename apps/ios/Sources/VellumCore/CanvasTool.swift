@@ -60,8 +60,9 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
                        help: "Draw a line, a rectangle or a circle; it straightens when you lift or hold still")
         case .lasso:
             Descriptor(title: "Lasso", systemImage: "lasso", group: .selectionAndText, comingIn: nil, inkTool: nil,
-                       prompt: "Loop ink or text to select",
-                       help: "Draw a loop around ink or text to select it, then move, resize, duplicate or delete it")
+                       prompt: "Loop ink, or tap a sheet",
+                       help: "Draw a loop around ink or text to select it, then move, resize, duplicate or delete it. "
+                           + "Tap a sheet to turn it, move it or change its scale")
         case .textBox:
             Descriptor(title: "Text box", systemImage: "character.textbox", group: .selectionAndText, comingIn: nil,
                        inkTool: nil, prompt: "Tap to place a text box",
@@ -101,6 +102,10 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         /// A sheet confirmed in Add sheet waits, as a true-size outline, for a tap where it goes (#11). It belongs to no
         /// tool: whatever is in hand, the next tap places the sheet.
         case placeSheet
+        /// A selected sheet is being twisted, at this angle in degrees (#44).
+        case turningSheet(Double)
+        /// A selected sheet's twist has caught on this quarter turn (#44).
+        case caughtSheet(Double)
     }
 
     /// The status bar's prompt part way through a measure, dimension or window.
@@ -111,6 +116,8 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .pullOff: "Drag or tap to place line"
         case .chooseWindowAction: "Zoom or make a frame"
         case .placeSheet: Self.placeSheetPrompt
+        case .turningSheet(let angle): "Turning: \(SheetAngle.reading(angle))"
+        case .caughtSheet(let angle): "Caught at \(SheetAngle.reading(angle))"
         }
     }
 
@@ -144,10 +151,20 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// The status bar's prompt for the lasso while something is selected.
     public static let selectionPrompt = "Drag the selection"
 
+    /// The status bar's prompt for the lasso while a sheet is selected (#44): as long as the longest prompt it stands
+    /// beside, so the sheet and frame count keeps its room.
+    public static let sheetSelectedPrompt = "Twist or drag the sheet"
+
     /// The status bar's prompt, given whether the lasso has a selection: with one, it says to drag it; and, for a
     /// measure, dimension or window part way through, what it waits for next (#8).
-    public func prompt(fingerDraws: Bool, hasSelection: Bool, step: Step = .start) -> String {
+    public func prompt(fingerDraws: Bool, hasSelection: Bool, hasSheet: Bool = false, step: Step = .start) -> String {
         if step == .placeSheet { return Self.placeSheetPrompt }
+        if self == .lasso, hasSheet {
+            switch step {
+            case .turningSheet, .caughtSheet: return Self.prompt(for: step) ?? Self.sheetSelectedPrompt
+            default: return Self.sheetSelectedPrompt
+            }
+        }
         if self == .lasso, hasSelection { return Self.selectionPrompt }
         if let next = Self.prompt(for: step) { return next }
         return prompt(fingerDraws: fingerDraws)

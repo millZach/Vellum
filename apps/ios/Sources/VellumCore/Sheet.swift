@@ -69,6 +69,12 @@ public struct PaperRect: Hashable, Sendable {
         point.x.inches >= minX && point.x.inches <= maxX && point.y.inches >= minY && point.y.inches <= maxY
     }
 
+    /// Whether a point is inside, or within `slack` printed inches of an edge.
+    func contains(_ point: PaperPoint, within slack: Double) -> Bool {
+        point.x.inches >= minX - slack && point.x.inches <= maxX + slack
+            && point.y.inches >= minY - slack && point.y.inches <= maxY + slack
+    }
+
     /// The smallest rectangle holding both.
     public func union(_ other: PaperRect) -> PaperRect {
         let x0 = min(minX, other.minX), y0 = min(minY, other.minY)
@@ -123,7 +129,8 @@ public struct ScaleArea: Hashable, Sendable {
     public var label: String { "\(name) · \(scale)" }
 }
 
-/// A PDF page placed on the canvas at its drawing scale, with its top-left corner at `origin` (ADR-0002). A scaled
+/// A PDF page placed on the canvas at its drawing scale (ADR-0002). `origin` is its top-left corner before it is turned,
+/// so its centre is `origin` plus half its size at any angle, and `angle` turns it about that centre (#44). A scaled
 /// sheet covers real-world lengths; an NTS sheet sits at its printed size and every length read on it is a printed
 /// length marked NTS. Since #11 a sheet can hold scale areas, details drawn at scales of their own, where lengths read
 /// at the area's scale; the sheet itself is placed at its main scale.
@@ -162,9 +169,11 @@ public struct Sheet: Hashable, Sendable, Identifiable {
     /// Whether the page inverts badly (a scan, coloured fills), so dark mode shows it dimmed rather than inverted
     /// (`SheetDisplay`, `SheetTone`). Decided once, when the sheet is placed.
     public var invertsBadly: Bool
+    /// How far the sheet is turned about its centre, in degrees counter-clockwise on screen, from 0 up to 360 (#44).
+    public var angle: Double
 
     public init(id: SheetID = SheetID(0), paper: PaperSize, scale: Scale, origin: CanvasPoint = .origin,
-                page: SheetPage? = nil, areas: [ScaleArea] = [], invertsBadly: Bool = false) {
+                page: SheetPage? = nil, areas: [ScaleArea] = [], invertsBadly: Bool = false, angle: Double = 0) {
         self.id = id
         self.paper = paper
         self.scale = scale
@@ -172,6 +181,7 @@ public struct Sheet: Hashable, Sendable, Identifiable {
         self.page = page
         self.areas = areas
         self.invertsBadly = invertsBadly
+        self.angle = angle
     }
 
     public var isNotToScale: Bool { scale == .notToScale }
@@ -179,36 +189,66 @@ public struct Sheet: Hashable, Sendable, Identifiable {
     /// Canvas inches per printed inch of the sheet's paper.
     public var canvasPerPrinted: Double { scale.canvasPerPrinted }
 
-    /// The rectangle the sheet covers on the canvas.
-    public var bounds: CanvasRect {
-        CanvasRect(origin: origin, size: CanvasSize(width: canvasLength(of: paper.width),
-                                                    height: canvasLength(of: paper.height)))
+    /// The sheet's width and height on the canvas, whatever its angle.
+    public var size: CanvasSize {
+        CanvasSize(width: canvasLength(of: paper.width), height: canvasLength(of: paper.height))
     }
 
-    public func contains(_ point: CanvasPoint) -> Bool { bounds.contains(point) }
+    /// The point the sheet turns about.
+    public var centre: CanvasPoint {
+        let size = self.size
+        return origin.offsetBy(dx: size.width / 2, dy: size.height / 2)
+    }
+
+    /// The smallest rectangle square to the canvas holding the sheet: exactly the sheet at 0°. For culling and zoom to
+    /// everything; use `size` for how big the sheet is, and `contains` for what is on it.
+    public var bounds: CanvasRect {
+        if angle == 0 { return CanvasRect(origin: origin, size: size) }
+        return CanvasRect.enclosing(corners)
+    }
+
+    /// The paper's four corners on the canvas: its top left, top right, bottom right and bottom left as printed.
+    public var corners: [CanvasPoint] {
+        canvasCorners(of: PaperRect(x: .inches(0), y: .inches(0), width: paper.width, height: paper.height))
+    }
+
+    /// Whether a canvas point is on the sheet, within one ink-grid step of its edge (`inkGridStepOnPaper`).
+    public func contains(_ point: CanvasPoint) -> Bool {
+        PaperRect(x: .inches(0), y: .inches(0), width: paper.width, height: paper.height)
+            .contains(paperPoint(at: point), within: inkGridStepOnPaper)
+    }
+
+    /// One step of the ink grid in printed inches of this sheet. A mark's points are kept on the grid, so a turn or a scale
+    /// change can leave one that lay exactly on an edge of the sheet or a scale area a fraction of a step past it. It must
+    /// still read as on it (#44): a mark on a scale area's edge would otherwise lose the area's scale, or its NTS.
+    private var inkGridStepOnPaper: Double { 1 / CanvasPoint.gridUnitsPerInch / canvasPerPrinted }
 
     /// Where a point on the sheet's paper lands on the canvas.
     public func canvasPoint(at paperPoint: PaperPoint) -> CanvasPoint {
-        origin.offsetBy(dx: canvasLength(of: paperPoint.x), dy: canvasLength(of: paperPoint.y))
+        let flat = origin.offsetBy(dx: canvasLength(of: paperPoint.x), dy: canvasLength(of: paperPoint.y))
+        return angle == 0 ? flat : SheetAngle.turn(flat, about: centre, by: angle)
     }
 
     /// Where a canvas point falls on the sheet's paper.
     public func paperPoint(at point: CanvasPoint) -> PaperPoint {
-        PaperPoint(x: .inches((point.x - origin.x).inches / canvasPerPrinted),
-                   y: .inches((point.y - origin.y).inches / canvasPerPrinted))
+        let flat = angle == 0 ? point : SheetAngle.turn(point, about: centre, by: -angle)
+        return PaperPoint(x: .inches((flat.x - origin.x).inches / canvasPerPrinted),
+                          y: .inches((flat.y - origin.y).inches / canvasPerPrinted))
     }
 
-    /// Where a rectangle of the paper lands on the canvas.
-    public func canvasRect(of rect: PaperRect) -> CanvasRect {
-        CanvasRect(origin: canvasPoint(at: PaperPoint(x: rect.x, y: rect.y)),
-                   size: CanvasSize(width: canvasLength(of: rect.width), height: canvasLength(of: rect.height)))
+    /// A rectangle of the paper's four corners on the canvas: its top left, top right, bottom right and bottom left as
+    /// printed.
+    public func canvasCorners(of rect: PaperRect) -> [CanvasPoint] {
+        [(rect.minX, rect.minY), (rect.maxX, rect.minY), (rect.maxX, rect.maxY), (rect.minX, rect.maxY)].map {
+            canvasPoint(at: PaperPoint(x: .inches($0.0), y: .inches($0.1)))
+        }
     }
 
     /// The scale area a canvas point falls in, if any; the last one listed wins where two overlap.
     public func area(at point: CanvasPoint) -> ScaleArea? {
         guard contains(point), !areas.isEmpty else { return nil }
         let onPaper = paperPoint(at: point)
-        return areas.last { $0.rect.contains(onPaper) }
+        return areas.last { $0.rect.contains(onPaper, within: inkGridStepOnPaper) }
     }
 
     /// The scale lengths read at a canvas point on this sheet: its scale area's, or the sheet's own.
@@ -238,7 +278,8 @@ public struct Sheet: Hashable, Sendable, Identifiable {
 
     /// The same sheet under another id.
     func withID(_ id: SheetID) -> Sheet {
-        Sheet(id: id, paper: paper, scale: scale, origin: origin, page: page, areas: areas, invertsBadly: invertsBadly)
+        Sheet(id: id, paper: paper, scale: scale, origin: origin, page: page, areas: areas, invertsBadly: invertsBadly,
+              angle: angle)
     }
 
     /// How long a printed length is on the canvas. An NTS sheet is placed at its printed size, so there the canvas

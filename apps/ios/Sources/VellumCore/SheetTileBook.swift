@@ -122,6 +122,39 @@ public struct SheetTileBook: Sendable {
         return keys
     }
 
+    /// The tiles of a sheet at a level that a view of the canvas touches, row by row. A turned sheet's tiles lie at an
+    /// angle to the view, so of the tiles in the view's bounding box on the paper only those it really touches are asked
+    /// for, which keeps a turned sheet to about the tiles an upright one takes. At 0° that is every one of them.
+    public static func keys(for sheet: Sheet, display: SheetDisplay, level: Int, visible: CanvasRect) -> [Key] {
+        let k = sheet.canvasPerPrinted
+        if sheet.angle == 0 {
+            let rect = PaperRect.inches(x: (visible.minX - sheet.origin.x).inches / k,
+                                        y: (visible.minY - sheet.origin.y).inches / k,
+                                        width: visible.size.width.inches / k, height: visible.size.height.inches / k)
+            return keys(for: sheet, display: display, level: level, covering: rect)
+        }
+        let corners = [CanvasPoint(x: visible.minX, y: visible.minY), CanvasPoint(x: visible.maxX, y: visible.minY),
+                       CanvasPoint(x: visible.maxX, y: visible.maxY), CanvasPoint(x: visible.minX, y: visible.maxY)]
+            .map { sheet.paperPoint(at: $0) }.map { (x: $0.x.inches, y: $0.y.inches) }
+        let xs = corners.map(\.x), ys = corners.map(\.y)
+        let around = PaperRect.inches(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+        return keys(for: sheet, display: display, level: level, covering: around).filter { key in
+            touches(key.paperRect, quad: corners)
+        }
+    }
+
+    /// Whether a rectangle and a quadrilateral with right angles overlap: separated along none of the quadrilateral's
+    /// two edge directions (the rectangle's own were tested by taking the quadrilateral's bounding box).
+    private static func touches(_ rect: PaperRect, quad: [(x: Double, y: Double)]) -> Bool {
+        let box = [(rect.minX, rect.minY), (rect.maxX, rect.minY), (rect.maxX, rect.maxY), (rect.minX, rect.maxY)]
+        for i in 0..<2 {
+            let (nx, ny) = (quad[i + 1].y - quad[i].y, quad[i].x - quad[i + 1].x)
+            let onQuad = quad.map { $0.x * nx + $0.y * ny }, onBox = box.map { $0.0 * nx + $0.1 * ny }
+            if onBox.max()! < onQuad.min()! || onBox.min()! > onQuad.max()! { return false }
+        }
+        return true
+    }
+
     /// What a view of the canvas needs: for each sheet on screen, its level and tiles; which of those to draw; and
     /// what to let go to stay under `cacheLimit`. A tile already drawn, or being drawn, is never asked for again while
     /// it is kept.
@@ -131,13 +164,11 @@ public struct SheetTileBook: Sendable {
         var showing: [Showing] = []
         var draw: [Key] = []
         for sheet in sheets where sheet.bounds.intersects(visible) {
-            let k = sheet.canvasPerPrinted
-            let rect = PaperRect.inches(x: (visible.minX - sheet.origin.x).inches / k,
-                                        y: (visible.minY - sheet.origin.y).inches / k,
-                                        width: visible.size.width.inches / k, height: visible.size.height.inches / k)
             let shown = display(sheet)
             let level = Self.level(for: sheet, pointsPerInch: viewport.pointsPerInch)
-            let keys = Self.keys(for: sheet, display: shown, level: level, covering: rect)
+            let keys = Self.keys(for: sheet, display: shown, level: level, visible: visible)
+            // A turned sheet's bounding box can touch the view when the sheet does not.
+            if keys.isEmpty, sheet.angle != 0 { continue }
             var covered = true
             for key in keys {
                 if var entry = entries[key] {

@@ -49,14 +49,14 @@ final class InkTileRenderer {
     }
     /// In dark mode, where sheets show light paper (dimmed ones, #11): ink starting there keeps its light-mode colour
     /// so sketch ink stays dark over the paper (`MarkupColour.rgb(dark:overLightPaper:)`, ADR-0011).
-    var lightPaper: [CanvasRect] = [] {
+    var lightPaper: [Sheet] = [] {
         didSet { if lightPaper != oldValue { redrawEverything() } }
     }
 
     /// Whether a stroke starting at a point is drawn over light paper in dark mode.
-    nonisolated static func isOverLightPaper(_ point: CanvasPoint?, in rects: [CanvasRect]) -> Bool {
-        guard let point, !rects.isEmpty else { return false }
-        return rects.contains { $0.contains(point) }
+    nonisolated static func isOverLightPaper(_ point: CanvasPoint?, in sheets: [Sheet]) -> Bool {
+        guard let point, !sheets.isEmpty else { return false }
+        return sheets.contains { $0.contains(point) }
     }
 
     /// Ink is never drawn thinner than this many screen points, so zoomed-out ink never vanishes.
@@ -270,7 +270,7 @@ final class InkTileRenderer {
         let base: CGImage?
         let strokes: [InkStroke]
         let dark: Bool
-        let lightPaper: [CanvasRect]
+        let lightPaper: [Sheet]
         let paths: StrokePathCache<CGPath>
         let cancelled: Flag
     }

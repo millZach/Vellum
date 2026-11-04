@@ -55,6 +55,8 @@ final class DebugBenchmark: NSObject {
     private var lastTimestamp: CFTimeInterval?
     private var work: [Double] = []
     private var intervals: [Double] = []
+    /// Each frame's step alone: Vellum's own code, before the Core Animation commit that follows it.
+    private var stepWork: [Double] = []
     private var expectedInterval = 1.0 / 120
     private var settleStart: CFTimeInterval?
     /// The scenario whose last step ran; it is reported once that frame's work is counted.
@@ -67,6 +69,11 @@ final class DebugBenchmark: NSObject {
     /// The made-up sheet the sheet scenarios place over the canvas.
     private var sheet: CanvasEditor.PendingSheet?
     private var placedSheet: Sheet?
+    /// Sheet tiles asked for when the turn's measured frames began.
+    private var tilesBeforeTurn = 0
+    /// Whether the warm-up waits for the ink tiles to finish drawing.
+    private var holdsForTiles = false
+    private var holdStart: CFTimeInterval = 0
     /// The speed probe's time before each scenario.
     private var probes: [Double] = []
     private static let probePath: CGPath = {
@@ -266,7 +273,38 @@ final class DebugBenchmark: NSObject {
                     view.moveInput(samples: samples, predicted: [])
                 }
             }, tearDown: { _ in }),
+            // #44: the placed sheet twisted with two fingers, a degree and a half a frame, through the catches at each
+            // quarter turn: a turn is one transform, and no sheet tile is drawn. Picking the sheet up lifts what comes along
+            // out of the ink tiles in the warm-up, which waits for them to redraw; the last frame saves the turn as one record.
+            turnScenario(name: "sheet_turn"),
         ]
+    }
+
+    private static func turnScenario(name: String) -> Scenario {
+        Scenario(name: name, frames: 240, setUp: { b in
+            b.zoomToSheet()
+            b.editor.tool = .lasso
+            guard let view = b.view, let sheet = b.placedSheet else { return }
+            b.editor.select(CanvasSelection(sheet: sheet.id))
+            // The lift: choosing what comes along and building its strokes' paths, on the main thread, once per turn.
+            let liftStart = CACurrentMediaTime()
+            _ = view.beginSheetTwist(fingerAngle: 0)
+            let lift = (CACurrentMediaTime() - liftStart) * 1000
+            b.holdsForTiles = true
+            b.record("  \(name) came_along=\(view.debugSheetDragStrokes) lift_ms=\(b.format(lift)) pending_at_lift=\(view.pendingRenderCount)")
+        }, step: { b, i in
+            guard let view = b.view else { return }
+            if i == 0 { b.tilesBeforeTurn = view.debugSheetTiles.drawn }
+            if i == 239 {
+                view.finishSheetDrag(keep: true)
+            } else {
+                view.twistSheet(fingerAngle: -1.5 * Double(i + 1))
+            }
+        }, tearDown: { b in
+            let drawn = (b.view?.debugSheetTiles.drawn ?? 0) - b.tilesBeforeTurn
+            b.record("  \(name) tiles_drawn_during_turn=\(drawn) angle=\(b.editor.sheets.last?.angle ?? -1)")
+            b.editor.tool = .pen
+        })
     }
 
     /// How fast this runner is just now, from work that no change to Vellum can touch: a fixed path stroked into a
@@ -338,9 +376,11 @@ final class DebugBenchmark: NSObject {
         scenarios[scenarioIndex].setUp(self)
         frame = 0
         warmUp = 30
+        holdStart = CACurrentMediaTime()
         work.removeAll()
         intervals.removeAll()
         keptRedraws.removeAll()
+        stepWork.removeAll()
         lastTimestamp = nil
         tickStart = nil
     }
@@ -378,6 +418,10 @@ final class DebugBenchmark: NSObject {
             warmUp -= 1
             return
         }
+        if holdsForTiles {
+            if (view?.pendingRenderCount ?? 0) > 0, now - holdStart < Self.settleLimit { return }
+            holdsForTiles = false
+        }
         if let last = lastTimestamp { intervals.append((link.timestamp - last) * 1000) }
         lastTimestamp = link.timestamp
         expectedInterval = link.targetTimestamp - link.timestamp
@@ -389,6 +433,7 @@ final class DebugBenchmark: NSObject {
         tickStart = now
         let redrawsBefore = view?.debugKeptRedraws.count ?? 0
         scenario.step(self, outOfTime ? scenario.frames - 1 : frame)
+        stepWork.append((CACurrentMediaTime() - now) * 1000)
         if let redraws = view?.debugKeptRedraws, redraws.count > redrawsBefore {
             keptRedraws += redraws[redrawsBefore...].map { "frame \(frame): \($0)" }
         }
@@ -412,6 +457,9 @@ final class DebugBenchmark: NSObject {
             + " interval_ms median=\(format(percentile(sortedIntervals, 0.5)))"
             + " p95=\(format(percentile(sortedIntervals, 0.95))) max=\(format(sortedIntervals.last ?? 0))"
             + " long_frames=\(long) display_interval_ms=\(format(expectedInterval * 1000))")
+        let sortedSteps = stepWork.sorted()
+        record("  step_ms median=\(format(percentile(sortedSteps, 0.5))) p95=\(format(percentile(sortedSteps, 0.95)))"
+            + " max=\(format(sortedSteps.last ?? 0))")
         // Where a slow frame fell, beside the kept layer's drawings, to tell one from the other.
         let slowWork = work.enumerated().filter { $0.element > budget }.map { "\($0.offset):\(format($0.element))" }
         let slowGaps = intervals.enumerated().filter { $0.element > expectedInterval * 1000 * 1.5 }

@@ -32,6 +32,10 @@ final class AnnotationOverlay {
     private var items: [Item: CALayer] = [:]
     /// A drag of the selection under way: its transform and what it moves.
     private var dragging: (transform: CanvasTransform, selection: CanvasSelection)?
+    /// A sheet's turn or move under way (#44): the sheet, its labels kept level and its outlines turned with it, and the
+    /// dimensions that come along.
+    private var sheetLive: (before: Sheet, after: Sheet, motion: SheetMotion, markups: CanvasSelection)?
+    private var liveLabels: LiveSheetLabels?
     /// Whether a pinch or pan is under way: the kept layer waits for it to end before it is drawn again.
     var isGesturing = false
 
@@ -172,6 +176,9 @@ final class AnnotationOverlay {
         withoutAnimation {
             for id in change.removedSheets { items.removeValue(forKey: .sheet(id))?.removeFromSuperlayer() }
             for sheet in change.addedSheets where editor.sheet(sheet.id) != nil { build(sheet) }
+            // What a dimension reads depends on the sheets under its points, so each reads again, once per change: one
+            // that stayed where a sheet moved off or on, as well as one that came along.
+            for dimension in editor.dimensions { build(dimension) }
         }
     }
 
@@ -208,11 +215,57 @@ final class AnnotationOverlay {
             keptLayer.transform = CATransform3DIdentity
         }
         if let dragging { placeDragged(dragging.selection) }
+        if sheetLive != nil { startLiveLabels() }
     }
 
     private func placeKept() {
         guard let base, let viewport else { return }
         withoutAnimation { keptLayer.transform = InkTileRenderer.transform(from: base, to: viewport) }
+    }
+
+    /// A sheet's turn or move starts: its labels are built once, every fallback ready, so each frame only places them.
+    func beginSheetChange(_ sheet: Sheet, markups: CanvasSelection) {
+        sheetLive = (sheet, sheet, SheetMotion(centre: sheet.centre), markups)
+        startLiveLabels()
+    }
+
+    /// The sheet as it stands this frame: its outlines take one transform, its level labels are placed again from the
+    /// sizes measured at the start, and the dimensions that come along take the motion's transform.
+    func moveSheet(_ after: Sheet, motion: SheetMotion) {
+        guard let live = sheetLive else { return }
+        sheetLive = (live.before, after, motion, live.markups)
+        placeLive()
+    }
+
+    /// The turn or move ended. A sheet that changed has been drawn afresh by `sheetsChanged` by now; one that did not is
+    /// drawn again as it was.
+    func endSheetChange() {
+        guard let live = sheetLive else { return }
+        sheetLive = nil
+        let stillLive = liveLabels.map { items[.sheet(live.before.id)] === $0.layer } ?? false
+        liveLabels = nil
+        withoutAnimation {
+            for id in live.markups.dimensions { items[.dimension(id)]?.transform = CATransform3DIdentity }
+            if stillLive, let sheet = editor.sheet(live.before.id) { build(sheet) }
+        }
+    }
+
+    private func startLiveLabels() {
+        guard let live = sheetLive, let base else { return }
+        withoutAnimation {
+            let layer = itemLayer(.sheet(live.before.id))
+            liveLabels = LiveSheetLabels(live.before, on: base, into: layer, dark: isDark)
+        }
+        placeLive()
+    }
+
+    private func placeLive() {
+        guard let live = sheetLive, let base else { return }
+        let move = InkCanvasUIView.transform(from: base, to: base, applying: live.motion)
+        withoutAnimation {
+            liveLabels?.place(live.after, motion: move, on: base)
+            for id in live.markups.dimensions { items[.dimension(id)]?.transform = move }
+        }
     }
 
     private func placeDragged(_ selection: CanvasSelection) {
@@ -270,22 +323,10 @@ final class AnnotationOverlay {
     /// `SheetLabelLayout` decides what fits. This runs when the kept layer is drawn, never per frame; a pan or a pinch
     /// only moves and scales the layer, and everything in it scales alike, so what fits here stays fitted on screen.
     static func draw(_ sheet: Sheet, on viewport: Viewport, into layer: CALayer, dark: Bool) {
-        let rect = screenRect(sheet.bounds, viewport)
-        let boxes = sheet.areas.map { screenRect(sheet.canvasRect(of: $0.rect), viewport) }
-        for box in boxes {
-            let shape = CAShapeLayer()
-            shape.actions = noAnimations
-            shape.path = CGPath(rect: box, transform: nil)
-            shape.strokeColor = Palette.scaleArea(dark: dark).cgColor
-            shape.fillColor = Palette.scaleArea(dark: dark).withAlphaComponent(0.06).cgColor
-            shape.lineWidth = 1.6
-            shape.lineDashPattern = [6, 4]
-            layer.addSublayer(shape)
-        }
+        for shape in areaOutlines(sheet, on: viewport, dark: dark) { layer.addSublayer(shape) }
         let name = Pill()
-        name.set(sheet.label, size: sheetNameSize, colour: Palette.sheetText(dark: dark),
-                 fill: Palette.ground(dark: dark).withAlphaComponent(0.92), weight: .semibold, padding: 2, radius: 2)
-        let laid = layout(sheet, rect: rect, boxes: boxes, nameSize: name.layer.bounds.size)
+        setSheetName(name, sheet, dark: dark)
+        let laid = layout(sheet, on: viewport, nameSize: name.layer.bounds.size)
         if let box = laid.sheetName {
             name.layer.anchorPoint = .zero
             name.layer.position = CGPoint(x: box.x, y: box.y)
@@ -296,6 +337,35 @@ final class AnnotationOverlay {
             let lines = placed.fit == .twoLines ? [area.name, area.scale.description] : [area.scale.description]
             layer.addSublayer(areaLabel(lines, in: box, dark: dark))
         }
+    }
+
+    /// Each scale area's dashed purple outline, turned with its sheet: scale areas are on the paper.
+    fileprivate static func areaOutlines(_ sheet: Sheet, on viewport: Viewport, dark: Bool) -> [CAShapeLayer] {
+        sheet.areas.map { area in
+            let shape = CAShapeLayer()
+            shape.actions = noAnimations
+            shape.path = polygon(sheet.canvasCorners(of: area.rect), viewport)
+            shape.strokeColor = Palette.scaleArea(dark: dark).cgColor
+            shape.fillColor = Palette.scaleArea(dark: dark).withAlphaComponent(0.06).cgColor
+            shape.lineWidth = 1.6
+            shape.lineDashPattern = [6, 4]
+            return shape
+        }
+    }
+
+    fileprivate static func setSheetName(_ name: Pill, _ sheet: Sheet, dark: Bool) {
+        name.set(sheet.label, size: sheetNameSize, colour: Palette.sheetText(dark: dark),
+                 fill: Palette.ground(dark: dark).withAlphaComponent(0.92), weight: .semibold, padding: 2, radius: 2)
+    }
+
+    private static func polygon(_ corners: [CanvasPoint], _ viewport: Viewport) -> CGPath {
+        let path = CGMutablePath()
+        for (i, corner) in corners.enumerated() {
+            let s = viewport.screenPoint(for: corner)
+            if i == 0 { path.move(to: CGPoint(x: s.x, y: s.y)) } else { path.addLine(to: CGPoint(x: s.x, y: s.y)) }
+        }
+        path.closeSubpath()
+        return path
     }
 
     /// A sheet's name's text size; a scale area's label's.
@@ -313,17 +383,24 @@ final class AnnotationOverlay {
                                                       .foregroundColor: colour])
     }
 
-    private static func layout(_ sheet: Sheet, rect: CGRect, boxes: [CGRect], nameSize: CGSize) -> SheetLabelLayout {
-        let areas = zip(sheet.areas, boxes).map { area, box in
-            SheetLabelLayout.Area(rect: LabelRect(x: box.minX, y: box.minY, width: box.width, height: box.height),
+    fileprivate static func quad(_ corners: [CanvasPoint], _ viewport: Viewport) -> LabelQuad {
+        LabelQuad(corners: corners.map {
+            let s = viewport.screenPoint(for: $0)
+            return LabelPoint(x: s.x, y: s.y)
+        })
+    }
+
+    private static func layout(_ sheet: Sheet, on viewport: Viewport, nameSize: CGSize) -> SheetLabelLayout {
+        let areas = sheet.areas.map { area in
+            SheetLabelLayout.Area(quad: quad(sheet.canvasCorners(of: area.rect), viewport),
                                   name: measureAreaLine(area.name), scale: measureAreaLine(area.scale.description))
         }
-        return SheetLabelLayout.lay(sheet: LabelRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height),
+        return SheetLabelLayout.lay(sheet: quad(sheet.corners, viewport),
                                     sheetName: LabelSize(width: nameSize.width, height: nameSize.height), areas: areas)
     }
 
     /// A scale area's label: its lines, each whole, on the area's purple.
-    private static func areaLabel(_ lines: [String], in box: LabelRect, dark: Bool) -> CALayer {
+    fileprivate static func areaLabel(_ lines: [String], in box: LabelRect, dark: Bool) -> CALayer {
         let backing = CALayer()
         backing.actions = noAnimations
         backing.anchorPoint = .zero
@@ -349,8 +426,7 @@ final class AnnotationOverlay {
     static func debugLayout(_ sheet: Sheet, on viewport: Viewport) -> (name: Bool, fits: [ScaleAreaLabelFit]) {
         let pill = Pill()
         pill.set(sheet.label, size: sheetNameSize, colour: .white, fill: .black, weight: .semibold, padding: 2, radius: 2)
-        let boxes = sheet.areas.map { screenRect(sheet.canvasRect(of: $0.rect), viewport) }
-        let laid = layout(sheet, rect: screenRect(sheet.bounds, viewport), boxes: boxes, nameSize: pill.layer.bounds.size)
+        let laid = layout(sheet, on: viewport, nameSize: pill.layer.bounds.size)
         return (laid.sheetName != nil, laid.areas.map(\.fit))
     }
     #endif
@@ -641,6 +717,65 @@ final class AnnotationOverlay {
             }
     }
     #endif
+}
+
+/// A sheet's labels and outlines while it turns or moves (#44): built once when it starts, with both of each area's
+/// fallbacks ready, so each frame only runs `SheetLabelLayout` on the sizes measured then and moves a few layers. Labels
+/// stay level, so they never take the turn's transform; the outlines, which are on the paper, take only that.
+@MainActor
+private final class LiveSheetLabels {
+    let layer: CALayer
+    private let outlines = CALayer()
+    private let name = Pill()
+    private let nameSize: CGSize
+    private var areas: [(area: ScaleArea, name: LabelSize, scale: LabelSize, twoLines: CALayer, alone: CALayer)] = []
+
+    init(_ sheet: Sheet, on viewport: Viewport, into layer: CALayer, dark: Bool) {
+        self.layer = layer
+        outlines.actions = noAnimations
+        outlines.anchorPoint = .zero
+        outlines.position = .zero
+        outlines.bounds = layer.bounds
+        for shape in AnnotationOverlay.areaOutlines(sheet, on: viewport, dark: dark) { outlines.addSublayer(shape) }
+        layer.addSublayer(outlines)
+        AnnotationOverlay.setSheetName(name, sheet, dark: dark)
+        nameSize = name.layer.bounds.size
+        name.layer.anchorPoint = .zero
+        layer.addSublayer(name.layer)
+        for area in sheet.areas {
+            let nameLine = AnnotationOverlay.measureAreaLine(area.name)
+            let scaleLine = AnnotationOverlay.measureAreaLine(area.scale.description)
+            let sizes = SheetLabelLayout.Area(rect: LabelRect(x: 0, y: 0, width: 0, height: 0), name: nameLine, scale: scaleLine)
+            func backing(_ lines: [String], _ size: LabelSize) -> CALayer {
+                let label = AnnotationOverlay.areaLabel(lines, in: LabelRect(x: 0, y: 0, width: size.width, height: size.height),
+                                                        dark: dark)
+                label.isHidden = true
+                layer.addSublayer(label)
+                return label
+            }
+            areas.append((area, nameLine, scaleLine, backing([area.name, area.scale.description], sizes.twoLinesSize),
+                          backing([area.scale.description], sizes.scaleAloneSize)))
+        }
+    }
+
+    /// `motion` takes screen points of the view as the sheet stood at the start to where they are now.
+    func place(_ sheet: Sheet, motion: CATransform3D, on viewport: Viewport) {
+        outlines.transform = motion
+        let quads = areas.map {
+            SheetLabelLayout.Area(quad: AnnotationOverlay.quad(sheet.canvasCorners(of: $0.area.rect), viewport),
+                                  name: $0.name, scale: $0.scale)
+        }
+        let laid = SheetLabelLayout.lay(sheet: AnnotationOverlay.quad(sheet.corners, viewport),
+                                        sheetName: LabelSize(width: nameSize.width, height: nameSize.height), areas: quads)
+        name.layer.isHidden = laid.sheetName == nil
+        if let box = laid.sheetName { name.layer.position = CGPoint(x: box.x, y: box.y) }
+        for (labels, placed) in zip(areas, laid.areas) {
+            labels.twoLines.isHidden = placed.fit != .twoLines
+            labels.alone.isHidden = placed.fit != .scaleAlone
+            guard let box = placed.box else { continue }
+            (placed.fit == .twoLines ? labels.twoLines : labels.alone).position = CGPoint(x: box.x, y: box.y)
+        }
+    }
 }
 
 /// A line of text in a rounded box: a dimension's length, a measure's, a frame's paper and scale, a snap's name. A

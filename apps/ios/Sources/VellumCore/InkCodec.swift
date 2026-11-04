@@ -40,13 +40,14 @@ enum InkCodec {
     // MARK: Events
 
     /// Each kind of event's code. Codes are never reused: 1 to 4 are version 1's, 5 to 9 came with #7, 10 to 14 with
-    /// #8, 15 with #11. A move, duplicate or delete of a selection holding no dimension or frame keeps its #7 code and bytes; one
+    /// #8, 15 with #11, 16 with #44. A move, duplicate or delete of a selection holding no dimension or frame keeps its #7 code and bytes; one
     /// holding any takes the #8 code, whose selection adds the dimension and frame ids.
     private enum EventTag: UInt8 {
         case draw = 1, erase = 2, undo = 3, redo = 4
         case transform = 5, duplicate = 6, delete = 7, addText = 8, editText = 9
         case addDimension = 10, addFrame = 11, transformAll = 12, duplicateAll = 13, deleteAll = 14
         case addSheet = 15
+        case changeSheet = 16
     }
 
     static func encode(_ event: InkEvent) -> [UInt8] {
@@ -100,6 +101,9 @@ enum InkCodec {
         case .addSheet(let sheet):
             w.u8(EventTag.addSheet.rawValue)
             w.sheet(sheet)
+        case .changeSheet(let change):
+            w.u8(EventTag.changeSheet.rawValue)
+            w.sheetChange(change)
         }
         return w.bytes
     }
@@ -146,6 +150,8 @@ enum InkCodec {
             event = .addFrame(try r.frame())
         case .addSheet:
             event = .addSheet(try r.sheet())
+        case .changeSheet:
+            event = .changeSheet(try r.sheetChange())
         }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after an event") }
         return event
@@ -160,7 +166,8 @@ enum InkCodec {
     /// frame id and the frames. A canvas of ink alone is written exactly as version 1 wrote it, byte for byte, and one
     /// of ink and text boxes exactly as version 2 did. Version 4 (#11) adds, on a canvas that has ever had a sheet, the
     /// next sheet id and the sheets after the frames (writing the parts before them even when they are empty); a
-    /// canvas that never had one is written exactly as version 3 wrote it.
+    /// canvas that never had one is written exactly as version 3 wrote it. Version 5 (#44) adds a sheet's angle and the
+    /// undo step of a turn, move or scale change; a canvas with neither is written exactly as version 4 wrote it.
     static func encode(_ session: InkSession) -> [UInt8] {
         var w = ByteWriter()
         w.i64(Int64(session.nextID))
@@ -345,6 +352,12 @@ struct ByteWriter {
         case .addSheet(let sheet):
             u8(EditTag.addSheet.rawValue)
             self.sheet(sheet)
+        case .changeSheet(let before, let after, let markups, let motion):
+            u8(EditTag.changeSheet.rawValue)
+            self.sheet(before)
+            self.sheet(after)
+            pieces(markups, on: ink, all: true)
+            sheetMotion(motion)
         }
     }
 
@@ -418,15 +431,19 @@ struct ByteWriter {
     }
 
     /// A dimension (#8): id, its first point in grid units, its second point and the point its line passes through as
-    /// steps from the first, its orientation, its markup colour, then its text height in inches as a 64-bit float.
+    /// steps from the first, its orientation, its markup colour, then its text height in inches as a 64-bit float. Since
+    /// #44 a dimension whose axes a sheet turned sets the orientation code's top bit and adds its axis angle in degrees
+    /// as a 64-bit float; any other is written as #8 wrote it.
     mutating func dimension(_ dimension: CanvasDimension) {
         varint(UInt64(max(dimension.id.value, 0)))
         gridPoint(dimension.start)
         gridPoint(dimension.end, from: dimension.start)
         gridPoint(dimension.through, from: dimension.start)
-        u8(InkCodecTables.orientationCode(dimension.orientation))
+        let turned = dimension.axisAngle != 0
+        u8(InkCodecTables.orientationCode(dimension.orientation) | (turned ? 0x80 : 0))
         u8(InkCodecTables.colourCode(dimension.colour))
         f64(dimension.textHeight.inches)
+        if turned { f64(dimension.axisAngle) }
     }
 
     /// A frame (#8): id, its paper's width and height in printed inches and its drawing scale's printed and real
@@ -445,14 +462,16 @@ struct ByteWriter {
     /// corner in grid units, whether it inverts badly, then its page (1 and the PDF's name on the Duo, its file name,
     /// its Dropbox path, the page and the sheet number read, or 0 for none) and its scale areas (a count, then each
     /// one's name, rectangle on the paper in printed inches as four 64-bit floats, and scale). The made-up AS NOTED
-    /// sheet takes 226 bytes.
+    /// sheet takes 226 bytes. Since #44 a sheet that stands turned sets bit 1 of the inverts-badly byte and adds its angle
+    /// in degrees as a 64-bit float at the end; a sheet at 0° is written as #11 wrote it, so a canvas saved before #44
+    /// reads with its sheets at 0°.
     mutating func sheet(_ sheet: Sheet) {
         varint(UInt64(max(sheet.id.value, 0)))
         f64(sheet.paper.width.inches)
         f64(sheet.paper.height.inches)
         sheetScale(sheet.scale)
         gridPoint(sheet.origin)
-        u8(sheet.invertsBadly ? 1 : 0)
+        u8((sheet.invertsBadly ? 1 : 0) | (sheet.angle != 0 ? 2 : 0))
         if let page = sheet.page {
             u8(1)
             string(page.file)
@@ -463,8 +482,13 @@ struct ByteWriter {
         } else {
             u8(0)
         }
-        varint(UInt64(sheet.areas.count))
-        for area in sheet.areas {
+        scaleAreas(sheet.areas)
+        if sheet.angle != 0 { f64(sheet.angle) }
+    }
+
+    private mutating func scaleAreas(_ areas: [ScaleArea]) {
+        varint(UInt64(areas.count))
+        for area in areas {
             string(area.name)
             f64(area.rect.x.inches)
             f64(area.rect.y.inches)
@@ -472,6 +496,34 @@ struct ByteWriter {
             f64(area.rect.height.inches)
             sheetScale(area.scale)
         }
+    }
+
+    /// A sheet's turn, move or scale change (#44): its id, its corner in grid units, its angle as a 64-bit float, 1 and
+    /// its new scale and areas or 0 when they stayed, the markups' ids, and their motion. The strokes' points are never
+    /// written again.
+    mutating func sheetChange(_ change: SheetChange) {
+        varint(UInt64(max(change.id.value, 0)))
+        gridPoint(change.origin)
+        f64(change.angle)
+        if let rescaled = change.rescaled {
+            u8(1)
+            sheetScale(rescaled.scale)
+            scaleAreas(rescaled.areas)
+        } else {
+            u8(0)
+        }
+        selection(change.markups, all: true)
+        sheetMotion(change.motion)
+    }
+
+    /// A motion: its centre in inches, its turn in degrees, its scale and its offset in inches, as 64-bit floats.
+    mutating func sheetMotion(_ motion: SheetMotion) {
+        f64(motion.centre.x.inches)
+        f64(motion.centre.y.inches)
+        f64(motion.turn)
+        f64(motion.scale)
+        f64(motion.dx.inches)
+        f64(motion.dy.inches)
     }
 
     /// A sheet's or scale area's scale: 2 for NTS, else the notation (0 lengths, 1 ratio) and the printed and real
@@ -525,6 +577,8 @@ enum EditTag: UInt8 {
     case deleteAll = 12
     // Version 4 (#11).
     case addSheet = 13
+    // Version 5 (#44).
+    case changeSheet = 14
 }
 
 struct ByteReader {
@@ -638,6 +692,10 @@ struct ByteReader {
             return .addFrame(try frame())
         case .addSheet:
             return .addSheet(try sheet())
+        case .changeSheet:
+            let before = try sheet(), after = try sheet()
+            let markups = try pieces(on: ink, all: true)
+            return .changeSheet(before: before, after: after, markups: markups, motion: try sheetMotion())
         case .addText:
             return .addText(try textBox())
         case .editText:
@@ -681,14 +739,16 @@ struct ByteReader {
         let start = try gridPoint()
         let end = try gridPoint(from: start)
         let through = try gridPoint(from: start)
-        guard let orientation = InkCodecTables.orientation(try u8()) else {
+        let orientationByte = try u8()
+        guard let orientation = InkCodecTables.orientation(orientationByte & 0x7F) else {
             throw InkCodec.Malformed(reason: "unknown dimension orientation")
         }
         guard let colour = InkCodecTables.colour(try u8()) else { throw InkCodec.Malformed(reason: "unknown colour") }
         let textHeight = try f64()
         guard textHeight.isFinite, textHeight > 0 else { throw InkCodec.Malformed(reason: "a dimension's text height") }
+        let axisAngle = orientationByte & 0x80 != 0 ? try angle() : 0
         return CanvasDimension(id: id, start: start, end: end, through: through, orientation: orientation, colour: colour,
-                         textHeight: .inches(textHeight))
+                         textHeight: .inches(textHeight), axisAngle: axisAngle)
     }
 
     /// The fewest bytes a sheet takes: an id, a paper, an NTS scale, a corner, the flag, no page and no areas.
@@ -702,7 +762,7 @@ struct ByteReader {
         }
         let scale = try sheetScale()
         let origin = try gridPoint()
-        let invertsBadly = try u8() == 1
+        let flags = try u8()
         var page: SheetPage?
         switch try u8() {
         case 0: break
@@ -713,6 +773,12 @@ struct ByteReader {
             page = SheetPage(file: file, name: name, path: path, index: index, number: number.isEmpty ? nil : number)
         default: throw InkCodec.Malformed(reason: "a sheet's page")
         }
+        let areas = try scaleAreas()
+        return Sheet(id: id, paper: .inches(width, by: height), scale: scale, origin: origin, page: page, areas: areas,
+                     invertsBadly: flags & 1 == 1, angle: flags & 2 != 0 ? try angle() : 0)
+    }
+
+    private mutating func scaleAreas() throws -> [ScaleArea] {
         let areaCount = try varintCount(each: 34)
         var areas: [ScaleArea] = []
         areas.reserveCapacity(areaCount)
@@ -722,8 +788,39 @@ struct ByteReader {
             guard [x, y, w, h].allSatisfy(\.isFinite) else { throw InkCodec.Malformed(reason: "a scale area") }
             areas.append(ScaleArea(name: name, rect: .inches(x: x, y: y, width: w, height: h), scale: try sheetScale()))
         }
-        return Sheet(id: id, paper: .inches(width, by: height), scale: scale, origin: origin, page: page, areas: areas,
-                     invertsBadly: invertsBadly)
+        return areas
+    }
+
+    private mutating func angle() throws -> Double {
+        let degrees = try f64()
+        guard degrees.isFinite, degrees >= 0, degrees < 360 else { throw InkCodec.Malformed(reason: "an angle") }
+        return degrees
+    }
+
+    mutating func sheetChange() throws -> SheetChange {
+        let id = SheetID(Int(clamping: try varint()))
+        let origin = try gridPoint()
+        let angle = try self.angle()
+        var rescaled: SheetChange.Rescale?
+        switch try u8() {
+        case 0: break
+        case 1:
+            let scale = try sheetScale()
+            rescaled = SheetChange.Rescale(scale: scale, areas: try scaleAreas())
+        default: throw InkCodec.Malformed(reason: "a sheet change's scale")
+        }
+        let markups = try selection(all: true)
+        return SheetChange(id: id, origin: origin, angle: angle, rescaled: rescaled, markups: markups,
+                           motion: try sheetMotion())
+    }
+
+    mutating func sheetMotion() throws -> SheetMotion {
+        let x = try f64(), y = try f64(), turn = try f64(), scale = try f64(), dx = try f64(), dy = try f64()
+        guard x.isFinite, y.isFinite, turn.isFinite, scale.isFinite, scale > 0, dx.isFinite, dy.isFinite else {
+            throw InkCodec.Malformed(reason: "a sheet's motion")
+        }
+        return SheetMotion(centre: CanvasPoint(x: .inches(x), y: .inches(y)), turn: turn, scale: scale, dx: .inches(dx),
+                           dy: .inches(dy))
     }
 
     private mutating func sheetScale() throws -> Sheet.Scale {

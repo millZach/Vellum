@@ -108,18 +108,7 @@ final class AddSheetModel {
     /// The scales the confirm step offers to pick: the ones written on the sheet's details first, then the common
     /// ones for the canvas units, and NTS.
     func offeredScales(for reading: SheetReading) -> [Sheet.Scale] {
-        let common: [DrawingScale]
-        switch units {
-        case .metric:
-            common = [1, 5, 10, 20, 50, 100, 200, 500].map { DrawingScale.ratio(Double($0)) }
-        case .feetAndInches, .decimalFeet:
-            common = [0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.75, 1, 1.5, 3].map {
-                DrawingScale.architectural(inchesPerFoot: $0)
-            } + [10, 20, 30, 40, 50, 60, 100].map { DrawingScale.engineering(feetPerInch: Double($0)) }
-        }
-        var offered = reading.detailScales
-        for scale in common.map(Sheet.Scale.drawn) + [.notToScale] where !offered.contains(scale) { offered.append(scale) }
-        return offered
+        SheetReading.offeredScales(details: reading.detailScales, units: units)
     }
 
     #if DEBUG

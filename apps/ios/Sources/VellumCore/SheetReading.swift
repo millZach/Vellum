@@ -168,6 +168,23 @@ public struct SheetReading: Hashable, Sendable {
         }
     }
 
+    /// The scales to pick for a sheet, at the confirm step and on a selected sheet (#44): the ones written on its details
+    /// first, then the common ones for the canvas units, and NTS.
+    public static func offeredScales(details: [Sheet.Scale], units: CanvasUnits) -> [Sheet.Scale] {
+        let common: [DrawingScale]
+        switch units {
+        case .metric:
+            common = [1, 5, 10, 20, 50, 100, 200, 500].map { DrawingScale.ratio(Double($0)) }
+        case .feetAndInches, .decimalFeet:
+            common = [0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.75, 1, 1.5, 3].map {
+                DrawingScale.architectural(inchesPerFoot: $0)
+            } + [10, 20, 30, 40, 50, 60, 100].map { DrawingScale.engineering(feetPerInch: Double($0)) }
+        }
+        var offered = details
+        for scale in common.map(Sheet.Scale.drawn) + [.notToScale] where !offered.contains(scale) { offered.append(scale) }
+        return offered
+    }
+
     /// The scale areas when the sheet goes on at `main`: every detail drawn at another scale (#11, ADR-0002).
     public func areas(placedAt main: Sheet.Scale) -> [ScaleArea] {
         details.filter { $0.scale != main }.map { ScaleArea(name: $0.name, rect: $0.area, scale: $0.scale) }

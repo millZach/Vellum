@@ -215,6 +215,11 @@ struct CaptureSheetsTransport: DropboxTransport {
 /// - `--ui-sheets nts`: the NTS loop diagram placed at printed size, its 4" dimension measured: 4" NTS.
 /// - `--ui-sheets labels`: the AS NOTED detail sheet placed at 1/2" = 1'-0", so all three details are scale areas, at the
 ///   zoom where one has two lines and another its scale alone (#35), found from the measured text.
+/// - `--ui-sheets turn-selected`, `turn-90`, `turn-angle`, `turn-catch`, `turn-moved`, `turn-scale` (#44): the AS NOTED
+///   sheet placed at 1/2" = 1'-0" with made-up markups on and off it and a frame, picked up with a tap of the lasso:
+///   selected with its buttons; turned with the 90° left button; twisted to 33.5°; twisted to 88.5° and held there,
+///   caught at 90° with the guide showing and the fingers still down; twisted to 33.5° and moved by a drag; and twisted
+///   to 33.5° and changed to 1" = 1'-0". Each logs its printed dimensions as measured and what its labels do.
 /// - `--ui-sheets scan`: the scan placed at 1/8" = 1'-0" beside the 1/4" plan: in dark mode the plan inverts and the
 ///   scan dims.
 @MainActor
@@ -267,12 +272,110 @@ enum DebugSheets {
                                 at: CGPoint(x: view.bounds.midX + 200, y: view.bounds.midY))
                 editor.zoomToEverything()
                 view.viewportJumped()
+            case "turn-selected", "turn-90", "turn-angle", "turn-catch", "turn-moved", "turn-scale":
+                await turn(what, view, editor)
             default:
                 break
             }
             try? await Task.sleep(for: .seconds(0.2))
             log("\(editor.sheets.count) placed, step \(editor.toolStep), shown \(view.debugAnnotationLabels)")
         }
+    }
+
+    /// Places D-501 with made-up markups, picks it up with the lasso, and does what the capture shows (#44).
+    private static func turn(_ what: String, _ view: InkCanvasUIView, _ editor: CanvasEditor) async {
+        let main = Sheet.Scale.drawn(.architectural(inchesPerFoot: 0.5))
+        guard let placed = await place(view, editor, file: 0, page: 1, scale: main) else { return }
+        // Room round it at any angle: the circle through its corners.
+        let reach = placed.centre.distance(to: placed.origin)
+        let room = CanvasRect(origin: placed.centre.offsetBy(dx: reach * -1.05, dy: reach * -1.05),
+                              size: CanvasSize(width: reach * 2.1, height: reach * 2.1))
+        editor.zoom(to: room)
+        view.viewportJumped()
+        try? await Task.sleep(for: .seconds(0.4))
+        markUp(placed, view, editor)
+        try? await Task.sleep(for: .seconds(0.3))
+        editor.tool = .lasso
+        view.debugTap(at: placed.centre)
+        log("picked up \(String(describing: editor.selection.sheet)), prompt \(editor.tool.prompt(fingerDraws: false, hasSelection: true, hasSheet: true))")
+        switch what {
+        case "turn-90":
+            view.debugTurn(by: 90)
+        case "turn-angle", "turn-moved", "turn-scale":
+            twist(view, to: 33.5, editor)
+            view.finishSheetDrag(keep: true)
+            if what == "turn-moved" { view.debugDragSheet(by: 150, 40) }
+            if what == "turn-scale" { await view.changeSelectedSheetScale(to: .drawn(.architectural(inchesPerFoot: 1))) }
+        case "turn-catch":
+            // Left down, so the guide and the status bar's "Caught at 90°" show.
+            twist(view, to: 88.5, editor)
+        default:
+            break
+        }
+        view.viewportJumped()
+        try? await Task.sleep(for: .seconds(0.3))
+        logTurned(editor)
+    }
+
+    /// Fingers going clockwise on screen turn the sheet clockwise, so a counter-clockwise angle is the fingers going back.
+    private static func twist(_ view: InkCanvasUIView, to angle: Double, _ editor: CanvasEditor) {
+        let from = editor.selectedSheet?.angle ?? 0
+        guard view.beginSheetTwist(fingerAngle: 0) else { return }
+        // In steps, as fingers go, so the turn follows the same path it does on the Duo.
+        for step in 1...20 { view.twistSheet(fingerAngle: -(angle - from) * Double(step) / 20) }
+    }
+
+    /// Ink, a text box and a dimension on the sheet, ink mostly off it, and a frame beside it, all made up.
+    private static func markUp(_ sheet: Sheet, _ view: InkCanvasUIView, _ editor: CanvasEditor) {
+        func at(_ x: Double, _ y: Double) -> CanvasPoint { sheet.canvasPoint(at: PaperPoint(x: .inches(x), y: .inches(y))) }
+        func stroke(_ points: [CanvasPoint], colour: MarkupColour) {
+            editor.tool = .pen
+            editor.colour = colour
+            let screen = points.map { p -> CGPoint in
+                let s = editor.viewport.screenPoint(for: p)
+                return CGPoint(x: s.x, y: s.y)
+            }
+            guard let first = screen.first, view.beginInput(at: first) else { return }
+            view.moveInput(samples: Array(screen.dropFirst()), predicted: [])
+            view.endInput(samples: [], keep: true)
+        }
+        // A red cloud on the sheet, away from the details.
+        let cloud = (0...40).map { i -> CanvasPoint in
+            let t = Double(i) / 40 * 2 * .pi
+            return at(14.6 + 1.2 * cos(t) * (1 + 0.08 * sin(9 * t)), 3 + 0.9 * sin(t) * (1 + 0.08 * sin(9 * t)))
+        }
+        stroke(cloud, colour: .red)
+        // Blue ink along the sheet's foot, more than half of it on the sheet.
+        stroke([at(9, 9.6), at(12, 9.6), at(15, 9.6), at(18, 9.6)], colour: .blue)
+        // Green ink mostly off it, which stays.
+        stroke([at(16.6, 1), at(19, 1), at(21, 1), at(21, 3)], colour: .green)
+        editor.colour = .red
+        let height = editor.viewport.canvasLength(ofScreen: TextBox.screenFontSize)
+        editor.addText("Field verify", at: at(13.4, 5), width: editor.viewport.canvasLength(ofScreen: 110),
+                       height: editor.viewport.canvasLength(ofScreen: 24), fontSize: height)
+        editor.colour = .blue
+        // Across Detail 2's printed 2'-0", as Measure would read it.
+        let printed = MadeUpSheets.detailSheet.dimensions[1]
+        editor.addDimension(start: sheet.canvasPoint(at: printed.from), end: sheet.canvasPoint(at: printed.to),
+                            through: at(7.5, 6.9))
+        editor.colour = .red
+        // A frame beside it, which stays square to the canvas.
+        let corner = at(-5, -3)
+        editor.addFrame(fitting: CanvasRect(origin: corner, size: CanvasSize(width: sheet.size.width / 5,
+                                                                             height: sheet.size.height / 5)))
+    }
+
+    /// Every printed dimension as measured on the sheet where it now stands, what a kept dimension reads, and what the
+    /// labels do.
+    private static func logTurned(_ editor: CanvasEditor) {
+        guard let sheet = editor.selectedSheet ?? editor.sheets.last else { return }
+        log(String(format: "turned %@ at %@, origin %.3f, %.3f", sheet.label, SheetAngle.reading(sheet.angle),
+                   sheet.origin.x.inches, sheet.origin.y.inches))
+        for printed in MadeUpSheets.detailSheet.dimensions {
+            log("  printed \(printed.text), measured \(editor.measureText(from: sheet.canvasPoint(at: printed.from), to: sheet.canvasPoint(at: printed.to)))")
+        }
+        for dimension in editor.dimensions { log("  dimension reads \(editor.label(for: dimension)), axis \(dimension.axisAngle)") }
+        log("  frames \(editor.frames.map(\.label)), text boxes \(editor.texts.map(\.text)), undo \(editor.canUndo)")
     }
 
     /// Confirms a made-up page and taps where it goes, through the canvas view's input path; returns the placed sheet.

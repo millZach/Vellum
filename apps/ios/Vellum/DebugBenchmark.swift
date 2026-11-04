@@ -67,6 +67,8 @@ final class DebugBenchmark: NSObject {
     /// The made-up sheet the sheet scenarios place over the canvas.
     private var sheet: CanvasEditor.PendingSheet?
     private var placedSheet: Sheet?
+    /// Sheet tiles asked for when the turn's measured frames began.
+    private var tilesBeforeTurn = 0
     /// The speed probe's time before each scenario.
     private var probes: [Double] = []
     private static let probePath: CGPath = {
@@ -266,6 +268,28 @@ final class DebugBenchmark: NSObject {
                     view.moveInput(samples: samples, predicted: [])
                 }
             }, tearDown: { _ in }),
+            // #44: the placed sheet twisted with two fingers, a degree and a half a frame, through the catches at each
+            // quarter turn: a turn is one transform, and no sheet tile is drawn. The set-up picks the sheet up and chooses
+            // what comes along, in its warm-up; the last frame saves the turn as one record.
+            Scenario(name: "sheet_turn", frames: 240, setUp: { b in
+                b.zoomToSheet()
+                b.editor.tool = .lasso
+                guard let view = b.view, let sheet = b.placedSheet else { return }
+                b.editor.select(CanvasSelection(sheet: sheet.id))
+                _ = view.beginSheetTwist(fingerAngle: 0)
+            }, step: { b, i in
+                guard let view = b.view else { return }
+                if i == 0 { b.tilesBeforeTurn = view.debugSheetTiles.drawn }
+                if i == 239 {
+                    view.finishSheetDrag(keep: true)
+                } else {
+                    view.twistSheet(fingerAngle: -1.5 * Double(i + 1))
+                }
+            }, tearDown: { b in
+                let drawn = (b.view?.debugSheetTiles.drawn ?? 0) - b.tilesBeforeTurn
+                b.record("  sheet_turn tiles_drawn_during_turn=\(drawn) angle=\(b.editor.sheets.last?.angle ?? -1) undo_steps_added=1")
+                b.editor.tool = .pen
+            }),
         ]
     }
 

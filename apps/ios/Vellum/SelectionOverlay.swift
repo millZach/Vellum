@@ -20,6 +20,10 @@ final class SelectionOverlay {
     let loopLayer = CAShapeLayer()
     private let boxLayer = CAShapeLayer()
     private var handleLayers: [CAShapeLayer] = []
+    /// A selected sheet's edge (#44), turned with it, and the guide showing a twist has caught on a quarter turn.
+    private let sheetEdge = CAShapeLayer()
+    private let catchGuide = CAShapeLayer()
+    private var showsSheet = false
     let menu: SelectionMenu
     /// The dashed box on screen, when there is a selection.
     private(set) var box: CGRect?
@@ -32,6 +36,14 @@ final class SelectionOverlay {
             shape.lineWidth = 1.2
             shape.lineDashPattern = [5, 4]
         }
+        sheetEdge.actions = noAnimations
+        sheetEdge.fillColor = nil
+        sheetEdge.lineWidth = 2
+        sheetEdge.lineJoin = .miter
+        catchGuide.actions = noAnimations
+        catchGuide.fillColor = nil
+        catchGuide.lineWidth = 1.4
+        catchGuide.lineDashPattern = [8, 5]
         for _ in 0..<4 {
             let handle = CAShapeLayer()
             handle.actions = noAnimations
@@ -48,13 +60,15 @@ final class SelectionOverlay {
     func install(in view: UIView) {
         view.layer.addSublayer(loopLayer)
         view.layer.addSublayer(boxLayer)
+        view.layer.addSublayer(sheetEdge)
+        view.layer.addSublayer(catchGuide)
         for handle in handleLayers { view.layer.addSublayer(handle) }
         view.addSubview(menu)
     }
 
     /// Keeps the layers above live ink drawn after them.
     func bringToFront(in view: UIView) {
-        for sublayer in [loopLayer, boxLayer] + handleLayers { view.layer.addSublayer(sublayer) }
+        for sublayer in [loopLayer, boxLayer, sheetEdge, catchGuide] + handleLayers { view.layer.addSublayer(sublayer) }
         view.bringSubviewToFront(menu)
     }
 
@@ -64,6 +78,8 @@ final class SelectionOverlay {
         CATransaction.setDisableActions(true)
         loopLayer.strokeColor = accent
         boxLayer.strokeColor = accent
+        sheetEdge.strokeColor = accent
+        catchGuide.strokeColor = Palette.snap(dark: dark).cgColor
         for handle in handleLayers {
             handle.strokeColor = accent
             handle.fillColor = Palette.ground(dark: dark).cgColor
@@ -107,6 +123,39 @@ final class SelectionOverlay {
         origin.x = min(max(origin.x, left + 6), bounds.width - right - size.width - 6)
         origin.y = min(max(origin.y, top + 6), bounds.height - size.height - 6)
         menu.frame = CGRect(origin: origin, size: size)
+    }
+
+    /// Shows a selected sheet's edge from its corners on screen, and, while a twist has caught on a quarter turn, the guide
+    /// through its centre along the sheet's edges (`angle` degrees counter-clockwise); nothing without a sheet. A few
+    /// points, so a turn pays for one short path a frame.
+    func showSheet(corners: [CGPoint]?, centre: CGPoint, catchAngle: Double?, in bounds: CGRect) {
+        if corners == nil, !showsSheet { return }
+        showsSheet = corners != nil
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard let corners, let first = corners.first else {
+            sheetEdge.path = nil
+            catchGuide.path = nil
+            return
+        }
+        let edge = CGMutablePath()
+        edge.move(to: first)
+        for corner in corners.dropFirst() { edge.addLine(to: corner) }
+        edge.closeSubpath()
+        sheetEdge.path = edge
+        guard let catchAngle else {
+            catchGuide.path = nil
+            return
+        }
+        let (c, s) = SheetAngle.cosineAndSine(catchAngle)
+        let reach = max(bounds.width, bounds.height) * 2
+        let guide = CGMutablePath()
+        guide.move(to: CGPoint(x: centre.x - c * reach, y: centre.y + s * reach))
+        guide.addLine(to: CGPoint(x: centre.x + c * reach, y: centre.y - s * reach))
+        guide.move(to: CGPoint(x: centre.x - s * reach, y: centre.y - c * reach))
+        guide.addLine(to: CGPoint(x: centre.x + s * reach, y: centre.y + c * reach))
+        catchGuide.path = guide
     }
 
     /// The corner handle near a screen point (0 top left, then clockwise), if any.
@@ -205,4 +254,134 @@ final class SelectionMenu: UIView {
 
     @objc private func duplicateTapped(_ sender: UIButton) { duplicateAction() }
     @objc private func deleteTapped(_ sender: UIButton) { deleteAction() }
+}
+
+/// What sits under the top bar while a sheet is selected (#44), as the prototype at `prototype/sheet-rotate` has it: the
+/// sheet's angle, which can't be tapped, 90° left and 90° right, Change scale, and Done.
+@MainActor
+final class SheetStrip: UIView {
+    private let angleLabel = UILabel()
+    private let angleBox = UIView()
+    private let turnLeft: UIButton
+    private let turnRight: UIButton
+    private let changeScale: UIButton
+    private let done: UIButton
+    private var shownAngle: String?
+
+    /// `scaleMenu` builds the Change scale menu when it is opened, so a selected sheet reads nothing until then.
+    init(turn: @escaping @MainActor @Sendable (Double) -> Void,
+         scaleMenu: @escaping @MainActor @Sendable () async -> [UIMenuElement],
+         done doneAction: @escaping @MainActor @Sendable () -> Void) {
+        turnLeft = SheetStrip.button("90° left", symbol: "rotate.left", hint: "Turns the sheet a quarter turn left") { turn(90) }
+        turnRight = SheetStrip.button("90° right", symbol: "rotate.right", hint: "Turns the sheet a quarter turn right") { turn(-90) }
+        changeScale = SheetStrip.button("Change scale", symbol: nil, hint: "Picks another drawing scale. The sheet takes the size that scale gives it") {}
+        done = SheetStrip.button("Done", symbol: nil, hint: "Lets go of the sheet", filled: true) { doneAction() }
+        super.init(frame: .zero)
+        changeScale.showsMenuAsPrimaryAction = true
+        changeScale.menu = UIMenu(title: "Drawing scale. The sheet takes the size this scale gives it.", children: [
+            UIDeferredMenuElement.uncached { completion in
+                Task { @MainActor in completion(await scaleMenu()) }
+            },
+        ])
+        angleLabel.font = .monospacedSystemFont(ofSize: 14, weight: .semibold)
+        angleLabel.textAlignment = .center
+        angleLabel.translatesAutoresizingMaskIntoConstraints = false
+        angleBox.translatesAutoresizingMaskIntoConstraints = false
+        angleBox.layer.cornerRadius = 10
+        angleBox.layer.borderWidth = 1
+        angleBox.addSubview(angleLabel)
+        // Wide enough for 359.9°, so the buttons beside it hold still through a turn.
+        NSLayoutConstraint.activate([
+            angleBox.widthAnchor.constraint(equalToConstant: 72),
+            angleBox.heightAnchor.constraint(equalToConstant: 44),
+            angleLabel.centerXAnchor.constraint(equalTo: angleBox.centerXAnchor),
+            angleLabel.centerYAnchor.constraint(equalTo: angleBox.centerYAnchor),
+        ])
+        let stack = UIStackView(arrangedSubviews: [angleBox, turnLeft, turnRight, changeScale, done])
+        stack.axis = .horizontal
+        stack.spacing = 5
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        isAccessibilityElement = false
+        accessibilityContainerType = .semanticGroup
+        accessibilityLabel = "Selected sheet"
+        angleBox.isAccessibilityElement = true
+        applyColours(dark: traitCollection.userInterfaceStyle == .dark)
+        isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    private static func button(_ title: String, symbol: String?, hint: String, filled: Bool = false,
+                               action: @escaping @MainActor @Sendable () -> Void) -> UIButton {
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = title
+        if let symbol { configuration.image = UIImage(systemName: symbol) }
+        configuration.imagePadding = 5
+        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 13)
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 11, bottom: 0, trailing: 11)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.systemFont(ofSize: 13.5, weight: filled ? .semibold : .regular)
+            return attributes
+        }
+        let button = UIButton(configuration: configuration, primaryAction: UIAction { _ in MainActor.assumeIsolated { action() } })
+        button.layer.cornerRadius = 10
+        button.layer.borderWidth = 1
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.12
+        button.layer.shadowRadius = 4
+        button.layer.shadowOffset = CGSize(width: 0, height: 1)
+        button.accessibilityHint = hint
+        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        return button
+    }
+
+    /// The prototype's panel, line and accent.
+    func applyColours(dark: Bool) {
+        let panel = dark ? UIColor(hex: 0x242529) : UIColor(hex: 0xFBF9F5)
+        let line = dark ? UIColor(hex: 0x3A3B40) : UIColor(hex: 0xD9D4C9)
+        let ink = dark ? UIColor(hex: 0xE8E6E1) : UIColor(hex: 0x1D1D1F)
+        let accent = Palette.selection(dark: dark)
+        angleBox.backgroundColor = panel
+        angleBox.layer.borderColor = line.cgColor
+        angleLabel.textColor = ink
+        for button in [turnLeft, turnRight, changeScale] {
+            button.backgroundColor = panel
+            button.layer.borderColor = line.cgColor
+            button.configuration?.baseForegroundColor = ink
+        }
+        done.backgroundColor = accent
+        done.layer.borderColor = accent.cgColor
+        done.configuration?.baseForegroundColor = dark ? UIColor(hex: 0x1F2023) : UIColor(hex: 0xFFFDF9)
+    }
+
+    /// Shows the strip with the sheet's angle, under the top bar; nil hides it. The angle's text is set only when it reads
+    /// differently, and its box holds its width, so a turn lays out one label.
+    func show(angle: Double?, in bounds: CGRect) {
+        guard let angle else {
+            if !isHidden { isHidden = true }
+            return
+        }
+        let text = SheetAngle.reading(angle)
+        if text != shownAngle {
+            shownAngle = text
+            angleLabel.text = text
+            angleBox.accessibilityLabel = "Angle \(text), counter-clockwise"
+        }
+        if isHidden {
+            isHidden = false
+            let size = systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+            let chrome = CanvasEditor.chromeInsets
+            frame = CGRect(x: CGFloat(chrome.left) + 6, y: CGFloat(chrome.top) + 4, width: size.width, height: size.height)
+        }
+    }
 }

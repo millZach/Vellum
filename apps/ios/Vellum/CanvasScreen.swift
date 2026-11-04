@@ -466,7 +466,8 @@ private struct StatusBar: View {
             PenReadout(editor: editor)
             ScaleReadout(editor: editor)
             // The prompt always shows in full (#12): the status wording is kept short enough to leave it room.
-            ToolPrompt(tool: editor.tool, hasSelection: !editor.selection.isEmpty, step: editor.toolStep)
+            ToolPrompt(tool: editor.tool, hasSelection: !editor.selection.isEmpty, hasSheet: editor.selection.sheet != nil,
+                       step: editor.toolStep)
                 .fixedSize()
                 .frame(maxWidth: .infinity, alignment: .leading)
             // The count takes the shortest wording that leaves everything else whole (#33).
@@ -514,12 +515,14 @@ private struct ToolPrompt: View {
     let tool: CanvasTool
     /// Whether the lasso has a selection, which it then says to drag (#7).
     let hasSelection: Bool
+    /// Whether the lasso has picked up a sheet, which it then says to twist or drag (#44).
+    let hasSheet: Bool
     /// Where a measure, dimension or window is up to (#8).
     let step: CanvasTool.Step
     @AppStorage(FingerDrawingSetting.storageKey) private var fingerDraws = FingerDrawingSetting.default
 
     var body: some View {
-        Text(tool.prompt(fingerDraws: fingerDraws, hasSelection: hasSelection, step: step))
+        Text(tool.prompt(fingerDraws: fingerDraws, hasSelection: hasSelection, hasSheet: hasSheet, step: step))
             .foregroundStyle(Chrome.secondaryText)
             .lineLimit(1)
             .truncationMode(.tail)

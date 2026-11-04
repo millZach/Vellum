@@ -54,6 +54,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             textOverlay.isDark = isDark
             annotationOverlay.isDark = isDark
             selectionOverlay.setDark(isDark)
+            sheetStrip.applyColours(dark: isDark)
             applyColours()
         }
     }
@@ -64,6 +65,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         didSet {
             guard tool != oldValue else { return }
             textTap.isEnabled = tool == .textBox && editor.placingSheet == nil
+            updateSheetTap()
             scribble?.isActive = tool == .textBox
             if oldValue == .textBox { textOverlay.finishEditing() }
             // A measure, a dimension half placed, a window: each belongs to its tool and goes when it is put down.
@@ -90,11 +92,13 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             guard fingerDraws != oldValue else { return }
             pan.minimumNumberOfTouches = fingerDraws ? 2 : 1
             placeTap.isEnabled = editor.placingSheet != nil && !fingerDraws
+            updateSheetTap()
             accessibilityHint = FingerDrawingSetting.accessibilityHint(fingerDraws: fingerDraws)
             fingersOnGlass = 0
         }
     }
     private let pan = UIPanGestureRecognizer()
+    private let pinch = UIPinchGestureRecognizer()
     /// With Draw with finger on: whether the finger stroke in progress is ink yet.
     private var fingerGate = FingerStrokeGate()
     /// With Draw with finger on: fingers on the canvas, so a finger only starts a stroke alone.
@@ -158,6 +162,44 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private var lassoPath = CGMutablePath()
     private var lastLassoScreen: CGPoint = .zero
     private var drag: SelectionDrag?
+
+    // A selected sheet (#44): the strip under the top bar, a finger's tap that picks one up, and the turn or move under way.
+    private lazy var sheetStrip = SheetStrip(
+        turn: { [weak self] quarter in self?.turnSelectedSheet(by: quarter) },
+        scaleMenu: { [weak self] in await self?.sheetScaleMenu() ?? [] },
+        done: { [weak self] in self?.editor.select(.empty) })
+    private let sheetTap = UITapGestureRecognizer()
+    private var sheetDrag: SheetDrag?
+    /// What the fingers' pan is doing: panning the canvas, or the selected sheet's turn or move.
+    private var fingerGesture = FingerGesture.panning
+    /// The angle waiting to go to the status bar on the next frame.
+    private var pendingTurnStep: CanvasTool.Step?
+
+    private enum FingerGesture {
+        case panning
+        case sheet
+        /// A twist's finger lifted: the rest of the gesture does nothing.
+        case finished
+    }
+
+    /// A selected sheet's turn or move under way. The sheet's layers, its markups' lifted strokes, text boxes and
+    /// dimensions each take one transform a frame; nothing is drawn. It becomes one undo step when it ends.
+    private struct SheetDrag {
+        enum Kind {
+            /// From a canvas point; `moved` once it has gone far enough not to be a tap.
+            case move(start: CanvasPoint, moved: Bool)
+            /// From the fingers' angle, in degrees; `moved` once it has turned far enough not to be a pair of fingers resting.
+            case twist(from: Double, moved: Bool)
+        }
+        var kind: Kind
+        let lift: CanvasEditor.SheetLift
+        let base: Viewport
+        let layer: CALayer
+        var after: Sheet
+        var motion: SheetMotion
+        var caught = false
+        let byFinger: Bool
+    }
 
     /// A drag of the selection: moving it, or resizing it from a corner about the opposite one. The selected strokes
     /// are lifted out of the tiles onto `layer`, in screen points of `base`, and the drag changes only its transform.
@@ -233,6 +275,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         selectionOverlay.install(in: self)
         layer.addSublayer(loupe.layer)
         addSubview(windowMenu)
+        addSubview(sheetStrip)
         selectionOverlay.setDark(isDark)
         applyColours()
 
@@ -251,6 +294,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         sheetRenderer.setSheets(editor.sheets)
         editor.willChangeHistory = { [weak self] in
             self?.textOverlay.finishEditing()
+            self?.finishSheetDrag(keep: false)
             // Undo part way through a dimension or measure starts it again, as the prototype does.
             self?.resetLengthsAndRegions(keepingMeasure: true)
         }
@@ -267,7 +311,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         pan.delegate = self
         addGestureRecognizer(pan)
 
-        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        pinch.addTarget(self, action: #selector(handlePinch(_:)))
         pinch.allowedTouchTypes = directTouches
         pinch.delegate = self
         addGestureRecognizer(pinch)
@@ -286,6 +330,13 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         placeTap.isEnabled = false
         placeTap.delegate = self
         addGestureRecognizer(placeTap)
+
+        // With the lasso in hand, a finger's tap picks up a sheet (#44); the Pencil's goes through the touches below.
+        sheetTap.addTarget(self, action: #selector(handleSheetTap(_:)))
+        sheetTap.allowedTouchTypes = directTouches
+        sheetTap.isEnabled = false
+        sheetTap.delegate = self
+        addGestureRecognizer(sheetTap)
         let scribble = CanvasScribble(overlay: textOverlay, host: self) { [weak self] point in self?.placeText(at: point) }
         addInteraction(UIIndirectScribbleInteraction(delegate: scribble))
         self.scribble = scribble
@@ -658,7 +709,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             }
             return
         }
-        if lassoing || drag != nil {
+        if lassoing || drag != nil || sheetDrag != nil {
             lassoMoved(samples)
             return
         }
@@ -693,7 +744,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         if regionInput != nil {
             regionMoved(samples)
             finishRegionInput(keep: keep)
-        } else if lassoing || drag != nil {
+        } else if lassoing || drag != nil || sheetDrag != nil {
             lassoMoved(samples)
         } else if !samples.isEmpty, snappedShape == nil {
             consume(samples, ending: true)
@@ -735,6 +786,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         if erasing { editor.endEraserSweep() }
         if lassoing { finishLoop(keep: keep) }
         if drag != nil { finishDrag(keep: keep) }
+        if let sheetDrag, !sheetDrag.byFinger { finishSheetDrag(keep: keep) }
         if var stroke = liveStroke, let base = liveBase {
             // The line and shape tool snaps when it lifts, to a line, a rectangle or an ellipse, or else a straight
             // line from end to end; the pen only when it was held still.
@@ -794,7 +846,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func stopDisplayLinkIfIdle() {
-        guard liveTouch == nil, liveStroke == nil, !erasing, !lassoing, drag == nil, regionInput == nil,
+        guard liveTouch == nil, liveStroke == nil, !erasing, !lassoing, drag == nil, sheetDrag == nil, regionInput == nil,
               fingersDown == 0 else { return }
         displayLink?.invalidate()
         displayLink = nil
@@ -815,6 +867,11 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         if placingMoved {
             placingMoved = false
             updatePlacingOutline()
+        }
+        // A twist's angle reaches the status bar at most once a frame.
+        if let step = pendingTurnStep {
+            pendingTurnStep = nil
+            if sheetDrag != nil, editor.toolStep != step { editor.toolStep = step }
         }
         publishPenPosition()
     }
@@ -843,11 +900,21 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         case .began:
             lastPanTranslation = .zero
             gestureBegan()
+            fingerGesture = beginSheetFingers(pan) ? .sheet : .panning
         case .changed:
             let t = pan.translation(in: self)
-            panBy(dx: t.x - lastPanTranslation.x, dy: t.y - lastPanTranslation.y)
+            switch fingerGesture {
+            case .panning:
+                panBy(dx: t.x - lastPanTranslation.x, dy: t.y - lastPanTranslation.y)
+            case .sheet:
+                sheetFingersMoved(pan)
+            case .finished:
+                break
+            }
             lastPanTranslation = t
         case .ended, .cancelled, .failed:
+            if fingerGesture == .sheet, sheetDrag?.byFinger == true { finishSheetDrag(keep: pan.state == .ended) }
+            fingerGesture = .panning
             gestureEnded()
         default:
             break
@@ -860,7 +927,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             lastPinchScale = 1
             gestureBegan()
         case .changed:
-            zoomBy(pinch.scale / lastPinchScale, about: pinch.location(in: self))
+            // A selected sheet's turn or move holds the view still.
+            if sheetDrag == nil { zoomBy(pinch.scale / lastPinchScale, about: pinch.location(in: self)) }
             lastPinchScale = pinch.scale
         case .ended, .cancelled, .failed:
             gestureEnded()
@@ -917,6 +985,14 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         guard let view = touch.view, view !== self else { return true }
         if let typing = textOverlay.editing?.view, view.isDescendant(of: typing) { return false }
         return !view.isDescendant(of: selectionOverlay.menu) && !view.isDescendant(of: windowMenu)
+            && !view.isDescendant(of: sheetStrip)
+    }
+
+    /// Two fingers both on the selected sheet twist it, so they never pinch the canvas (#44). Any others pinch as they do
+    /// today.
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === pinch, fingersAreOnSelectedSheet(pinch) || sheetDrag != nil { return false }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 }
 
@@ -976,6 +1052,11 @@ extension InkCanvasUIView {
     /// The Pencil touched down with the lasso: on a corner handle it resizes the selection, on the selection it moves
     /// it, anywhere else it starts a new loop and lets go of the selection.
     private func beginLasso(at location: CGPoint, point: CanvasPoint) {
+        // On a selected sheet the Pencil moves it (#44); anywhere else lets go of it and starts a loop.
+        if let sheet = editor.selectedSheet, sheet.contains(point) {
+            beginSheetDrag(.move(start: point, moved: false), byFinger: false)
+            return
+        }
         if !editor.selection.isEmpty, let bounds = editor.selectionBounds {
             if let corner = selectionOverlay.handle(at: location) {
                 let corners = [CanvasPoint(x: bounds.minX, y: bounds.minY), CanvasPoint(x: bounds.maxX, y: bounds.minY),
@@ -1006,6 +1087,10 @@ extension InkCanvasUIView {
     private func lassoMoved(_ samples: [CGPoint]) {
         guard let last = samples.last else { return }
         pendingPenPosition = canvasPoint(last)
+        if sheetDrag != nil {
+            moveSheetDrag(to: canvasPoint(last))
+            return
+        }
         if drag != nil {
             dragTo(canvasPoint(last))
             return
@@ -1035,6 +1120,14 @@ extension InkCanvasUIView {
         CATransaction.setDisableActions(true)
         selectionOverlay.loopLayer.path = nil
         CATransaction.commit()
+        // A tap, not a loop: picks up the sheet under it (#44).
+        if keep, let first = lassoPoints.first, lassoPoints.allSatisfy({ point in
+            editor.viewport.canvasLength(ofScreen: Self.sheetTapReach) >= first.distance(to: point)
+        }) {
+            lassoPoints = []
+            pickUpSheet(at: first)
+            return
+        }
         if keep, lassoPoints.count >= 3 {
             editor.selectInLoop(lassoPoints)
             let count = editor.selection.count
@@ -1140,6 +1233,15 @@ extension InkCanvasUIView {
         }
     }
 
+    /// The transform taking screen points of `base` to screen points of `viewport`, with a sheet's turn, move or scale
+    /// change of the canvas between: a turn, a scale and an offset.
+    static func transform(from base: Viewport, to viewport: Viewport, applying motion: SheetMotion) -> CATransform3D {
+        let k = motion.scale * viewport.pointsPerInch / base.pointsPerInch
+        let (c, s) = SheetAngle.cosineAndSine(motion.turn)
+        let origin = viewport.screenPoint(for: motion.apply(base.canvasPoint(for: ScreenPoint(x: 0, y: 0))))
+        return CATransform3DMakeAffineTransform(CGAffineTransform(a: k * c, b: -k * s, c: k * s, d: k * c, tx: origin.x, ty: origin.y))
+    }
+
     /// The transform taking screen points of `base` to screen points of `viewport`, with a move or resize of the
     /// canvas between: a scale and an offset.
     static func transform(from base: Viewport, to viewport: Viewport, applying move: CanvasTransform) -> CATransform3D {
@@ -1165,6 +1267,7 @@ extension InkCanvasUIView {
                           height: selected.size.height.inches * viewport.pointsPerInch)
         }
         selectionOverlay.show(ink: rect, count: editor.selection.count, showsMenu: drag == nil, in: bounds)
+        updateSelectedSheet()
     }
 
     #if DEBUG
@@ -1422,6 +1525,7 @@ extension InkCanvasUIView {
         placingTip = nil
         placingDown = false
         placeTap.isEnabled = placing && !fingerDraws
+        updateSheetTap()
         textTap.isEnabled = tool == .textBox && !placing
         if placing { resetLengthsAndRegions(keepingMeasure: false) }
         shownViewport = nil
@@ -1458,4 +1562,298 @@ extension InkCanvasUIView {
             UIAccessibility.post(notification: .announcement, argument: "Placed \(placed.label)")
         }
     }
+}
+
+// MARK: - Turning and moving a selected sheet (#44)
+
+extension InkCanvasUIView {
+    /// How far a tap may wander, in screen points, and still be a tap.
+    fileprivate static let sheetTapReach = 8.0
+    /// How far a sheet's move or twist must go, in screen points and degrees, before it is one and not a rested tip.
+    private static let sheetMoveThreshold = 5.0
+    private static let twistThreshold = 0.5
+
+    /// A finger's tap only picks up a sheet with the lasso in hand; with Draw with finger on it goes the Pencil's way.
+    fileprivate func updateSheetTap() {
+        sheetTap.isEnabled = tool == .lasso && editor.placingSheet == nil && !fingerDraws
+    }
+
+    @objc fileprivate func handleSheetTap(_ tap: UITapGestureRecognizer) {
+        guard tap.state == .ended, editor.tool == .lasso, editor.placingSheet == nil else { return }
+        let location = tap.location(in: self)
+        // A tap on ink already selected leaves it to be dragged.
+        if editor.selection.sheet == nil, selectionOverlay.contains(location) { return }
+        pickUpSheet(at: canvasPoint(location))
+    }
+
+    /// Selects the topmost sheet under a canvas point, keeping the selected one if the point is on it; off every sheet,
+    /// lets go of a selected one.
+    fileprivate func pickUpSheet(at point: CanvasPoint) {
+        if let selected = editor.selectedSheet, selected.contains(point) { return }
+        if let sheet = editor.sheet(at: point) {
+            editor.select(CanvasSelection(sheet: sheet.id))
+            UIAccessibility.post(notification: .announcement,
+                                 argument: "Selected \(sheet.label), at \(SheetAngle.reading(sheet.angle))")
+        } else if editor.selection.sheet != nil {
+            editor.select(.empty)
+        }
+    }
+
+    private func fingers(_ gesture: UIGestureRecognizer) -> (CGPoint, CGPoint)? {
+        guard gesture.numberOfTouches == 2 else { return nil }
+        return (gesture.location(ofTouch: 0, in: self), gesture.location(ofTouch: 1, in: self))
+    }
+
+    /// Whether two fingers are both on the selected sheet.
+    fileprivate func fingersAreOnSelectedSheet(_ gesture: UIGestureRecognizer) -> Bool {
+        guard let sheet = editor.selectedSheet, let (a, b) = fingers(gesture) else { return false }
+        return sheet.contains(canvasPoint(a)) && sheet.contains(canvasPoint(b))
+    }
+
+    private static func fingerAngle(_ a: CGPoint, _ b: CGPoint) -> Double {
+        atan2(Double(b.y - a.y), Double(b.x - a.x)) * 180 / .pi
+    }
+
+    /// The fingers' pan began: on the selected sheet, two fingers twist it and one moves it. False leaves them to pan and
+    /// zoom the canvas as they do today.
+    fileprivate func beginSheetFingers(_ pan: UIPanGestureRecognizer) -> Bool {
+        guard sheetDrag == nil, let sheet = editor.selectedSheet else { return false }
+        if let (a, b) = fingers(pan) {
+            guard fingersAreOnSelectedSheet(pan) else { return false }
+            return beginSheetTwist(fingerAngle: Self.fingerAngle(a, b))
+        }
+        guard !fingerDraws, pan.numberOfTouches == 1 else { return false }
+        let t = pan.translation(in: self)
+        let now = pan.location(in: self)
+        let start = canvasPoint(CGPoint(x: now.x - t.x, y: now.y - t.y))
+        guard sheet.contains(start) else { return false }
+        beginSheetDrag(.move(start: start, moved: false), byFinger: true)
+        return sheetDrag != nil
+    }
+
+    /// The fingers moved during a sheet's turn or move. A second finger landing on a move drops it and twists, or pans and
+    /// zooms if it isn't on the sheet, as the first would have; a finger lifting from a twist ends it, and the other
+    /// finger then does nothing until it lifts.
+    fileprivate func sheetFingersMoved(_ pan: UIPanGestureRecognizer) {
+        guard let current = sheetDrag else { return }
+        switch current.kind {
+        case .move:
+            if pan.numberOfTouches >= 2 {
+                finishSheetDrag(keep: false)
+                if let (a, b) = fingers(pan), fingersAreOnSelectedSheet(pan) {
+                    _ = beginSheetTwist(fingerAngle: Self.fingerAngle(a, b))
+                } else {
+                    fingerGesture = .panning
+                }
+                return
+            }
+            moveSheetDrag(to: canvasPoint(pan.location(in: self)))
+        case .twist:
+            guard let (a, b) = fingers(pan) else {
+                finishSheetDrag(keep: true)
+                fingerGesture = .finished
+                return
+            }
+            twistSheet(fingerAngle: Self.fingerAngle(a, b))
+        }
+    }
+
+    /// Lifts the selected sheet's markups onto a layer of their own and starts following it. The choosing and the layer
+    /// are built once, here; each frame after is transforms.
+    private func beginSheetDrag(_ kind: SheetDrag.Kind, byFinger: Bool) {
+        guard sheetDrag == nil, let lift = editor.liftSheet() else { return }
+        let base = editor.viewport
+        let inkLayer = dragLayer(for: lift.strokes, drawnAt: base)
+        // Many strokes turn as one image, as a selection's move slides as one (#32); a few stay as paths, sharp and whole
+        // when ones off screen turn into view.
+        if lift.strokes.count > Self.rasterizedStrokes {
+            inkLayer.shouldRasterize = true
+            inkLayer.rasterizationScale = traitCollection.displayScale
+        }
+        layer.addSublayer(inkLayer)
+        selectionOverlay.bringToFront(in: self)
+        sheetDrag = SheetDrag(kind: kind, lift: lift, base: base, layer: inkLayer, after: lift.sheet,
+                              motion: SheetMotion(centre: lift.sheet.centre), byFinger: byFinger)
+        annotationOverlay.beginSheetChange(lift.sheet, markups: lift.markups)
+        startDisplayLink()
+    }
+
+    private static var rasterizedStrokes: Int { 200 }
+
+    /// The Pencil or a finger took a selected sheet to a canvas point: a move by the distance from where it touched down.
+    private func moveSheetDrag(to point: CanvasPoint) {
+        guard var current = sheetDrag, case .move(let start, var moved) = current.kind else { return }
+        if !moved {
+            let distance = start.distance(to: point).inches * editor.viewport.pointsPerInch
+            guard distance >= Self.sheetMoveThreshold else { return }
+            moved = true
+            current.kind = .move(start: start, moved: true)
+        }
+        let change = current.lift.sheet.moved(dx: point.x - start.x, dy: point.y - start.y)
+        current.after = change.sheet
+        current.motion = change.motion
+        sheetDrag = current
+        showSheetDrag(current)
+    }
+
+    /// Starts a twist of the selected sheet from the fingers' angle, in degrees. False with nothing selected.
+    @discardableResult
+    func beginSheetTwist(fingerAngle: Double) -> Bool {
+        beginSheetDrag(.twist(from: fingerAngle, moved: false), byFinger: true)
+        return sheetDrag != nil
+    }
+
+    /// The fingers' angle, in degrees: it turns freely and catches on a quarter turn. Fingers going clockwise on screen
+    /// turn the sheet clockwise, so its counter-clockwise angle falls.
+    func twistSheet(fingerAngle: Double) {
+        guard var current = sheetDrag, case .twist(let from, var moved) = current.kind else { return }
+        let difference = SheetAngle.normalized(fingerAngle - from)
+        if !moved {
+            guard min(difference, 360 - difference) > Self.twistThreshold else { return }
+            moved = true
+            current.kind = .twist(from: from, moved: true)
+        }
+        let shaped = SheetAngle.shaped(current.lift.sheet.angle - difference)
+        let change = current.lift.sheet.turned(to: shaped.angle)
+        if shaped.caught, !current.caught { UISelectionFeedbackGenerator().selectionChanged() }
+        current.caught = shaped.caught
+        current.after = change.sheet
+        current.motion = change.motion
+        sheetDrag = current
+        pendingTurnStep = shaped.caught ? .caughtSheet(shaped.angle) : .turningSheet(shaped.angle)
+        showSheetDrag(current)
+    }
+
+    /// One transform for the sheet, one for its strokes, one each for what else comes along, the level labels placed
+    /// again, and the edge and the strip's angle: no tile and no stroke is drawn.
+    private func showSheetDrag(_ current: SheetDrag) {
+        sheetRenderer.preview(current.after)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        current.layer.transform = Self.transform(from: current.base, to: editor.viewport, applying: current.motion)
+        CATransaction.commit()
+        textOverlay.dragWithSheet(current.motion, ids: current.lift.markups.texts)
+        annotationOverlay.moveSheet(current.after, motion: current.motion)
+        updateSelectedSheet()
+    }
+
+    /// The turn or move ends: one undo step, or, if it went nowhere or was dropped, the sheet as it was. The strokes' layer
+    /// stays until their tiles are drawn, so the ink never blinks.
+    func finishSheetDrag(keep: Bool) {
+        guard let finished = sheetDrag else { return }
+        sheetDrag = nil
+        pendingTurnStep = nil
+        if keep, finished.after != finished.lift.sheet {
+            editor.dropSheet(to: finished.after, motion: finished.motion)
+            announceSheet(finished.after)
+        } else {
+            editor.dropSheet(to: nil, motion: nil)
+        }
+        settleSheetDrag(finished)
+    }
+
+    private func settleSheetDrag(_ finished: SheetDrag) {
+        sheetRenderer.endPreview()
+        textOverlay.dragWithSheet(nil, ids: finished.lift.markups.texts)
+        annotationOverlay.endSheetChange()
+        switch editor.toolStep {
+        case .turningSheet, .caughtSheet: editor.toolStep = .start
+        default: break
+        }
+        updateSelectedSheet()
+        stopDisplayLinkIfIdle()
+        let layer = finished.layer
+        Task { @MainActor [weak self] in
+            let started = CACurrentMediaTime()
+            while let self, self.renderer.pendingCount > 0, CACurrentMediaTime() - started < 1 {
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.removeFromSuperlayer()
+            CATransaction.commit()
+        }
+    }
+
+    private func announceSheet(_ sheet: Sheet) {
+        UIAccessibility.post(notification: .announcement,
+                             argument: "\(sheet.label), at \(SheetAngle.reading(sheet.angle))")
+    }
+
+    /// A turn button: a quarter turn left (90) or right (-90), one undo step, through the same lift so the ink never
+    /// blinks.
+    fileprivate func turnSelectedSheet(by quarter: Double) {
+        guard let sheet = editor.selectedSheet else { return }
+        applySheetChange(sheet.turned(to: SheetAngle.stepped(sheet.angle, by: quarter)))
+    }
+
+    /// Puts a change made in one go in place: a turn button's, or a scale change's.
+    private func applySheetChange(_ change: (sheet: Sheet, motion: SheetMotion)) {
+        guard sheetDrag == nil else { return }
+        beginSheetDrag(.move(start: .origin, moved: true), byFinger: true)
+        guard var current = sheetDrag else { return }
+        current.after = change.sheet
+        current.motion = change.motion
+        sheetDrag = current
+        showSheetDrag(current)
+        finishSheetDrag(keep: true)
+    }
+
+    /// Picks another drawing scale for the selected sheet (`CanvasEditor.changeSelectedSheetScale`).
+    func changeSelectedSheetScale(to scale: Sheet.Scale) async {
+        guard let change = await editor.changeSelectedSheetScale(to: scale) else { return }
+        applySheetChange(change)
+    }
+
+    /// The Change scale menu: read when it opens, with the scale in hand ticked.
+    fileprivate func sheetScaleMenu() async -> [UIMenuElement] {
+        guard let sheet = editor.selectedSheet else { return [] }
+        let scales = await editor.scalesOffered(for: sheet)
+        return scales.map { scale in
+            UIAction(title: scale.description, state: scale == sheet.scale ? .on : .off) { [weak self] _ in
+                Task { @MainActor in await self?.changeSelectedSheetScale(to: scale) }
+            }
+        }
+    }
+
+    /// Places the selected sheet's edge, its catch guide and the strip's angle.
+    fileprivate func updateSelectedSheet() {
+        let sheet = sheetDrag?.after ?? editor.selectedSheet
+        let viewport = editor.viewport
+        let screen = { (point: CanvasPoint) -> CGPoint in
+            let s = viewport.screenPoint(for: point)
+            return CGPoint(x: s.x, y: s.y)
+        }
+        let caught = sheetDrag?.caught == true
+        selectionOverlay.showSheet(corners: sheet?.corners.map(screen), centre: sheet.map { screen($0.centre) } ?? .zero,
+                                   catchAngle: caught ? sheet?.angle : nil, in: bounds)
+        sheetStrip.show(angle: sheet?.angle, in: bounds)
+        if sheet != nil, subviews.last !== sheetStrip { bringSubviewToFront(sheetStrip) }
+    }
+
+    #if DEBUG
+    /// A tap of the Pencil at a canvas point, as a tap with the lasso in hand: for the captures.
+    func debugTap(at point: CanvasPoint) {
+        let s = editor.viewport.screenPoint(for: point)
+        let at = CGPoint(x: s.x, y: s.y)
+        guard beginInput(at: at) else { return }
+        endInput(samples: [at], keep: true)
+    }
+
+    /// A turn button's tap, for the captures.
+    func debugTurn(by quarter: Double) { turnSelectedSheet(by: quarter) }
+
+    /// A drag of the Pencil on the selected sheet, by a distance on screen: for the captures.
+    func debugDragSheet(by dx: CGFloat, _ dy: CGFloat) {
+        guard let sheet = editor.selectedSheet else { return }
+        let s = editor.viewport.screenPoint(for: sheet.centre)
+        let from = CGPoint(x: s.x, y: s.y)
+        guard beginInput(at: from) else { return }
+        moveInput(samples: [CGPoint(x: from.x + dx / 2, y: from.y + dy / 2)], predicted: [])
+        endInput(samples: [CGPoint(x: from.x + dx, y: from.y + dy)], keep: true)
+    }
+
+    /// The top of the kept labels' fits, read on the canvas as they are: for the captures' log.
+    func debugSheetLabelLines() -> [String] { annotationOverlay.debugLabels }
+    #endif
 }

@@ -52,8 +52,9 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
     }
 
     private(set) var editing: Editing?
-    /// A drag of the selection under way: its transform and the text boxes it moves.
-    private var dragging: (transform: CanvasTransform, ids: Set<TextBoxID>)?
+    /// A drag of the selection or a sheet's turn or move under way: where it takes a box, how much it scales it, and the
+    /// text boxes it moves. Text stays level however a sheet turns (#44).
+    private var dragging: (moved: (TextBox) -> TextBox, scale: Double, ids: Set<TextBoxID>)?
 
     init(editor: CanvasEditor) {
         self.editor = editor
@@ -93,9 +94,9 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
     private func place(_ original: TextBox) {
         guard let host, let viewport else { return }
         // A drag of the selection moves and scales the label by its transform; the text is laid out as saved.
-        let dragScale = dragging.flatMap { $0.ids.contains(original.id) ? $0.transform.scale : nil }
+        let dragScale = dragging.flatMap { $0.ids.contains(original.id) ? $0.scale : nil }
         let moving = dragScale != nil
-        let box = dragging.map { moving ? original.transformed(by: $0.transform) : original } ?? original
+        let box = dragging.map { moving ? $0.moved(original) : original } ?? original
         let fontOnScreen = box.fontSize.inches * viewport.pointsPerInch
         let screenRect = rect(box.rect, viewport)
         let onScreen = screenRect.intersects(host.bounds.insetBy(dx: -40, dy: -40))
@@ -157,7 +158,21 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
 
     /// Moves the selected text boxes' labels with a drag of the selection, by a transform, or puts them back (nil).
     func drag(_ transform: CanvasTransform?, ids: [TextBoxID]) {
-        dragging = transform.map { ($0, Set(ids)) }
+        if let transform {
+            dragging = (moved: { $0.transformed(by: transform) }, scale: transform.scale, ids: Set(ids))
+        } else {
+            dragging = nil
+        }
+        for id in ids { if let box = editor.text(id) { place(box) } }
+    }
+
+    /// Moves the text boxes that come along with a sheet's turn or move, or puts them back (nil). A label moves, level.
+    func dragWithSheet(_ motion: SheetMotion?, ids: [TextBoxID]) {
+        if let motion {
+            dragging = (moved: { $0.moved(by: motion) }, scale: motion.scale, ids: Set(ids))
+        } else {
+            dragging = nil
+        }
         for id in ids { if let box = editor.text(id) { place(box) } }
     }
 

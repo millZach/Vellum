@@ -127,6 +127,17 @@ public struct SheetLabelLayout: Hashable, Sendable {
             quad = LabelQuad(rect)
         }
 
+        /// Its label with its backing, name over scale.
+        public var twoLinesSize: LabelSize {
+            LabelSize(width: max(name.width, scale.width) + areaHorizontalPadding * 2,
+                      height: name.height + scale.height + areaVerticalPadding * 2)
+        }
+
+        /// Its label with its backing, the scale alone.
+        public var scaleAloneSize: LabelSize {
+            LabelSize(width: scale.width + areaHorizontalPadding * 2, height: scale.height + areaVerticalPadding * 2)
+        }
+
         public init(quad: LabelQuad, name: LabelSize, scale: LabelSize) {
             rect = quad.upright ?? LabelRect(x: 0, y: 0, width: 0, height: 0)
             self.name = name
@@ -213,10 +224,7 @@ public struct SheetLabelLayout: Hashable, Sendable {
     }
 
     private static func place(_ area: Area, avoiding taken: [LabelRect]) -> Placed {
-        let twoLines = LabelSize(width: max(area.name.width, area.scale.width) + areaHorizontalPadding * 2,
-                                 height: area.name.height + area.scale.height + areaVerticalPadding * 2)
-        let scaleAlone = LabelSize(width: area.scale.width + areaHorizontalPadding * 2,
-                                   height: area.scale.height + areaVerticalPadding * 2)
+        let twoLines = area.twoLinesSize, scaleAlone = area.scaleAloneSize
         for (fit, size) in [(ScaleAreaLabelFit.twoLines, twoLines), (.scaleAlone, scaleAlone)] {
             guard area.quad.upright != nil else {
                 if let box = spot(in: area.quad, size: size, avoiding: taken) { return Placed(fit: fit, box: box) }

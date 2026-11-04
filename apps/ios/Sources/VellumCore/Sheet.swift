@@ -226,15 +226,6 @@ public struct Sheet: Hashable, Sendable, Identifiable {
                           y: .inches((flat.y - origin.y).inches / canvasPerPrinted))
     }
 
-    /// Where a rectangle of the paper lands on the canvas: exact at 0°, the smallest rectangle holding it otherwise.
-    public func canvasRect(of rect: PaperRect) -> CanvasRect {
-        if angle == 0 {
-            return CanvasRect(origin: canvasPoint(at: PaperPoint(x: rect.x, y: rect.y)),
-                              size: CanvasSize(width: canvasLength(of: rect.width), height: canvasLength(of: rect.height)))
-        }
-        return CanvasRect.enclosing(canvasCorners(of: rect))
-    }
-
     /// A rectangle of the paper's four corners on the canvas: its top left, top right, bottom right and bottom left as
     /// printed.
     public func canvasCorners(of rect: PaperRect) -> [CanvasPoint] {

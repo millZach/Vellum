@@ -128,6 +128,12 @@ sheet_captures() {
       capture "sheet-$what" --ui-tab canvases --ui-reset --ui-new-canvas --ui-sheets "$what"
       tail -30 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
     done
+    # Turning a placed sheet (#44): selected with its buttons, turned 90 degrees and at an angle with level labels, the catch
+    # guide, moved, and after a scale change, each with its measures in sheets.txt.
+    for what in turn-selected turn-90 turn-angle turn-catch turn-moved turn-scale; do
+      capture "sheet-$what" --ui-tab canvases --ui-reset --ui-new-canvas --ui-sheets "$what"
+      tail -30 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
+    done
     # The top bar with the long canvas name, Add sheet on one line beside it (#35).
     capture "top-bar-long-name" --ui-tab canvases --ui-reset --ui-fixture
     WAIT=$saved_wait

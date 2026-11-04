@@ -19,7 +19,7 @@ One JSON file per area, so work on different areas never conflicts:
 | Placed sheets: tiles drawn and kept, PDF downloads | `baselines/sheets.json` | #11 |
 | Syncing canvases to Dropbox: requests and bytes per sync, the folder check and re-upload after a deleted folder, leaving a canvas | `baselines/sync.json` | #12, #37 |
 
-Later areas (`jobs`) add their own file the same way. The pan, pinch and draw frame times over a placed sheet are timings in `canvas-rendering.json` (`sheet_pan_*`, `sheet_pinch_*`, `sheet_draw_*`), since the same benchmark records them.
+Later areas (`jobs`) add their own file the same way. The pan, pinch, draw and turn frame times over a placed sheet are timings in `canvas-rendering.json` (`sheet_pan_*`, `sheet_pinch_*`, `sheet_draw_*`, `sheet_turn_*`), since the same benchmark records them. The `sheet_turn` scenario twists the placed sheet two fingers' worth, 1.5° a frame for 240 frames, through its catches, and logs `tiles_drawn_during_turn`, which should be 0.
 
 Each file is `{ "area": "...", "entries": [ ... ] }`, and each entry:
 

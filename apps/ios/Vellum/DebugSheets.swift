@@ -357,7 +357,7 @@ enum DebugSheets {
         // Across Detail 2's printed 2'-0", as Measure would read it.
         let printed = MadeUpSheets.detailSheet.dimensions[1]
         editor.addDimension(start: sheet.canvasPoint(at: printed.from), end: sheet.canvasPoint(at: printed.to),
-                            through: at(7.5, 3.1))
+                            through: at(7.5, 6.9))
         editor.colour = .red
         // A frame beside it, which stays square to the canvas.
         let corner = at(-5, -3)

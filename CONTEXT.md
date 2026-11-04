@@ -25,11 +25,11 @@ A stroke straightened into a line, a rectangle or a circle (or an ellipse): the 
 _Avoid_: shape recognition, auto-shape, perfect shape
 
 **Lasso**:
-The tool that selects by drawing a loop: it takes every stroke at least half inside the loop, every text box whose centre is inside, every dimension whose text is inside, and every frame wholly inside.
+The tool that selects by drawing a loop: it takes every stroke at least half inside the loop, every text box whose centre is inside, every dimension whose text is inside, and every frame wholly inside. A tap with it picks up the topmost sheet under the tap instead; a loop never takes a sheet.
 _Avoid_: marquee, selection tool, window (a window is a dragged rectangle)
 
 **Selection**:
-The strokes, text boxes, dimensions and frames the lasso has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner, duplicated or deleted, each as one undo step. It is not saved, and it stays selected through undo and redo.
+The strokes, text boxes, dimensions and frames the lasso has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner, duplicated or deleted, each as one undo step; or the one sheet a tap took, shown with its edge in the accent and a strip under the top bar, which can be turned, moved or changed in scale. It is not saved, and it stays selected through undo and redo.
 _Avoid_: group, highlight
 
 **Draw with finger**:
@@ -41,7 +41,7 @@ What a colour of ink means to an agent: red is something to add, green is someth
 _Avoid_: pen colour, highlight
 
 **Ink log**:
-The record on the Duo of every change to a canvas's ink, text boxes, dimensions, frames and sheets since its last snapshot (a stroke drawn, strokes erased, a selection moved, resized, duplicated or deleted, a text box placed or edited, a dimension, frame or sheet placed, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
+The record on the Duo of every change to a canvas's ink, text boxes, dimensions, frames and sheets since its last snapshot (a stroke drawn, strokes erased, a selection moved, resized, duplicated or deleted, a text box placed or edited, a dimension, frame or sheet placed, a sheet turned, moved or changed in scale, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
 _Avoid_: journal, history file, autosave
 
 **Canvas saver**:
@@ -77,15 +77,23 @@ Typed text placed on the canvas, with a position and a size, its letters a real-
 _Avoid_: label, note
 
 **Sheet**:
-A PDF page placed on the canvas at its drawing scale, so that its contents sit at real-world size and line up with anything else drawn at the same place. It is placed from Add sheet: a PDF picked in Dropbox, a page picked from its page grid, its scale confirmed, then a tap where it goes. A canvas holds any number, the last placed on top.
+A PDF page placed on the canvas at its drawing scale, so that its contents sit at real-world size and line up with anything else drawn at the same place. It is placed from Add sheet: a PDF picked in Dropbox, a page picked from its page grid, its scale confirmed, then a tap where it goes. A canvas holds any number, the last placed on top. Selected, it can be turned, moved or changed in scale; it never takes a free resize, which would make every length on it wrong.
 _Avoid_: PDF (the file), page, underlay
+
+**Sheet angle**:
+How far a sheet is turned about its centre, read counter-clockwise from 0° up to 360°, to a tenth of a degree. It shows on the selected sheet and can't be typed. A two-finger twist turns it freely and catches on 0°, 90°, 180° or 270° within 3°, with a guide showing the catch; the turn buttons step it a quarter turn. A length read on a sheet is the same at any angle.
+_Avoid_: rotation, orientation (a dimension has an orientation), bearing
+
+**Markups that come along**:
+What goes with a sheet when it turns, moves or changes scale, chosen at the start of each: ink and dimensions with more than half their length on it, and text boxes with their centre on it. Marks mostly off it stay, and so do frames, which stay square to the canvas. One undo puts it all back. A text box's text stays level; a dimension's axes turn with the sheet, so it reads the same length.
+_Avoid_: attached ink, children, bound markups
 
 **Sheet number**:
 The number a sheet's title block gives it, such as M-101, read off the PDF page's text; the page grid and a placed sheet's label show it.
 _Avoid_: drawing number (a drawing's number is the index's), page number
 
 **Scale area**:
-A region of a sheet drawn at a scale of its own, such as a detail marked `SCALE: 1 1/2" = 1'-0"` on an AS NOTED sheet. The sheet is placed at its main scale; inside a scale area, Measure and Dimension read the area's scale, or printed inches marked NTS in an NTS area. Vellum finds them from the scales written under the details and outlines them on the sheet.
+A region of a sheet drawn at a scale of its own, such as a detail marked `SCALE: 1 1/2" = 1'-0"` on an AS NOTED sheet. The sheet is placed at its main scale; inside a scale area, Measure and Dimension read the area's scale, or printed inches marked NTS in an NTS area. Vellum finds them from the scales written under the details and outlines them on the sheet. They are on the paper, so they always turn with it, and their labels stay level.
 _Avoid_: viewport, detail sheet, crop
 
 **Drawing scale**:

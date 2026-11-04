@@ -174,10 +174,6 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private var fingerGesture = FingerGesture.panning
     /// The angle waiting to go to the status bar on the next frame.
     private var pendingTurnStep: CanvasTool.Step?
-    #if DEBUG || BENCHMARK
-    /// Each part of a turn's frame, in milliseconds, for the benchmark.
-    var debugTurnTimes: [String: [Double]] = [:]
-    #endif
 
     private enum FingerGesture {
         case panning
@@ -1733,26 +1729,16 @@ extension InkCanvasUIView {
     /// One transform for the sheet, one for its strokes, one each for what else comes along, the level labels placed
     /// again, and the edge and the strip's angle: no tile and no stroke is drawn.
     private func showSheetDrag(_ current: SheetDrag) {
-        debugTiming("1 sheet") { sheetRenderer.preview(current.after) }
-        debugTiming("2 ink") {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            current.layer.transform = Self.transform(from: current.base, to: editor.viewport, applying: current.motion)
-            CATransaction.commit()
-        }
-        debugTiming("3 text") { textOverlay.dragWithSheet(current.motion, ids: current.lift.markups.texts) }
-        debugTiming("4 labels") { annotationOverlay.moveSheet(current.after, motion: current.motion) }
-        debugTiming("5 edge and strip") { updateSelectedSheet() }
-    }
-
-    private func debugTiming(_ part: String, _ body: () -> Void) {
-        #if DEBUG || BENCHMARK
-        let started = CACurrentMediaTime()
-        body()
-        debugTurnTimes[part, default: []].append((CACurrentMediaTime() - started) * 1000)
-        #else
-        body()
-        #endif
+        // One commit for the frame: each commit after the first waits on the render server, which on a slow one held the
+        // main thread for two display frames (#44).
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        sheetRenderer.preview(current.after)
+        current.layer.transform = Self.transform(from: current.base, to: editor.viewport, applying: current.motion)
+        textOverlay.dragWithSheet(current.motion, ids: current.lift.markups.texts)
+        annotationOverlay.moveSheet(current.after, motion: current.motion)
+        updateSelectedSheet()
+        CATransaction.commit()
     }
 
     /// The turn or move ends: one undo step, or, if it went nowhere or was dropped, the sheet as it was. The strokes' layer
@@ -1850,14 +1836,6 @@ extension InkCanvasUIView {
     }
 
     #if DEBUG || BENCHMARK
-    /// What the benchmark switches off to find what a turn's slow frames cost.
-    enum DebugTurnPart { case outline, shadow, edge, tiles }
-
-    func debugTurnWithout(_ part: DebugTurnPart?) {
-        selectionOverlay.debugHidesSheetEdge = part == .outline
-        sheetRenderer.debugTurn(noShadow: part == .shadow, noEdge: part == .edge, noTiles: part == .tiles)
-    }
-
     /// How many strokes came along with the turn or move under way, for the benchmark's log.
     var debugSheetDragStrokes: Int { sheetDrag?.lift.strokes.count ?? 0 }
     #endif

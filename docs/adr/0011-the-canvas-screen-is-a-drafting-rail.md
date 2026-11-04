@@ -45,3 +45,15 @@ Send in the top bar and the window menu's "Send… (later)" are faded blue while
 ## Amendment (#45): the full count beside the longer prompts
 
 The sheet and frame count reads in full beside "Draw a line, box or circle", "Dimension: tap first point" and "Tap where the sheet goes" at ordinary coordinates, as Zach chose. The room comes from the scale readout, which kept 120 points whatever it showed. It now keeps the bar's 60 points, its 6-point gap and 40 points for the label, enough for any label up to `50'-0"`. A longer label widens the readout by what it needs, so it is never cut or wrapped; that moves the prompt once as the label changes, and past the room the count shortens to the first wording that fits. The width follows the label and not the bar, so a pinch lays out only the bar between labels. `Scripts/status-bar-check.py` fails the captures job if a usual label beside one of the three prompts loses the full count.
+
+## Amendment (#44): picking up, turning and moving a sheet
+
+As Zach picked them from the prototype at the tag `prototype/sheet-rotate`. The prototype's other options, a handle, a typed angle and a corner drag, are not built.
+
+- **Selecting.** With the lasso in hand, a tap with a finger or the Pencil picks up the topmost sheet under it. The prompt says "Loop ink, or tap a sheet", then "Twist or drag the sheet". A sheet only turns, moves or changes scale while selected, so a pinch can't turn one by accident. A tap off it, Done, or another tool lets it go.
+- **The strip.** Under the top bar, as in the prototype: the sheet's angle, which can't be tapped, then 90° left, 90° right, Change scale (a menu of the scales Add sheet's confirm step offers, the one in hand ticked) and Done. The sheet's edge shows in the accent, turned with it.
+- **Fingers.** Two fingers both on the selected sheet twist it about its centre; they do not also zoom. Two fingers not both on it pan and zoom as they always have. One finger on it moves it; off it, one finger pans. A second finger landing on a move drops the move and goes on as a twist or a pan. One finger lifting from a twist ends it, and the other does nothing until it lifts. So a sheet filling the screen must be let go, with Done, before the canvas can be pinched there. With Draw with finger on, one finger moves it the way the Pencil does.
+- **The Pencil.** It moves the selected sheet by dragging on it; off it, it starts a loop and lets go of the sheet.
+- **The catch.** While a twist is within 3° of a quarter turn a teal dashed guide runs through the sheet's centre along its edges, the status bar says "Caught at 90°", and a light tap of the haptics marks it. Otherwise it says "Turning: 33.5°".
+- **Labels stay level.** A turned sheet's name and scale-area labels start in the paper's corner and slide towards the middle of their sheet or area until they fit inside it, clear of those placed before them (`SheetLabelLayout`). #35's fallbacks hold for the room inside a turned area: name over scale, then scale alone, then outline only. Never cut, never over another. At 0° the layout is exactly #35's.
+

@@ -161,6 +161,26 @@
       "note": "A measure or dimension tap (#8) snapping to the nearest ink end, corner or circle centre within 20 screen points: strokes whose cached bounds the index compares, the worst of ten taps across the middle of the made-up 10,000-stroke canvas at the zoom that fits it all. Through InkIndex, never the whole canvas (before: every stroke). New with #8."
     },
     {
+      "metric": "point_snap_crowded_segment_pairs_per_lookup",
+      "kind": "count",
+      "value": 32640,
+      "before": 0,
+      "unit": "pairs",
+      "tolerance": 0,
+      "measured": "PENDING",
+      "note": "PENDING"
+    },
+    {
+      "metric": "point_snap_crowded_points_per_lookup",
+      "kind": "count",
+      "value": 32000,
+      "before": 0,
+      "unit": "points",
+      "tolerance": 0,
+      "measured": "PENDING",
+      "note": "PENDING"
+    },
+    {
       "metric": "point_snap_points_inspected_per_tap",
       "kind": "count",
       "value": 9485,

@@ -201,11 +201,12 @@ public struct InkIndex: Sendable {
 
     // MARK: Looking things up
 
-    /// The work a lookup did, for the work budgets (docs/perf): strokes whose cached bounds it compared, and stroke
-    /// points it looked at.
+    /// The work a lookup did, for the work budgets (docs/perf): strokes whose cached bounds it compared, stroke points it
+    /// looked at, and pairs of segments or round strokes a snap tested for crossing.
     public struct Work: Hashable, Sendable {
         public var strokesVisited = 0
         public var pointsInspected = 0
+        public var segmentPairsTested = 0
         public init() {}
     }
 

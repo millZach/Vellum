@@ -252,6 +252,12 @@ final class SheetRenderer {
     }
 
     #if DEBUG || BENCHMARK
+    func debugTurn(noShadow: Bool, noEdge: Bool, noTiles: Bool) {
+        withoutAnimation {
+            for holder in holders.values { holder.debugTurn(noShadow: noShadow, noEdge: noEdge, noTiles: noTiles) }
+        }
+    }
+
     /// Sheet tiles kept, for the benchmark's log.
     var debugCachedTiles: Int { book.cachedCount }
     #endif
@@ -279,6 +285,14 @@ private final class SheetLayers {
         paper.shadowOffset = CGSize(width: 0, height: 1)
         container.addSublayer(paper)
     }
+
+    #if DEBUG || BENCHMARK
+    func debugTurn(noShadow: Bool, noEdge: Bool, noTiles: Bool) {
+        paper.shadowOpacity = noShadow ? 0 : 0.18
+        paper.allowsEdgeAntialiasing = !noEdge
+        for level in levels.values { level.container.opacity = noTiles ? 0 : 1 }
+    }
+    #endif
 
     func level(_ level: Int) -> LevelLayer {
         if let existing = levels[level] { return existing }

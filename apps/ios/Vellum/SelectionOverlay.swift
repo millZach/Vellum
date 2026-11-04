@@ -24,6 +24,9 @@ final class SelectionOverlay {
     private let sheetEdge = CAShapeLayer()
     private let catchGuide = CAShapeLayer()
     private var showsSheet = false
+    #if DEBUG || BENCHMARK
+    var debugHidesSheetEdge = false { didSet { sheetEdge.isHidden = debugHidesSheetEdge } }
+    #endif
     let menu: SelectionMenu
     /// The dashed box on screen, when there is a selection.
     private(set) var box: CGRect?

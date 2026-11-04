@@ -279,16 +279,22 @@ final class DebugBenchmark: NSObject {
             // with nothing coming along, to tell the sheet's own layers from the lifted ink's.
             turnScenario(name: "sheet_turn", alone: false),
             turnScenario(name: "sheet_turn_alone", alone: true),
+            turnScenario(name: "sheet_turn_no_outline", alone: true, without: .outline),
+            turnScenario(name: "sheet_turn_no_shadow", alone: true, without: .shadow),
+            turnScenario(name: "sheet_turn_no_edge", alone: true, without: .edge),
+            turnScenario(name: "sheet_turn_no_tiles", alone: true, without: .tiles),
         ]
     }
 
-    private static func turnScenario(name: String, alone: Bool) -> Scenario {
+    private static func turnScenario(name: String, alone: Bool, without: InkCanvasUIView.DebugTurnPart? = nil) -> Scenario {
         Scenario(name: name, frames: 240, setUp: { b in
             b.zoomToSheet()
             b.editor.tool = .lasso
             guard let view = b.view, let sheet = b.placedSheet else { return }
             b.editor.select(CanvasSelection(sheet: sheet.id))
             b.editor.debugSheetComesAlone = alone
+            view.debugTurnWithout(without)
+            view.debugTurnTimes = [:]
             _ = view.beginSheetTwist(fingerAngle: 0)
             b.holdsForTiles = true
             b.record("  \(name) came_along=\(view.debugSheetDragStrokes) pending_at_lift=\(view.pendingRenderCount)")
@@ -305,6 +311,11 @@ final class DebugBenchmark: NSObject {
             let drawn = (b.view?.debugSheetTiles.drawn ?? 0) - b.tilesBeforeTurn
             b.record("  \(name) tiles_drawn_during_turn=\(drawn) angle=\(b.editor.sheets.last?.angle ?? -1)")
             b.editor.debugSheetComesAlone = false
+            b.view?.debugTurnWithout(nil)
+            for (part, times) in (b.view?.debugTurnTimes ?? [:]).sorted(by: { $0.key < $1.key }) {
+                let sorted = times.sorted()
+                b.record("  \(name) part \(part) median=\(b.format(b.percentile(sorted, 0.5))) p95=\(b.format(b.percentile(sorted, 0.95)))")
+            }
             b.editor.tool = .pen
         })
     }
@@ -503,11 +514,11 @@ final class DebugBenchmark: NSObject {
                                                           atomically: true, encoding: .utf8)
     }
 
-    private func percentile(_ sorted: [Double], _ p: Double) -> Double {
+    fileprivate func percentile(_ sorted: [Double], _ p: Double) -> Double {
         guard !sorted.isEmpty else { return 0 }
         return sorted[min(sorted.count - 1, Int((Double(sorted.count - 1) * p).rounded()))]
     }
 
-    private func format(_ value: Double) -> String { String(format: "%.2f", value) }
+    fileprivate func format(_ value: Double) -> String { String(format: "%.2f", value) }
 }
 #endif

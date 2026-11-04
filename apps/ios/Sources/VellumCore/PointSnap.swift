@@ -21,7 +21,7 @@ import Darwin
 /// - **End**: an open stroke's first and last points.
 /// - **Corner**: a point where the stroke turns by more than `cornerTurn`, or at all on a straight stroke (a polygon's 24
 ///   sides turn 15°); and the ends of a closed stroke, which meet at one.
-/// - **Centre**: a round stroke's centre; a regular polygon's, of 3 or from 5 sides; or that of any other closed stroke of at
+/// - **Centre**: a round stroke's centre, which for an arc comes from the index, since it can lie well off the arc's bounds; a regular polygon's, of 3 or from 5 sides; or that of any other closed stroke of at
 ///   least `centreMinimumPoints` points that stay within a factor `centreRoundness` of each other's distance from it, which
 ///   a snapped ellipse does. A rectangle has none, even a square one.
 /// - **Mid**: the middle of a straight stroke's segment.
@@ -237,6 +237,9 @@ public enum PointSnap {
             }
         }
 
+        // An arc's centre may be far off its own bounds, so the strokes found above don't always include it.
+        for centre in index.arcCentres.values { consider(centre.x, centre.y, .centre) }
+
         intersections(segments, rounds, tx, ty, radius, best?.distance, &work, consider)
 
         guard let best else { return Target(point: tip, kind: nil) }
@@ -366,6 +369,14 @@ public enum PointSnap {
         if step > Double.pi { step -= 2 * Double.pi } else if step < -Double.pi { step += 2 * Double.pi }
         return Round(stroke: stroke, x: centre.x, y: centre.y, r: r,
                      arc: (start: start, sweep: step * Double(SnappedShape.arcSegments)))
+    }
+
+    /// Where an arc's centre is, if these points are an arc: exactly `SnappedShape.arcSegments` segments, all as far from it.
+    static func arcCentre(of points: [CanvasPoint]) -> InkIndex.ArcCentre? {
+        guard points.count == SnappedShape.arcSegments + 1,
+              let centre = circumcentre(points[0], points[SnappedShape.arcSegments / 2], points[SnappedShape.arcSegments]),
+              commonDistance(of: points[...], from: centre.x, centre.y) != nil else { return nil }
+        return InkIndex.ArcCentre(x: centre.x, y: centre.y)
     }
 
     private static func circumcentre(_ a: CanvasPoint, _ b: CanvasPoint, _ c: CanvasPoint) -> (x: Double, y: Double)? {

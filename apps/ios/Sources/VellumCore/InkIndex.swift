@@ -65,6 +65,14 @@ public struct InkIndex: Sendable {
     private var levels: [Int: [Cell: [StrokeID]]] = [:]
     /// Every stroke's id, in ascending order, which is the order the ink keeps them in.
     private var ids: [StrokeID] = []
+    /// The centres of the arcs among the strokes (#40). An arc's centre can lie well off its bounds, where a lookup by place
+    /// would never find it, so a snap reads these as well. Only strokes that really are arcs are here, so it stays short.
+    private(set) var arcCentres: [StrokeID: ArcCentre] = [:]
+
+    struct ArcCentre: Sendable {
+        var x: Double
+        var y: Double
+    }
 
     public init() {}
 
@@ -94,6 +102,7 @@ public struct InkIndex: Sendable {
         let cell = Cell(x: Self.cellIndex(box.minX, size), y: Self.cellIndex(box.minY, size))
         entries[stroke.id] = Entry(stroke: stroke, box: box, level: level, cell: cell)
         levels[level, default: [:]][cell, default: []].append(stroke.id)
+        if let centre = PointSnap.arcCentre(of: stroke.points) { arcCentres[stroke.id] = centre }
         let at = Self.insertionPoint(of: stroke.id, in: ids)
         ids.insert(stroke.id, at: at)
     }
@@ -102,6 +111,7 @@ public struct InkIndex: Sendable {
     @discardableResult
     public mutating func remove(_ id: StrokeID) -> InkStroke? {
         guard let entry = entries.removeValue(forKey: id) else { return nil }
+        arcCentres[id] = nil
         // In place, so a level's table of cells is never copied to take one stroke out of it.
         levels[entry.level]?[entry.cell]?.removeAll { $0 == id }
         if levels[entry.level]?[entry.cell]?.isEmpty == true {

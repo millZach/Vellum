@@ -99,6 +99,21 @@ final class PointSnapKindsTests: XCTestCase {
         assertSnap(PointSnap.target(at: p(51, 100), pointsPerInch: ppi, in: ink), .mid, 50, 100)
     }
 
+    /// The index keeps an arc's centre through a removal and a replacement, as it does the arc.
+    func testTheIndexFollowsAnArcsCentre() {
+        var session = InkSession()
+        let arc = session.draw(DrawnShape.arc(start: p(0, 0), end: p(100, 0), bulge: p(50, -25)).shape.points, tool: .pen,
+                               colour: .sketch, width: .inches(0.01))!
+        var index = InkIndex(session.ink)
+        XCTAssertEqual(PointSnap.target(at: p(52, 38), pointsPerInch: ppi, in: index).kind, .centre)
+        index.remove(arc.id)
+        XCTAssertNil(PointSnap.target(at: p(52, 38), pointsPerInch: ppi, in: index).kind)
+        // Forty-nine points that aren't on a circle are no arc.
+        var other = InkSession()
+        other.draw((0..<49).map { k in p(Double(k), sin(Double(k))) }, tool: .pen, colour: .sketch, width: .inches(0.01))
+        XCTAssertTrue(InkIndex(other.ink).arcCentres.isEmpty)
+    }
+
     func testAPolygonSnapsAtItsCentreCornersAndMids() {
         let hexagon = DrawnShape.polygon(centre: p(200, 200), corner: p(248, 200)).shape.points
         let ink = index([hexagon])

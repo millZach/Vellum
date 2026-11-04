@@ -163,22 +163,22 @@
     {
       "metric": "point_snap_crowded_segment_pairs_per_lookup",
       "kind": "count",
-      "value": 8128,
-      "before": 0,
+      "value": 998,
+      "before": 499264200,
       "unit": "pairs",
       "tolerance": 0,
-      "measured": "PENDING",
-      "note": "PENDING"
+      "measured": "feat/drawing-tools f3068dd 2026-11-04 CI run 41876112104 (deterministic; checked by CI VellumCore tests)",
+      "note": "A snap lookup on a crowded canvas (#40): pairs of segments or round strokes tested for crossing, the worst of ten lookups with a point to work from, in a made-up thicket of 400 hand-drawn strokes of 80 points all crossing, zoomed out to 0.25 points per inch. Crossings are looked for only among segments within reach of the tip and no further than the best point so far, swept along x, at most 128 of them, so never more than 8,128 pairs. Before: every segment on that canvas against every other."
     },
     {
       "metric": "point_snap_crowded_points_per_lookup",
       "kind": "count",
-      "value": 32000,
-      "before": 0,
+      "value": 29120,
+      "before": 32000,
       "unit": "points",
       "tolerance": 0,
-      "measured": "PENDING",
-      "note": "PENDING"
+      "measured": "feat/drawing-tools f3068dd 2026-11-04 CI run 41876112104 (deterministic; checked by CI VellumCore tests)",
+      "note": "The same lookups: points read from the strokes near the tip, each such stroke's points once. Nearly every stroke in this thicket runs through the place, which is what makes it the worst case: the index can rule out only what isn't near. Before: every point on that canvas."
     },
     {
       "metric": "point_snap_points_inspected_per_tap",

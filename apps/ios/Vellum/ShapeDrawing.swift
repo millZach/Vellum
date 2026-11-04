@@ -97,6 +97,7 @@ final class ShapeDrawing {
 
     func setDark(_ dark: Bool) {
         isDark = dark
+        label.set("", size: 12, colour: Palette.ground(dark: dark), fill: .clear, weight: .semibold)
         applyColours()
         render()
     }
@@ -308,8 +309,12 @@ final class ShapeDrawing {
         }
         dotsLayer.path = dots
         if isDown, let shape, !draft.placed.isEmpty {
-            label.set(shape.tag(units: editor.canvas.units), size: 12, colour: Palette.ground(dark: isDark),
-                      fill: Palette.sheetText(dark: isDark).withAlphaComponent(0.9), weight: .semibold)
+            // Only when its words change: new text is drawn again, and the tip moves every frame.
+            let words = shape.tag(units: editor.canvas.units)
+            if label.text != words {
+                label.set(words, size: 12, colour: Palette.ground(dark: isDark),
+                          fill: Palette.sheetText(dark: isDark).withAlphaComponent(0.9), weight: .semibold)
+            }
             let spot = aimed.map { screen($0.point) } ?? tip
             let size = label.layer.bounds.size
             let free = host.exactPlacement

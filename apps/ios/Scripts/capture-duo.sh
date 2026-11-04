@@ -262,6 +262,9 @@ for appearance in light dark; do
   capture canvas-loupe --ui-tab canvases --ui-reset --ui-fixture --ui-loupe
   capture canvas-frame --ui-tab canvases --ui-reset --ui-fixture --ui-frame
   capture canvas-window --ui-tab canvases --ui-reset --ui-fixture --ui-window
+  # The longest coordinates (#33) beside the longest prompt, and again beside the widest status.
+  capture canvas-long-coordinates --ui-tab canvases --ui-reset --ui-fixture --ui-long-coordinates --ui-draw-with-finger
+  capture canvas-long-coordinates-offline --ui-tab canvases --ui-reset --ui-sync offline --ui-long-coordinates --ui-draw-with-finger
   WAIT=$saved_wait
 done
 

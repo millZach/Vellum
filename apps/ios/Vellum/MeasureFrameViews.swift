@@ -127,6 +127,34 @@ final class Loupe {
     }
 }
 
+/// A menu item that can't be used yet, faded blue on the window menu's pill (#33). A label, not a disabled `UIButton`,
+/// because UIKit chose a disabled button's title colour itself: dark grey and nearly invisible in light, or white once
+/// told not to update it. Same font and insets as the menu's buttons; touches fall through to the menu, as a disabled
+/// button's do, and VoiceOver hears a dimmed button with its hint.
+@MainActor
+private final class DisabledMenuItem: UILabel {
+    init(title: String, hint: String) {
+        super.init(frame: .zero)
+        text = title
+        font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        textAlignment = .center
+        textColor = UIColor { traits in
+            UIColor(hex: ChromeColourPair.windowMenuDisabled(dark: traits.userInterfaceStyle == .dark).text)
+        }
+        setContentHuggingPriority(.required, for: .horizontal)
+        accessibilityTraits = [.button, .notEnabled]
+        accessibilityHint = hint
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        return CGSize(width: size.width + 18, height: size.height + 12)
+    }
+}
+
 /// What to do with a window dragged on the canvas (#8): zoom to it, make a frame of it, or send it (which comes with
 /// sending jobs, so it is shown and disabled), or close it. Dark, like the selection's menu.
 @MainActor
@@ -143,20 +171,15 @@ final class WindowMenu: UIView {
         closeAction = close
         super.init(frame: .zero)
         backgroundColor = UIColor { traits in
-            traits.userInterfaceStyle == .dark ? UIColor(hex: 0x3A3B40) : UIColor(hex: 0x1D1D1F)
+            UIColor(hex: ChromeColourPair.windowMenuDisabled(dark: traits.userInterfaceStyle == .dark).fill)
         }
         layer.cornerRadius = 10
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOpacity = 0.18
         layer.shadowRadius = 6
         layer.shadowOffset = CGSize(width: 0, height: 2)
-        let send = button("Send… (later)", hint: "Not available yet. Sending a window to an agent comes in a later update.",
-                          action: nil)
-        send.isEnabled = false
-        // Disabled, it stays readable on the dark menu, dimmed.
-        send.configurationUpdateHandler = { button in
-            button.configuration?.baseForegroundColor = UIColor(white: 1, alpha: button.isEnabled ? 1 : 0.45)
-        }
+        let send = DisabledMenuItem(title: "Send… (later)",
+                                    hint: "Not available yet. Sending a window to an agent comes in a later update.")
         let close = button("✕", hint: "Closes the window", action: #selector(closeTapped(_:)))
         close.accessibilityLabel = "Close"
         for view in [

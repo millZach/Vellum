@@ -146,6 +146,13 @@ public struct ChromeColourPair: Hashable, Sendable {
         dark ? ChromeColourPair(text: 0x9CC4EC, fill: 0x2C3A4A) : ChromeColourPair(text: 0x47688A, fill: 0xE6EDF5)
     }
 
+    /// The window menu's disabled "Send… (later)" on the menu's own pill, which is near black in light and dark grey in
+    /// dark (#33, Zach's C): the prototype's lighter blues, since `disabledButton`'s light text reaches only 2.9:1 there.
+    /// The menu takes its pill's colour from `fill`.
+    public static func windowMenuDisabled(dark: Bool) -> ChromeColourPair {
+        dark ? ChromeColourPair(text: 0xB8D6F2, fill: 0x3A3B40) : ChromeColourPair(text: 0x9CC4EC, fill: 0x1D1D1F)
+    }
+
     private static func luminance(_ colour: UInt32) -> Double {
         func channel(_ shift: UInt32) -> Double {
             let value = Double((colour >> shift) & 0xFF) / 255

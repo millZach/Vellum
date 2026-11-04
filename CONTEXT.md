@@ -17,12 +17,28 @@ One continuous line of ink, from where the pen touched down to where it lifted: 
 _Avoid_: line (a line is the line tool's), path, mark
 
 **Line weight**:
-How heavy a pen draws, chosen on the pen (fine, medium or bold), never from how hard the Pencil presses. A stroke keeps the weight it was drawn at as a real-world width, so it zooms with what it marks.
+How heavy a pen draws, chosen on the pen (fine, medium or bold, in the weight picker for the pen and highlighter and at the foot of the shape flyout for line and shape), never from how hard the Pencil presses. A stroke keeps the weight it was drawn at as a real-world width, so it zooms with what it marks.
 _Avoid_: thickness, pressure, size
 
 **Snap**:
-A stroke straightened into a line, a rectangle or a circle (or an ellipse): the pen snaps one when the Pencil holds still at its end for half a second, and the line and shape tool snaps every stroke when it lifts. A snapped stroke is ink like any other, with the shape's points.
+A stroke straightened into a line, a rectangle or a circle (or an ellipse): the pen snaps one when the Pencil holds still at its end for half a second, and the line and shape tool's Draw it snaps every stroke when it lifts. A snapped stroke is ink like any other, with the shape's points.
 _Avoid_: shape recognition, auto-shape, perfect shape
+
+**Shape flyout**:
+The panel beside the rail that opens when line and shape is tapped while in hand: Draw it, Line, Polyline, Rectangle, Circle, Arc and Polygon, with the line weight at its foot. The rail button shows the shape picked. Draw it draws by hand and straightens on lift. Line, Rectangle, Circle and Polygon take a drag or two taps, Polyline a tap per bend, finished with Done, by tapping the last point again or by closing on the first, and Arc its start, its end, then the bulge. Every shape becomes a stroke's points; Vellum stores no separate geometry.
+_Avoid_: shape picker, palette, toolbar
+
+**Angle catch**:
+A line, a polyline's segment or a polygon's first corner within 4° of 0°, 45° or 90° or their multiples pulling onto that angle, with a guide showing. There is no lock button; other angles close to those are typed. Angles read counter-clockwise from east, as in AutoCAD. A snap point beats it.
+_Avoid_: ortho, polar tracking, angle lock
+
+**Tag**:
+The small label that shows a shape's size just after it is drawn: length and angle for a line or a polyline's last segment, W × H for a rectangle, ⌀ and diameter for a circle, sides × side length for a polygon, R and radius for an arc. Tapping it opens the number pad. It goes away when the next thing starts, because ink keeps no shape to come back to.
+_Avoid_: label, chip, badge, dimension (a dimension stays on the canvas)
+
+**Number pad**:
+The small pad a tag opens, which corrects a shape to typed values as its own undo step. A bare number means inches on a feet-and-inches canvas, like AutoCAD (`12` is 12 inches, `12'` is 12 feet, `12'6` is 12'-6"), and the canvas's own unit on any other: feet in decimal feet, millimetres in metric. What it can't read stays on the pad, marked, and changes nothing.
+_Avoid_: keypad, keyboard, command line
 
 **Lasso**:
 The tool that selects by drawing a loop: it takes every stroke at least half inside the loop, every text box whose centre is inside, every dimension whose text is inside, and every frame wholly inside. A tap with it picks up the topmost sheet under the tap instead; a loop never takes a sheet.
@@ -41,7 +57,7 @@ What a colour of ink means to an agent: red is something to add, green is someth
 _Avoid_: pen colour, highlight
 
 **Ink log**:
-The record on the Duo of every change to a canvas's ink, text boxes, dimensions, frames and sheets since its last snapshot (a stroke drawn, strokes erased, a selection moved, resized, duplicated or deleted, a text box placed or edited, a dimension, frame or sheet placed, a sheet turned, moved or changed in scale, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
+The record on the Duo of every change to a canvas's ink, text boxes, dimensions, frames and sheets since its last snapshot (a stroke drawn, a shape corrected through its tag, strokes erased, a selection moved, resized, duplicated or deleted, a text box placed or edited, a dimension, frame or sheet placed, a sheet turned, moved or changed in scale, an undo, a redo), each written as it happens, so a crash loses at most the stroke still being drawn (ADR-0014).
 _Avoid_: journal, history file, autosave
 
 **Canvas saver**:
@@ -137,11 +153,11 @@ A line of a dimension that runs from just off a point dimensioned to just past t
 _Avoid_: witness line, projection line
 
 **Snap point**:
-An ink end, corner or circle centre that a measure or dimension tap takes when it lands within about 20 screen points of one; otherwise the tap takes the point under the tip.
+A point on the ink that a measure, dimension or shape's tap takes when it lands within 20 screen points of one: an end, corner, centre, mid, intersection, perpendicular or tangent, all always on, the nearest winning; otherwise the tap takes the point under the tip. Perpendicular and tangent work from a point already placed, so a first point has neither. Snap points are worked out from a stroke's points, on the ink and never on a sheet's or scale area's edge.
 _Avoid_: snap (a snap straightens a stroke), osnap, grip
 
 **Loupe**:
-The magnifier that shows the canvas under the Pencil or finger, three times larger, while a measure or dimension point is being found, with the snap point marked. The point is taken when the tip lifts.
+The magnifier that shows the canvas under the Pencil or finger, three times larger, while a measure's, dimension's or shape's point is being found, with the snap point marked and named. It moves aside rather than sliding under the chrome. The point is taken when the tip lifts.
 _Avoid_: magnifier, zoom lens
 
 **Window**:

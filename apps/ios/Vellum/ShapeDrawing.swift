@@ -17,7 +17,7 @@ final class ShapeDrawing {
     private let dotsLayer = CAShapeLayer()
     private let label = Pill()
     private let tagButton = UIButton(type: .custom)
-    private let padView = NumberPadView()
+    private let padView = NumberPadView(frame: .zero)
     private let doneButton = UIButton(type: .custom)
     private var isDark = false
 
@@ -291,10 +291,12 @@ final class ShapeDrawing {
             previewLayer.path = nil
         }
         if let guide = aimed?.guide, let anchor = draft.anchor {
-            let a = screen(anchor), (c, s) = SheetAngle.cosineAndSine(guide)
+            let a = screen(anchor)
+            let turn = SheetAngle.cosineAndSine(guide)
+            let (c, s) = (CGFloat(turn.cos) * 2000, CGFloat(turn.sin) * 2000)
             let path = CGMutablePath()
-            path.move(to: CGPoint(x: a.x - 2000 * c, y: a.y + 2000 * s))
-            path.addLine(to: CGPoint(x: a.x + 2000 * c, y: a.y - 2000 * s))
+            path.move(to: CGPoint(x: a.x - c, y: a.y + s))
+            path.addLine(to: CGPoint(x: a.x + c, y: a.y - s))
             guideLayer.path = path
         } else {
             guideLayer.path = nil
@@ -311,8 +313,9 @@ final class ShapeDrawing {
             let spot = aimed.map { screen($0.point) } ?? tip
             let size = label.layer.bounds.size
             let free = host.exactPlacement
-            label.layer.position = CGPoint(x: max(free.left, min(spot.x + 14, free.right - size.width)),
-                                           y: max(free.top, min(spot.y - 34, free.bottom - size.height)))
+            let x = max(CGFloat(free.left), min(spot.x + 14, CGFloat(free.right) - size.width))
+            let y = max(CGFloat(free.top), min(spot.y - 34, CGFloat(free.bottom) - size.height))
+            label.layer.position = CGPoint(x: x, y: y)
             label.layer.isHidden = false
         } else {
             label.layer.isHidden = true
@@ -355,7 +358,7 @@ final class ShapeDrawing {
         let size = ((tagButton.currentTitle ?? "") as NSString).size(withAttributes: [
             .font: UIFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
         ])
-        let (w, h) = (ceil(size.width) + 18, 28.0)
+        let w = Double(ceil(size.width)) + 18, h = 28.0
         let s = editor.viewport.screenPoint(for: tagged.shape.spot)
         let centre = host.exactPlacement.tagCentre(spot: s, width: w, height: h)
         tagButton.frame = CGRect(x: centre.x - w / 2, y: centre.y - h / 2, width: w, height: h)
@@ -412,7 +415,7 @@ final class ShapeDrawing {
         guard let host, let tagged, pad != nil else { return }
         let size = padView.bounds.size
         let origin = host.exactPlacement.padOrigin(spot: editor.viewport.screenPoint(for: tagged.shape.spot),
-                                                   width: size.width, height: size.height)
+                                                   width: Double(size.width), height: Double(size.height))
         padView.frame.origin = CGPoint(x: origin.x, y: origin.y)
         if host.subviews.last !== padView { host.bringSubviewToFront(padView) }
     }
@@ -521,8 +524,8 @@ final class NumberPadView: UIView {
     private var isDark = false
     private var shown: NumberPad?
 
-    init() {
-        super.init(frame: .zero)
+    override init(frame: CGRect) {
+        super.init(frame: frame)
         layer.cornerRadius = 12
         layer.borderWidth = 1
         layer.shadowColor = UIColor.black.cgColor

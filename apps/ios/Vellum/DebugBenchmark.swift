@@ -55,6 +55,8 @@ final class DebugBenchmark: NSObject {
     private var lastTimestamp: CFTimeInterval?
     private var work: [Double] = []
     private var intervals: [Double] = []
+    /// Each frame's step alone: Vellum's own code, before the Core Animation commit that follows it.
+    private var stepWork: [Double] = []
     private var expectedInterval = 1.0 / 120
     private var settleStart: CFTimeInterval?
     /// The scenario whose last step ran; it is reported once that frame's work is counted.
@@ -272,22 +274,23 @@ final class DebugBenchmark: NSObject {
                 }
             }, tearDown: { _ in }),
             // #44: the placed sheet twisted with two fingers, a degree and a half a frame, through the catches at each
-            // quarter turn: a turn is one transform, and no sheet tile is drawn. Picking the sheet up lifts what comes
-            // along out of the ink tiles, which then redraw without it off the main thread, so `sheet_turn_lift` starts at
-            // once, as a turn on the Duo does, and `sheet_turn` waits for them, to show the turn alone.
-            turnScenario(name: "sheet_turn_lift", settles: false),
-            turnScenario(name: "sheet_turn", settles: true),
+            // quarter turn: a turn is one transform, and no sheet tile is drawn. Picking the sheet up lifts what comes along
+            // out of the ink tiles in the warm-up; the last frame saves the turn as one record. `sheet_turn_alone` is the same
+            // with nothing coming along, to tell the sheet's own layers from the lifted ink's.
+            turnScenario(name: "sheet_turn", alone: false),
+            turnScenario(name: "sheet_turn_alone", alone: true),
         ]
     }
 
-    private static func turnScenario(name: String, settles: Bool) -> Scenario {
+    private static func turnScenario(name: String, alone: Bool) -> Scenario {
         Scenario(name: name, frames: 240, setUp: { b in
             b.zoomToSheet()
             b.editor.tool = .lasso
             guard let view = b.view, let sheet = b.placedSheet else { return }
             b.editor.select(CanvasSelection(sheet: sheet.id))
+            b.editor.debugSheetComesAlone = alone
             _ = view.beginSheetTwist(fingerAngle: 0)
-            b.holdsForTiles = settles
+            b.holdsForTiles = true
             b.record("  \(name) came_along=\(view.debugSheetDragStrokes) pending_at_lift=\(view.pendingRenderCount)")
         }, step: { b, i in
             guard let view = b.view else { return }
@@ -301,6 +304,7 @@ final class DebugBenchmark: NSObject {
         }, tearDown: { b in
             let drawn = (b.view?.debugSheetTiles.drawn ?? 0) - b.tilesBeforeTurn
             b.record("  \(name) tiles_drawn_during_turn=\(drawn) angle=\(b.editor.sheets.last?.angle ?? -1)")
+            b.editor.debugSheetComesAlone = false
             b.editor.tool = .pen
         })
     }
@@ -378,6 +382,7 @@ final class DebugBenchmark: NSObject {
         work.removeAll()
         intervals.removeAll()
         keptRedraws.removeAll()
+        stepWork.removeAll()
         lastTimestamp = nil
         tickStart = nil
     }
@@ -430,6 +435,7 @@ final class DebugBenchmark: NSObject {
         tickStart = now
         let redrawsBefore = view?.debugKeptRedraws.count ?? 0
         scenario.step(self, outOfTime ? scenario.frames - 1 : frame)
+        stepWork.append((CACurrentMediaTime() - now) * 1000)
         if let redraws = view?.debugKeptRedraws, redraws.count > redrawsBefore {
             keptRedraws += redraws[redrawsBefore...].map { "frame \(frame): \($0)" }
         }
@@ -453,6 +459,9 @@ final class DebugBenchmark: NSObject {
             + " interval_ms median=\(format(percentile(sortedIntervals, 0.5)))"
             + " p95=\(format(percentile(sortedIntervals, 0.95))) max=\(format(sortedIntervals.last ?? 0))"
             + " long_frames=\(long) display_interval_ms=\(format(expectedInterval * 1000))")
+        let sortedSteps = stepWork.sorted()
+        record("  step_ms median=\(format(percentile(sortedSteps, 0.5))) p95=\(format(percentile(sortedSteps, 0.95)))"
+            + " max=\(format(sortedSteps.last ?? 0))")
         // Where a slow frame fell, beside the kept layer's drawings, to tell one from the other.
         let slowWork = work.enumerated().filter { $0.element > budget }.map { "\($0.offset):\(format($0.element))" }
         let slowGaps = intervals.enumerated().filter { $0.element > expectedInterval * 1000 * 1.5 }

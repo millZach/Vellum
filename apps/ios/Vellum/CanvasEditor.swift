@@ -420,6 +420,10 @@ final class CanvasEditor {
     }
 
     @ObservationIgnored private var sheetLift: SheetLift?
+    #if DEBUG || BENCHMARK
+    /// For the benchmark's `sheet_turn_alone`: nothing comes along.
+    @ObservationIgnored var debugSheetComesAlone = false
+    #endif
 
     /// Starts a turn, move or scale change of the selected sheet: chooses what comes along (more than half its length on
     /// the sheet, through the index), and takes those strokes out of the index, so the tiles redraw without them.
@@ -427,7 +431,10 @@ final class CanvasEditor {
         cancelLift()
         dropSheet(to: nil, motion: nil)
         guard let sheet = selectedSheet else { return nil }
-        let markups = sheet.markups(in: inkIndex, texts: session.texts, dimensions: session.dimensions)
+        var markups = sheet.markups(in: inkIndex, texts: session.texts, dimensions: session.dimensions)
+        #if DEBUG || BENCHMARK
+        if debugSheetComesAlone { markups = .empty }
+        #endif
         let strokes = markups.strokes.compactMap { inkIndex.stroke($0) }
         let lift = SheetLift(sheet: sheet, markups: markups, strokes: strokes)
         sheetLift = lift

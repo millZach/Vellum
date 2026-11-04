@@ -40,7 +40,7 @@ enum InkCodec {
     // MARK: Events
 
     /// Each kind of event's code. Codes are never reused: 1 to 4 are version 1's, 5 to 9 came with #7, 10 to 14 with
-    /// #8, 15 with #11, 16 with #44. A move, duplicate or delete of a selection holding no dimension or frame keeps its #7 code and bytes; one
+    /// #8, 15 with #11, 16 with #44, 17 with #40. A move, duplicate or delete of a selection holding no dimension or frame keeps its #7 code and bytes; one
     /// holding any takes the #8 code, whose selection adds the dimension and frame ids.
     private enum EventTag: UInt8 {
         case draw = 1, erase = 2, undo = 3, redo = 4
@@ -48,6 +48,7 @@ enum InkCodec {
         case addDimension = 10, addFrame = 11, transformAll = 12, duplicateAll = 13, deleteAll = 14
         case addSheet = 15
         case changeSheet = 16
+        case correctStroke = 17
     }
 
     static func encode(_ event: InkEvent) -> [UInt8] {
@@ -104,6 +105,9 @@ enum InkCodec {
         case .changeSheet(let change):
             w.u8(EventTag.changeSheet.rawValue)
             w.sheetChange(change)
+        case .correctStroke(let stroke):
+            w.u8(EventTag.correctStroke.rawValue)
+            w.stroke(stroke)
         }
         return w.bytes
     }
@@ -152,6 +156,8 @@ enum InkCodec {
             event = .addSheet(try r.sheet())
         case .changeSheet:
             event = .changeSheet(try r.sheetChange())
+        case .correctStroke:
+            event = .correctStroke(try r.stroke())
         }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after an event") }
         return event
@@ -167,7 +173,8 @@ enum InkCodec {
     /// of ink and text boxes exactly as version 2 did. Version 4 (#11) adds, on a canvas that has ever had a sheet, the
     /// next sheet id and the sheets after the frames (writing the parts before them even when they are empty); a
     /// canvas that never had one is written exactly as version 3 wrote it. Version 5 (#44) adds a sheet's angle and the
-    /// undo step of a turn, move or scale change; a canvas with neither is written exactly as version 4 wrote it.
+    /// undo step of a turn, move or scale change; a canvas with neither is written exactly as version 4 wrote it. Version 6
+    /// (#40) adds the undo step of a shape corrected through its tag; a canvas with none is written as version 5 wrote it.
     static func encode(_ session: InkSession) -> [UInt8] {
         var w = ByteWriter()
         w.i64(Int64(session.nextID))
@@ -358,6 +365,10 @@ struct ByteWriter {
             self.sheet(after)
             pieces(markups, on: ink, all: true)
             sheetMotion(motion)
+        case .correctStroke(let before, let after):
+            u8(EditTag.correctStroke.rawValue)
+            historyStroke(before, on: ink)
+            historyStroke(after, on: ink)
         }
     }
 
@@ -579,6 +590,8 @@ enum EditTag: UInt8 {
     case addSheet = 13
     // Version 5 (#44).
     case changeSheet = 14
+    // Version 6 (#40).
+    case correctStroke = 15
 }
 
 struct ByteReader {
@@ -696,6 +709,9 @@ struct ByteReader {
             let before = try sheet(), after = try sheet()
             let markups = try pieces(on: ink, all: true)
             return .changeSheet(before: before, after: after, markups: markups, motion: try sheetMotion())
+        case .correctStroke:
+            let before = try historyStroke(on: ink)
+            return .correctStroke(before: before, after: try historyStroke(on: ink))
         case .addText:
             return .addText(try textBox())
         case .editText:

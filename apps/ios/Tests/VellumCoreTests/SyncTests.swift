@@ -288,6 +288,34 @@ final class SyncTests: XCTestCase {
         try await assertDropboxRebuildsTheDuosCanvas(sync, id)
     }
 
+    /// A shape corrected through its tag (#40) reaches Dropbox as the log's tail, not the stroke's canvas again.
+    func testACorrectionSyncsOnlyTheLogsTail() async throws {
+        let id = try library.create(name: "Corrected").id
+        let (_, session, saver) = try await savers.open(id)
+        var drawn = session
+        let stroke = try XCTUnwrap(drawn.draw([CanvasPoint(x: .inches(0), y: .inches(0)), CanvasPoint(x: .inches(10), y: .inches(0))],
+                                              tool: .pen, colour: .red, width: .inches(0.1)))
+        saver.save(drawn.takeEvents())
+        savers.close(saver)
+        await saver.idle()
+        let (sync, _) = engine()
+        await sync.start()
+        await sync.settled()
+
+        let (_, again, correcting) = try await savers.open(id)
+        var corrected = again
+        XCTAssertNotNil(corrected.correct(stroke.id, to: [CanvasPoint(x: .inches(0), y: .inches(0)), CanvasPoint(x: .inches(150), y: .inches(0))]))
+        correcting.save(corrected.takeEvents())
+        savers.close(correcting)
+        await correcting.idle()
+        dropbox.resetCounts()
+        await sync.canvasLeft(id)
+        await sync.settled()
+        XCTAssertFalse(dropbox.requests.isEmpty)
+        XCTAssertLessThanOrEqual(dropbox.bytesUploaded, 256, "the log's new record, not the canvas")
+        try await assertDropboxRebuildsTheDuosCanvas(sync, id)
+    }
+
     func testAFirstSyncOfANewCanvasIsTwoRequests() async throws {
         let id = try library.create(name: "New").id
         let (sync, _) = engine()

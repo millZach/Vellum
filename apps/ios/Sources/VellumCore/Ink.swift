@@ -444,6 +444,8 @@ public enum InkEvent: Hashable, Sendable {
     /// A sheet turned, moved or changed in scale (#44), with the markups that came along: where it stands, the ids and
     /// the motion, never the moved strokes' points and nothing of the PDF.
     case changeSheet(SheetChange)
+    /// A shape's size corrected through its tag (#40): the stroke as it now stands, under the same id. Its own undo step.
+    case correctStroke(InkStroke)
 }
 
 /// The ink, text boxes, dimensions and frames on a canvas, with undo and redo: drawing, erasing, and since #7 moving,
@@ -563,6 +565,8 @@ public struct InkSession: Hashable, Sendable {
         /// A sheet turned, moved or changed in scale: as it was and as it is, its markups as they were, and how they
         /// moved. Redoing works the moved markups out again from these, exactly as the first time.
         case changeSheet(before: Sheet, after: Sheet, markups: Pieces, motion: SheetMotion)
+        /// A shape corrected through its tag: the stroke as it was, and as it is.
+        case correctStroke(before: InkStroke, after: InkStroke)
     }
 
     public init(ink: Ink = Ink(), texts: [TextBox] = [], dimensions: [CanvasDimension] = [], frames: [Frame] = [],
@@ -651,6 +655,18 @@ public struct InkSession: Hashable, Sendable {
         let stroke = InkStroke(id: StrokeID(nextID), tool: tool, colour: colour, width: width,
                                points: points.map(\.onInkGrid))
         perform(.draw(stroke))
+        return stroke
+    }
+
+    /// Corrects a shape just drawn to new points (#40), as its own undo step: the stroke keeps its id, pen, colour and
+    /// width. The stroke as corrected, or nil when it isn't on the canvas or nothing changed.
+    @discardableResult
+    public mutating func correct(_ id: StrokeID, to points: [CanvasPoint]) -> InkStroke? {
+        guard !points.isEmpty, let index = ink.index(of: id) else { return nil }
+        var stroke = ink.strokes[index]
+        stroke.points = points.map(\.onInkGrid)
+        guard stroke != ink.strokes[index] else { return nil }
+        perform(.correctStroke(stroke))
         return stroke
     }
 
@@ -914,6 +930,14 @@ public struct InkSession: Hashable, Sendable {
             record(.changeSheet(before: before, after: after, markups: markups, motion: change.motion))
             selectionAfterLastChange = CanvasSelection(sheet: after.id)
             return placeSheet(after, with: markups.moved(by: change.motion))
+        case .correctStroke(let after):
+            guard !after.points.isEmpty, let index = ink.index(of: after.id), ink.strokes[index] != after else {
+                return .none
+            }
+            let before = ink.strokes[index]
+            ink.replace([after])
+            record(.correctStroke(before: before, after: after))
+            return InkChange(added: [after], removed: [after.id])
         case .undo:
             guard let edit = undoStack.popLast() else { return .none }
             sweepHasEntry = false
@@ -968,6 +992,9 @@ public struct InkSession: Hashable, Sendable {
         case .changeSheet(let before, _, let markups, _):
             selectionAfterLastChange = CanvasSelection(sheet: before.id)
             return placeSheet(before, with: markups)
+        case .correctStroke(let before, _):
+            ink.replace([before])
+            return InkChange(added: [before], removed: [before.id])
         }
     }
 
@@ -1008,6 +1035,9 @@ public struct InkSession: Hashable, Sendable {
         case .changeSheet(_, let after, let markups, let motion):
             selectionAfterLastChange = CanvasSelection(sheet: after.id)
             return placeSheet(after, with: markups.moved(by: motion))
+        case .correctStroke(_, let after):
+            ink.replace([after])
+            return InkChange(added: [after], removed: [after.id])
         }
     }
 
@@ -1127,6 +1157,8 @@ public struct InkSession: Hashable, Sendable {
         case (.changeSheet(_, _, let pieces, _), true): points(pieces.strokes)
         case (.duplicate(let pieces, _), false): points(pieces.strokes)
         case (.draw(let stroke), false): stroke.points.count
+        case (.correctStroke(let before, _), true): before.points.count
+        case (.correctStroke(_, let after), false): after.points.count
         default: 0
         }
     }

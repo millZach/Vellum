@@ -8,6 +8,9 @@ public enum StatusBarText {
     /// The characters for a position of three-digit feet, `X -139'-11 15/16"  Y -139'-11 15/16"`.
     public static let longPositionCharacters = 36
 
+    /// The scale bar's longest in points, short to leave the pen's position its room.
+    public static let scaleBarLongest = 60.0
+
     /// The characters to keep once a position of `showing` characters has been shown, given those kept so far. It only
     /// grows, and goes straight to the long width, so the neighbours move at most about once however the pen moves,
     /// never once per sample.

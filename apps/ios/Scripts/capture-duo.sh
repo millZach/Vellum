@@ -266,6 +266,14 @@ for appearance in light dark; do
   # The longest coordinates (#33) beside the longest prompt, and again beside the widest status.
   capture canvas-long-coordinates --ui-tab canvases --ui-reset --ui-fixture --ui-long-coordinates --ui-draw-with-finger
   capture canvas-long-coordinates-offline --ui-tab canvases --ui-reset --ui-sync offline --ui-long-coordinates --ui-draw-with-finger
+  # The scale readout at the widest usual label and the longest ones, beside the longer prompts (#45).
+  capture canvas-scale-50ft-sheet --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold sheet,feetAndInches,0.1
+  capture canvas-scale-100ft-line --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold line,feetAndInches,0.05
+  capture canvas-scale-100ft-sheet --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold sheet,feetAndInches,0.05
+  capture canvas-scale-2000ft-line --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold line,feetAndInches,0.0025
+  capture canvas-scale-500m-line --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold line,metric,0.003
+  capture canvas-scale-500m-sheet --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold sheet,metric,0.003
+  capture canvas-scale-sixteenth-line --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold line,feetAndInches,900
   WAIT=$saved_wait
 done
 
@@ -285,6 +293,23 @@ capture appearance-light-then-dark --ui-tab canvases --ui-reset --ui-new-canvas 
 appearance=dark
 xcrun simctl ui "$udid" appearance dark
 capture appearance-light-then-system --ui-tab canvases --ui-reset --ui-new-canvas --ui-appearance-steps light,system
+
+# The count beside the longer prompts (#45): the Debug-only `--ui-status-walk` (Vellum/DebugStatusBar.swift) walks every
+# scale label in every units with each prompt and writes which count wording showed. A usual label beside one of the
+# three prompts without the full count fails this job, so the count can't slip back quietly.
+xcrun simctl ui "$udid" appearance light
+xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+rm -f "$data/Documents/status-bar-walk.txt"
+xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-reset --ui-fixture --ui-status-walk >/dev/null
+waited=0
+while [ "$waited" -lt 240 ] && ! grep -q '^done' "$data/Documents/status-bar-walk.txt" 2>/dev/null; do
+  sleep 5; waited=$((waited + 5))
+done
+cp "$data/Documents/status-bar-walk.txt" "$out/status-bar-walk.txt" 2>/dev/null || : > "$out/status-bar-walk.txt"
+xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+python3 Scripts/status-bar-check.py "$out/status-bar-walk.txt"
 
 benchmark ""
 

@@ -269,8 +269,6 @@ final class DebugBenchmark: NSObject {
         ]
     }
 
-    /// Places the made-up sheet in the middle of the canvas, with no saver (the test canvas is never saved), and
-    /// zooms to it.
     /// How fast this runner is just now, from work that no change to Vellum can touch: a fixed path stroked into a
     /// bitmap, five times, the median in milliseconds. `Scripts/perf-compare.py` scales the Release timing baselines by it.
     private func speedProbe() -> Double {
@@ -290,6 +288,8 @@ final class DebugBenchmark: NSObject {
         return percentile(times.sorted(), 0.5)
     }
 
+    /// Places the made-up sheet in the middle of the canvas, with no saver (the test canvas is never saved), and
+    /// zooms to it.
     private func placeSheet() {
         guard let pending = sheet, placedSheet == nil else { return zoomToSheet() }
         editor.zoomToEverything()

@@ -17,6 +17,9 @@ public struct DimensionID: Hashable, Sendable, Comparable, CustomStringConvertib
 /// length fixed when it is placed (`screenTextHeight` at that zoom), so it zooms with the ink around it, as a text
 /// box's letters do. It is drawn in its markup colour. The length it shows is never stored: it is read from its
 /// points in the canvas units whenever it is drawn (`Canvas.measure(_:)`), so changing the units changes it.
+///
+/// A dimension that comes along when its sheet turns keeps reading the same length: `axisAngle` turns what "across" and
+/// "up and down" mean with it, the way AutoCAD's rotated linear dimension does (#44).
 public struct CanvasDimension: Hashable, Sendable, Identifiable {
     /// Which distance between the two points the dimension reads.
     public enum Orientation: String, CaseIterable, Hashable, Sendable {
@@ -39,12 +42,14 @@ public struct CanvasDimension: Hashable, Sendable, Identifiable {
     public var colour: MarkupColour
     /// The height of its text as a real-world length.
     public var textHeight: Length
+    /// How far its "across" is turned from the canvas's, in degrees counter-clockwise; 0 unless a sheet turned it.
+    public var axisAngle: Double
 
     /// The text height of a new dimension on screen, in points, at the zoom it is placed at.
     public static let screenTextHeight = 12.0
 
     public init(id: DimensionID, start: CanvasPoint, end: CanvasPoint, through: CanvasPoint, orientation: Orientation,
-                colour: MarkupColour, textHeight: Length) {
+                colour: MarkupColour, textHeight: Length, axisAngle: Double = 0) {
         self.id = id
         self.start = start
         self.end = end
@@ -52,6 +57,7 @@ public struct CanvasDimension: Hashable, Sendable, Identifiable {
         self.orientation = orientation
         self.colour = colour
         self.textHeight = textHeight
+        self.axisAngle = axisAngle
     }
 
     /// The orientation a third point pulls a dimension to, the AutoCAD way: within the two points' span across and
@@ -79,15 +85,28 @@ public struct CanvasDimension: Hashable, Sendable, Identifiable {
 
     /// The length the dimension reads, unsigned: the distance across, up and down, or straight, by its orientation.
     public var length: Length {
+        if axisAngle != 0, orientation != .aligned {
+            let (a, b) = (unturned(start), unturned(end))
+            return orientation == .horizontal ? Length(inches: (b.x.inches - a.x.inches).magnitude)
+                : Length(inches: (b.y.inches - a.y.inches).magnitude)
+        }
         switch orientation {
-        case .horizontal: Length(inches: (end.x.inches - start.x.inches).magnitude)
-        case .vertical: Length(inches: (end.y.inches - start.y.inches).magnitude)
-        case .aligned: start.distance(to: end)
+        case .horizontal: return Length(inches: (end.x.inches - start.x.inches).magnitude)
+        case .vertical: return Length(inches: (end.y.inches - start.y.inches).magnitude)
+        case .aligned: return start.distance(to: end)
         }
     }
 
     /// Where the dimension line runs, from the end over `start` to the end over `end`.
     public var line: (CanvasPoint, CanvasPoint) {
+        if axisAngle != 0, orientation != .aligned {
+            let (a, b, t) = (unturned(start), unturned(end), unturned(through))
+            let flat = orientation == .horizontal
+                ? (CanvasPoint(x: a.x, y: t.y), CanvasPoint(x: b.x, y: t.y))
+                : (CanvasPoint(x: t.x, y: a.y), CanvasPoint(x: t.x, y: b.y))
+            return (SheetAngle.turn(flat.0, about: .origin, by: axisAngle),
+                    SheetAngle.turn(flat.1, about: .origin, by: axisAngle))
+        }
         switch orientation {
         case .horizontal:
             return (CanvasPoint(x: start.x, y: through.y), CanvasPoint(x: end.x, y: through.y))
@@ -99,6 +118,11 @@ public struct CanvasDimension: Hashable, Sendable, Identifiable {
             return (CanvasPoint(x: .inches(start.x.inches + nx * offset), y: .inches(start.y.inches + ny * offset)),
                     CanvasPoint(x: .inches(end.x.inches + nx * offset), y: .inches(end.y.inches + ny * offset)))
         }
+    }
+
+    /// A point as it would be had the dimension's axes never turned.
+    private func unturned(_ point: CanvasPoint) -> CanvasPoint {
+        SheetAngle.turn(point, about: .origin, by: -axisAngle)
     }
 
     /// The middle of the dimension line, where its text sits.
@@ -123,13 +147,13 @@ public struct CanvasDimension: Hashable, Sendable, Identifiable {
     public func transformed(by transform: CanvasTransform, id newID: DimensionID? = nil) -> CanvasDimension {
         CanvasDimension(id: newID ?? id, start: transform.apply(start).onInkGrid, end: transform.apply(end).onInkGrid,
                   through: transform.apply(through).onInkGrid, orientation: orientation, colour: colour,
-                  textHeight: textHeight * transform.scale)
+                  textHeight: textHeight * transform.scale, axisAngle: axisAngle)
     }
 
     /// The same dimension with its points on the ink grid, as it is kept and saved.
     var onInkGrid: CanvasDimension {
         CanvasDimension(id: id, start: start.onInkGrid, end: end.onInkGrid, through: through.onInkGrid,
-                  orientation: orientation, colour: colour, textHeight: textHeight)
+                  orientation: orientation, colour: colour, textHeight: textHeight, axisAngle: axisAngle)
     }
 
     /// The unit normal to the line from a to b, pointing up the screen (or left, for a plumb pair): the side an

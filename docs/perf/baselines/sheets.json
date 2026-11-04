@@ -23,6 +23,15 @@
       "note": "Picking a PDF three times and placing it on two canvases sends one files/download. A placed sheet is drawn from its canvas folder's copy, so reopening a canvas downloads nothing." },
     { "metric": "sheet_bytes_downloaded_per_pdf_byte", "kind": "count", "value": 1, "unit": "ratio", "tolerance": 0,
       "measured": "feat/place-sheets 2026-11-02 VellumCore SheetTileTests (deterministic)",
-      "note": "Bytes downloaded for a placed sheet are the PDF's bytes once: total downloaded over the PDF's size, across the same picks and places." }
+      "note": "Bytes downloaded for a placed sheet are the PDF's bytes once: total downloaded over the PDF's size, across the same picks and places." },
+    { "metric": "sheet_tiles_drawn_per_turn", "kind": "count", "value": 0, "unit": "tiles", "tolerance": 0,
+      "measured": "feat/rotate-sheet 2026-11-04 VellumCore SheetRotateTests (deterministic)",
+      "note": "Turning a sheet in view right round, a degree at a time (#44), draws no tile after its first view: a turn is one transform, and tiles are keyed by the paper, so they keep through a turn, a move and a scale change." },
+    { "metric": "sheet_tiles_drawn_first_view_at_45_degrees", "kind": "count", "value": 28, "unit": "tiles", "tolerance": 0,
+      "measured": "feat/rotate-sheet 2026-11-04 VellumCore SheetRotateTests (deterministic)",
+      "note": "The same 36 x 24 sheet turned 45 degrees and seen at 2 points per inch on the unfolded Duo: only the tiles the view really touches on the paper, 28 of the 36 in the square round the view at that angle; an upright sheet takes 24 (#44)." },
+    { "metric": "sheet_markup_points_inspected", "kind": "count", "value": 360, "unit": "points", "tolerance": 0,
+      "measured": "feat/rotate-sheet 2026-11-04 VellumCore SheetRotateTests (deterministic)",
+      "note": "Choosing the markups that come along, which happens once at the start of a turn, move or scale change (#44): of 1,003 strokes of 120 points on the sheet, only the 3 whose cached bounds cross its edge have their points read." }
   ]
 }

@@ -255,6 +255,39 @@ final class SyncTests: XCTestCase {
                        [UInt8](try Data(contentsOf: pdf)))
     }
 
+    /// Turning a sheet (#44) is one more record in the log: its PDF never uploads again, and Dropbox rebuilds the turn.
+    func testATurnedSheetSyncsWithoutItsPDF() async throws {
+        let id = try library.create(name: "Turned").id
+        let pdf = try keepSheet(on: id, named: "madeuphash02")
+        let page = SheetPage(file: "madeuphash02", name: "M-101 (example).pdf", path: "/M-101 (example).pdf", index: 0)
+        let (_, opened, saver) = try await savers.open(id)
+        var session = opened
+        let sheet = session.addSheet(Sheet(paper: .archD, scale: .notToScale, page: page))
+        saver.save(session.takeEvents())
+        savers.close(saver)
+        await saver.idle()
+        let (sync, _) = engine()
+        await sync.start()
+        await sync.settled()
+        let name = await self.folder(sync, id)
+        let folder = "/Vellum/\(name)"
+        XCTAssertEqual(dropbox.files(in: folder)["sheets/madeuphash02.pdf"], pdf)
+
+        let (_, again, turning) = try await savers.open(id)
+        var turnedSession = again
+        let turned = sheet.turned(to: 33.5)
+        XCTAssertTrue(turnedSession.changeSheet(to: turned.sheet, motion: turned.motion))
+        turning.save(turnedSession.takeEvents())
+        savers.close(turning)
+        await turning.idle()
+        dropbox.resetCounts()
+        await sync.canvasLeft(id)
+        await sync.settled()
+        SyncBudget.check("sheet-pdf-uploads-later-syncs", dropbox.requests.filter { $0.contains("/sheets/") }.count)
+        XCTAssertFalse(dropbox.requests.isEmpty)
+        try await assertDropboxRebuildsTheDuosCanvas(sync, id)
+    }
+
     func testAFirstSyncOfANewCanvasIsTwoRequests() async throws {
         let id = try library.create(name: "New").id
         let (sync, _) = engine()

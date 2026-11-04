@@ -375,9 +375,10 @@ public struct InkChange: Hashable, Sendable {
     public var removedDimensions: [DimensionID] = []
     public var addedFrames: [Frame] = []
     public var removedFrames: [FrameID] = []
-    /// Sheets placed, or put back by a redo (#11).
+    /// Sheets placed, put back by a redo (#11), or as they stand after a turn, move or scale change (#44), which also
+    /// lists them in `removedSheets`.
     public var addedSheets: [Sheet] = []
-    /// Sheets taken away by an undo.
+    /// Sheets taken away by an undo, or replaced by a turn, move or scale change (#44).
     public var removedSheets: [SheetID] = []
 
     public init(added: [InkStroke] = [], removed: [StrokeID] = [], addedTexts: [TextBox] = [],
@@ -440,6 +441,9 @@ public enum InkEvent: Hashable, Sendable {
     case addFrame(Frame)
     /// A sheet placed (#11): the PDF page, its scale and scale areas, and where it went.
     case addSheet(Sheet)
+    /// A sheet turned, moved or changed in scale (#44), with the markups that came along: where it stands, the ids and
+    /// the motion, never the moved strokes' points and nothing of the PDF.
+    case changeSheet(SheetChange)
 }
 
 /// The ink, text boxes, dimensions and frames on a canvas, with undo and redo: drawing, erasing, and since #7 moving,
@@ -508,6 +512,13 @@ public struct InkSession: Hashable, Sendable {
                    frames: frames.map { $0.transformed(by: transform) })
         }
 
+        /// These things as a sheet's turn, move or scale change leaves them. A frame stays square to the canvas and never
+        /// comes along.
+        func moved(by motion: SheetMotion) -> Pieces {
+            Pieces(strokes: strokes.map { $0.moved(by: motion) }, texts: texts.map { $0.moved(by: motion) },
+                   dimensions: dimensions.map { $0.moved(by: motion) }, frames: frames)
+        }
+
         /// What putting these in place of the ones with their ids did.
         var replacement: InkChange {
             InkChange(added: strokes, removed: strokes.map(\.id), addedTexts: texts, removedTexts: texts.map(\.id),
@@ -549,6 +560,9 @@ public struct InkSession: Hashable, Sendable {
         case addFrame(Frame)
         /// A sheet placed.
         case addSheet(Sheet)
+        /// A sheet turned, moved or changed in scale: as it was and as it is, its markups as they were, and how they
+        /// moved. Redoing works the moved markups out again from these, exactly as the first time.
+        case changeSheet(before: Sheet, after: Sheet, markups: Pieces, motion: SheetMotion)
     }
 
     public init(ink: Ink = Ink(), texts: [TextBox] = [], dimensions: [CanvasDimension] = [], frames: [Frame] = [],
@@ -759,6 +773,19 @@ public struct InkSession: Hashable, Sendable {
         return placed
     }
 
+    /// Puts a sheet where a turn, move or scale change took it (`Sheet.turned`, `moved`, `rescaled`), with its markups
+    /// moved by the same motion, as one undo step. False when it names no sheet or changes nothing.
+    @discardableResult
+    public mutating func changeSheet(to after: Sheet, markups: CanvasSelection = .empty, motion: SheetMotion) -> Bool {
+        guard let before = sheet(after.id) else { return false }
+        let rescaled = after.scale != before.scale || after.areas != before.areas
+        guard rescaled || after.origin != before.origin || after.angle != before.angle else { return false }
+        perform(.changeSheet(SheetChange(id: after.id, origin: after.origin, angle: after.angle,
+                                         rescaled: rescaled ? .init(scale: after.scale, areas: after.areas) : nil,
+                                         markups: markups, motion: motion)))
+        return !lastChange.isEmpty
+    }
+
     public mutating func undo() {
         guard canUndo else { return }
         perform(.undo)
@@ -880,6 +907,13 @@ public struct InkSession: Hashable, Sendable {
             Self.insert([sheet], into: &sheets)
             record(.addSheet(sheet))
             return InkChange(addedSheets: [sheet])
+        case .changeSheet(let change):
+            guard let before = sheet(change.id) else { return .none }
+            let after = change.applied(to: before)
+            let markups = pieces(of: change.markups)
+            record(.changeSheet(before: before, after: after, markups: markups, motion: change.motion))
+            selectionAfterLastChange = CanvasSelection(sheet: after.id)
+            return placeSheet(after, with: markups.moved(by: change.motion))
         case .undo:
             guard let edit = undoStack.popLast() else { return .none }
             sweepHasEntry = false
@@ -931,6 +965,9 @@ public struct InkSession: Hashable, Sendable {
         case .addSheet(let sheet):
             Self.remove([sheet.id], from: &sheets)
             return InkChange(removedSheets: [sheet.id])
+        case .changeSheet(let before, _, let markups, _):
+            selectionAfterLastChange = CanvasSelection(sheet: before.id)
+            return placeSheet(before, with: markups)
         }
     }
 
@@ -968,7 +1005,19 @@ public struct InkSession: Hashable, Sendable {
         case .addSheet(let sheet):
             Self.insert([sheet], into: &sheets)
             return InkChange(addedSheets: [sheet])
+        case .changeSheet(_, let after, let markups, let motion):
+            selectionAfterLastChange = CanvasSelection(sheet: after.id)
+            return placeSheet(after, with: markups.moved(by: motion))
         }
+    }
+
+    /// Puts a sheet and its markups in place: a turn, move or scale change, or undoing one.
+    private mutating func placeSheet(_ sheet: Sheet, with markups: Pieces) -> InkChange {
+        Self.replace([sheet], in: &sheets)
+        var change = place(markups)
+        change.addedSheets = [sheet]
+        change.removedSheets = [sheet.id]
+        return change
     }
 
     /// Puts things in place of the ones with their ids: a move, a resize, or undoing one.
@@ -1075,6 +1124,7 @@ public struct InkSession: Hashable, Sendable {
         switch (edit, inUndo) {
         case (.erase(let strokes), true): points(strokes)
         case (.delete(let pieces), true), (.transform(let pieces, _), true): points(pieces.strokes)
+        case (.changeSheet(_, _, let pieces, _), true): points(pieces.strokes)
         case (.duplicate(let pieces, _), false): points(pieces.strokes)
         case (.draw(let stroke), false): stroke.points.count
         default: 0

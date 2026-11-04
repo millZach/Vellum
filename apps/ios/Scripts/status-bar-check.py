@@ -3,9 +3,11 @@
 
 usage: status-bar-check.py <status-bar-walk.txt>
 
-Reads what `--ui-status-walk` wrote (Vellum/DebugStatusBar.swift): units, position, prompt, scale label, count wording.
-Exits 1 if a usual feet-and-inches label at ordinary coordinates, beside one of the three prompts, showed anything but
-the full count, or if the walk did not finish. Prints where the count shortened, for the PR.
+Reads what `--ui-status-walk` wrote (Vellum/DebugStatusBar.swift): units, position, prompt, scale label, count wording,
+bar width. Exits 1 if a usual feet-and-inches label at ordinary coordinates, beside one of the three prompts, showed
+anything but the full count; if the bar's width ever changed, since a long label must shorten the count and not push
+the bar wider; if the longest position never shortened the count, which would mean the walk can't tell the wordings
+apart; or if the walk did not finish. Prints where the count shortened, for the PR.
 """
 import sys
 
@@ -30,14 +32,22 @@ def main(path):
             if wording != "full":
                 failures.append(f'"{prompt}" at {label}: {wording}')
 
-    for units, position, prompt, label, wording in rows:
-        if wording != "full":
+    widths = sorted({row[5] for row in rows})
+    if len(widths) != 1:
+        wide = [row for row in rows if row[5] != min(widths, key=float)]
+        failures.append(f"the bar's width changed: {widths}, first at {wide[0][:4] if wide else '?'}")
+    if not any(row[1] == "long" and row[4] != "full" for row in rows):
+        failures.append("the long position never shortened the count")
+
+    for units, position, prompt, label, wording, _ in rows:
+        if wording != "full" and position == "usual":
             print(f"{units}\t{position}\t{prompt}\t{label}\t{wording}")
     if failures:
         for failure in failures:
             print(f"::error::The full count did not hold: {failure}")
         return 1
-    print(f"The full count held beside {len(PROMPTS)} prompts at {len(USUAL_LABELS)} scale labels ({len(rows)} rows walked).")
+    print(f"The full count held beside {len(PROMPTS)} prompts at {len(USUAL_LABELS)} scale labels, "
+          f"the bar stayed {widths[0]} points wide ({len(rows)} rows walked).")
     return 0
 
 

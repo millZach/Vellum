@@ -10,11 +10,14 @@ import VellumCore
 ///   zoom, for a capture.
 /// - `--ui-status-walk`: walks every scale label in every units with each prompt, then the feet-and-inches labels again
 ///   with the longest position, and writes `status-bar-walk.txt` to Documents: one tab-separated line for each, ending
-///   in the count wording that showed (`full`, `short` or `shortest`). `Scripts/status-bar-check.py` reads it.
+///   in the count wording that showed (`full`, `short` or `shortest`) and the bar's width in points.
+///   `Scripts/status-bar-check.py` reads it.
 @MainActor
 enum DebugStatusBar {
     /// The width the count came out at. `ViewThatFits` takes the size of the wording it shows, so this says which.
     static var countWidth: CGFloat = 0
+    /// The width the whole bar came out at. It has a set room, so anything else means something pushed it wider.
+    static var barWidth: CGFloat = 0
     static let isWalking = DebugLaunch.has("--ui-status-walk")
     private static var started = false
 
@@ -102,7 +105,8 @@ enum DebugStatusBar {
             for prompt in Prompt.allCases {
                 prompt.show(in: editor)
                 try? await Task.sleep(for: .milliseconds(200))
-                lines.append([units.rawValue, name, prompt.text, label, wording(editor)].joined(separator: "\t"))
+                lines.append([units.rawValue, name, prompt.text, label, wording(editor),
+                              String(format: "%.1f", barWidth)].joined(separator: "\t"))
             }
         }
         return lines
@@ -125,6 +129,17 @@ extension View {
         if DebugStatusBar.isWalking {
             onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
                 MainActor.assumeIsolated { DebugStatusBar.countWidth = width }
+            }
+        } else {
+            self
+        }
+    }
+
+    /// Tells the walk how wide the whole bar came out; only while walking.
+    @MainActor @ViewBuilder func debugReportsStatusBarWidth() -> some View {
+        if DebugStatusBar.isWalking {
+            onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
+                MainActor.assumeIsolated { DebugStatusBar.barWidth = width }
             }
         } else {
             self

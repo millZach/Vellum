@@ -448,6 +448,7 @@ private struct FramePaperPicker: View {
 #if !DEBUG
 private extension View {
     func debugReportsCountWidth() -> some View { self }
+    func debugReportsStatusBarWidth() -> some View { self }
 }
 #endif
 
@@ -492,6 +493,7 @@ private struct StatusBar: View {
         .padding(.horizontal, 12)
         .frame(height: 34)
         .chromePanel(cornerRadius: 11)
+        .debugReportsStatusBarWidth()
     }
 
     /// Saved on the Duo first, then synced to Dropbox (#12).
@@ -565,6 +567,9 @@ private struct ScaleReadout: View {
                                 units: editor.canvas.units)
         Text(bar.label).monospacedDigit().fixedSize().hidden()
             .frame(minWidth: Self.labelRoom, alignment: .leading)
+            // Rigid: without this the bar's row is told the readout can squeeze to its minimum, gives the count that
+            // room, and a longer label then pushes the whole bar wider.
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.leading, StatusBarText.scaleBarLongest + Self.gap)
             .overlay(alignment: .leading) {
                 HStack(spacing: Self.gap) {

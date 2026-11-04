@@ -12,6 +12,9 @@ import VellumCore
 /// - `guide`: a line's second point held within 3° of level, with the angle guide.
 /// - `mid`, `intersection`, `perpendicular`, `tangent`: the tip held near each, with the loupe naming it.
 /// - `line`, `polyline`, `rectangle`, `circle`, `arc`, `polygon`: each shape drawn, with its tag.
+/// - `polyline-switch`: three bends, then a change of colour and of tool, to Measure, the lasso and the highlighter in turn:
+///   each time the polyline must be ink, as a pen stroke, in its first colour and width, with one undo step. Writes what it
+///   found to `drawing-switch.txt` in Documents, ending in `done`, for the captures job's log.
 /// - `tag-chrome`, `pad-chrome`, `loupe-chrome`: a shape under the top bar and by the rail, with the tag, the pad and the loupe
 ///   clear of them.
 @MainActor
@@ -63,6 +66,35 @@ enum DebugDrawingTools {
         await draw(.line, [(620, 110), (620, 530)], view, editor)
         view.debugShapeDrawing.clearTag()
         editor.colour = .red
+    }
+
+    private static func polylineSwitch(_ view: InkCanvasUIView, _ editor: CanvasEditor) async {
+        var lines: [String] = []
+        for (i, tool) in [CanvasTool.measure, .lasso, .highlighter].enumerated() {
+            editor.tool = .lineAndShape
+            editor.colour = .red
+            try? await Task.sleep(for: .milliseconds(300))
+            let before = editor.ink.count
+            let y = CGFloat(180 + i * 120)
+            await draw(.polyline, [(180, y), (360, y + 60), (540, y)], view, editor)
+            let width = editor.pen.beginStroke(at: .origin, pointsPerInch: editor.viewport.pointsPerInch)?.width
+            editor.colour = .blue
+            editor.tool = tool
+            // SwiftUI hands the tool to the view a moment after the editor takes it.
+            try? await Task.sleep(for: .milliseconds(400))
+            let stroke = editor.ink.strokes.last
+            let inked = editor.ink.count == before + 1 && stroke?.tool == .pen && stroke?.colour == .red
+                && stroke?.width == width && stroke?.points.count == 3
+            editor.undo()
+            let oneStep = editor.ink.count == before
+            editor.redo()
+            lines.append("\(inked && oneStep ? "ok" : "LOST") \(tool.rawValue) strokes \(editor.ink.count - before) "
+                + "pen \(stroke?.tool.rawValue ?? "none") colour \(stroke?.colour.rawValue ?? "none")")
+        }
+        lines.append("done")
+        let file = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("drawing-switch.txt")
+        try? (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
     }
 
     private static func run(_ step: String, _ view: InkCanvasUIView, _ editor: CanvasEditor) async {
@@ -119,6 +151,8 @@ enum DebugDrawingTools {
             await draw(.arc, [(220, 420), (680, 420), (450, 180)], view, editor)
         case "polygon":
             await draw(.polygon, [(470, 330), (620, 330)], view, editor)
+        case "polyline-switch":
+            await polylineSwitch(view, editor)
         case "tag-chrome":
             await draw(.line, [(220, 24), (640, 24)], view, editor)
         case "pad-chrome":

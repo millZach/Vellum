@@ -187,6 +187,20 @@ sync_captures() {
 # pad and loupe staying clear of the chrome; then the longest of the shapes' prompts in full.
 # In the sheets job, since the captures job was at its hour without them.
 drawing_captures() {
+  # Switching tool part way through a polyline keeps it (#40): only the running app reaches the order the tool changes in.
+  xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-reset --ui-new-canvas --ui-drawing polyline-switch >/dev/null
+  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+  waited=0
+  while [ "$waited" -lt 60 ] && ! grep -q '^done' "$data/Documents/drawing-switch.txt" 2>/dev/null; do
+    sleep 3; waited=$((waited + 3))
+  done
+  cp "$data/Documents/drawing-switch.txt" "$out/drawing-switch.txt" 2>/dev/null || : > "$out/drawing-switch.txt"
+  cat "$out/drawing-switch.txt"
+  if grep -q LOST "$out/drawing-switch.txt" || ! grep -q '^done' "$out/drawing-switch.txt"; then
+    echo "::error::Switching tool lost a polyline"; exit 1
+  fi
   for appearance in light dark; do
     xcrun simctl ui "$udid" appearance "$appearance"
     saved_wait=${WAIT:-6}; WAIT=${DRAWING_WAIT:-8}

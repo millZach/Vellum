@@ -114,6 +114,125 @@ final class PointSnapKindsTests: XCTestCase {
         XCTAssertTrue(InkIndex(other.ink).arcCentres.isEmpty)
     }
 
+    /// A hand line of exactly 49 points, 6 inches long with a 0.03 inch wobble, is no arc: its circle would be huge, and its
+    /// centre would pull the tip from empty canvas. Made up with a fixed walk, so the numbers don't change.
+    func testANearlyStraightHandStrokeOfFortyNinePointsIsNoArc() {
+        var points: [CanvasPoint] = []
+        var x = 0.0
+        for k in 0..<49 {
+            points.append(p(x, 0.03 * sin(Double(k) * 1.7)))
+            x += 0.0625 + 0.125 * (0.5 + 0.5 * sin(Double(k) * 2.3))
+        }
+        var session = InkSession()
+        session.draw(points, tool: .pen, colour: .sketch, width: .inches(0.01))
+        let ink = InkIndex(session.ink)
+        XCTAssertTrue(ink.arcCentres.isEmpty, "no centre")
+        XCTAssertNil(PointSnap.arcCentre(of: session.ink.strokes[0].points))
+        // It keeps its segments, as a stroke that isn't round does: a line crossing a gentler one is found.
+        var gentle: [CanvasPoint] = []
+        x = 0
+        for k in 0..<49 {
+            gentle.append(p(x, 0.005 * sin(Double(k) * 1.7)))
+            x += 0.0625 + 0.125 * (0.5 + 0.5 * sin(Double(k) * 2.3))
+        }
+        let both = index([gentle, SnappedShape.line(p(3, -2), p(3, 4)).points])
+        XCTAssertTrue(both.arcCentres.isEmpty)
+        XCTAssertEqual(PointSnap.target(at: p(3.1, 0.1), pointsPerInch: 40, in: both).kind, .intersection)
+    }
+
+    /// A real arc is still an arc after a move, a turn at 33.5° and a scale change, each rounded to the grid as ink is.
+    func testARealArcStaysAnArcThroughAMoveATurnAndAScale() throws {
+        var points = DrawnShape.arc(start: p(0, 0), end: p(100, 0), bulge: p(50, -25)).shape.points.map(\.onInkGrid)
+        var centre = p(50, 37.5)
+        let motions = [SheetMotion(centre: .origin, dx: .inches(7.13), dy: .inches(-3.3)),
+                       SheetMotion(centre: p(10, 10), turn: 33.5),
+                       SheetMotion(centre: p(-4, 2), scale: 2.5),
+                       SheetMotion(centre: p(3, 3), turn: 33.5, scale: 0.4)]
+        for motion in motions {
+            points = points.map { motion.apply($0).onInkGrid }
+            centre = motion.apply(centre)
+            let found = try XCTUnwrap(PointSnap.arcCentre(of: points), "\(motion)")
+            XCTAssertEqual(found.x, centre.x.inches, accuracy: 1e-2)
+            XCTAssertEqual(found.y, centre.y.inches, accuracy: 1e-2)
+            let ink = index([points])
+            let tip = centre.offsetBy(dx: .inches(1), dy: .inches(1))
+            XCTAssertEqual(PointSnap.target(at: tip, pointsPerInch: ppi, in: ink).kind, .centre, "\(motion)")
+            // And round: a line across its middle takes the true curve.
+            XCTAssertEqual(ink.arcCentres.count, 1)
+        }
+    }
+
+    /// The arc's centre to the 1/16" the app shows, with a height of at least 1/200 of its length. A shallower arc can't reach
+    /// it on the ink grid: the limit is stated in the PR and in `PointSnap.arcFit`.
+    func testAnArcsCentreIsGoodToASixteenthUntilItIsVeryShallow() throws {
+        // Bulging up the screen with its centre below, at the radius asked.
+        func centreError(chord: Double, radius: Double) throws -> Double {
+            let beyond = (radius * radius - chord * chord / 4).squareRoot()
+            let drawn = try XCTUnwrap(DrawnShape.arc(start: p(0, 0), end: p(chord, 0), bulge: p(chord / 2, -chord / 8))
+                .corrected([.radius: .length(.inches(radius))]))
+            let found = try XCTUnwrap(PointSnap.arcCentre(of: drawn.shape.points.map(\.onInkGrid)))
+            return hypot(found.x - chord / 2, found.y - beyond)
+        }
+        for (chord, radius) in [(600.0, 1000.0), (100, 1000), (100, 120), (12, 200), (12, 100), (12, 50)] {
+            XCTAssertLessThan(try centreError(chord: chord, radius: radius), 1.0 / 16, "\(chord) \(radius)")
+        }
+        // 12 inches long at a radius of 83'-4 1/16": 0.018 inch of height, 1/667 of its length, the case that showed the limit.
+        XCTAssertLessThan(try centreError(chord: 12, radius: 1000.0625), 2)
+    }
+
+    /// A circle exactly touching a line takes an Intersection, though rounding leaves its fitted radius just short; a line
+    /// clearly missing takes none.
+    func testALineTouchingACircleIntersectsAndOneMissingDoesNot() {
+        let circle = SnappedShape.ellipse(centre: .origin, radiusX: .inches(60), radiusY: .inches(60), angle: 0).points
+        let touching = index([circle, SnappedShape.line(p(-80, 60), p(100, 60)).points])
+        assertSnap(PointSnap.target(at: p(0, 60), pointsPerInch: 10, in: touching), .intersection, 0, 60)
+        let missing = index([circle, SnappedShape.line(p(-80, 60.01), p(100, 60.01)).points])
+        XCTAssertNil(PointSnap.target(at: p(0, 60), pointsPerInch: 10, in: missing).kind)
+    }
+
+    /// Arc centres are found by place: thousands far from the tip cost nothing. The budget is in
+    /// docs/perf/baselines/canvas-rendering.json.
+    func testArcCentresFarFromTheTipAreNotRead() {
+        var session = InkSession()
+        for i in 0..<5000 {
+            let centre = p(100_000 + Double(i % 100) * 500, 100_000 + Double(i / 100) * 500)
+            session.draw(SnappedShape.arc(centre: centre, radius: .inches(50), start: 0, sweep: 90).points, tool: .pen,
+                         colour: .sketch, width: .inches(0.01))
+        }
+        for centre in [p(2, 3), p(-4, 5), p(-6, -7)] {
+            session.draw(SnappedShape.arc(centre: centre, radius: .inches(50), start: 0, sweep: 90).points, tool: .pen,
+                         colour: .sketch, width: .inches(0.01))
+        }
+        let ink = InkIndex(session.ink)
+        XCTAssertEqual(ink.arcCentres.count, 5003)
+        var work = InkIndex.Work()
+        let near = PointSnap.target(at: p(0, 0), pointsPerInch: ppi, in: ink, work: &work)
+        XCTAssertEqual(near.kind, .centre)
+        XCTAssertEqual(near.point, p(2, 3))
+        MeasureFrameBaseline.check("point_snap_arc_centres_visited_per_lookup", work.arcCentresVisited, area: "canvas-rendering",
+                                   before: 5003)
+        var nowhere = InkIndex.Work()
+        _ = PointSnap.target(at: p(-5000, -5000), pointsPerInch: ppi, in: ink, work: &nowhere)
+        XCTAssertEqual(nowhere.arcCentresVisited, 0)
+        // Taking one out takes it from its place too.
+        var fewer = ink
+        fewer.remove(session.ink.strokes[5000].id)
+        XCTAssertEqual(PointSnap.target(at: p(1, 2), pointsPerInch: ppi, in: fewer).point, p(-4, 5))
+    }
+
+    /// A pile of circles through the tip: pairs stop at the cap. The budget is in docs/perf/baselines/canvas-rendering.json.
+    func testAPileOfCirclesStopsAtTheRoundLimit() {
+        var session = InkSession()
+        for i in 0..<300 {
+            session.draw(SnappedShape.ellipse(centre: p(Double(i) * 0.01, 0), radiusX: .inches(60), radiusY: .inches(60),
+                                              angle: 0).points, tool: .pen, colour: .sketch, width: .inches(0.01))
+        }
+        var work = InkIndex.Work()
+        _ = PointSnap.target(at: p(60, 0), pointsPerInch: ppi, in: InkIndex(session.ink), work: &work)
+        MeasureFrameBaseline.check("point_snap_crowded_round_pairs_per_lookup", work.segmentPairsTested, area: "canvas-rendering",
+                                   before: 300 * 299 / 2)
+    }
+
     func testAPolygonSnapsAtItsCentreCornersAndMids() {
         let hexagon = DrawnShape.polygon(centre: p(200, 200), corner: p(248, 200)).shape.points
         let ink = index([hexagon])

@@ -424,10 +424,21 @@ public struct ShapeDraft: Hashable, Sendable {
     public static let samePlaceReach = 2.0
 
     public let kind: LineShape
+    /// The pen, colour and width fixed when the shape started, as a stroke's are at touchdown (ADR-0012): what it commits as,
+    /// whatever the tool in hand is by then. Nil only in tests of the points alone.
+    public let pen: StrokeInProgress?
     public private(set) var placed: [CanvasPoint] = []
     public private(set) var isClosed = false
+    /// The points as they stood before each change, so an undo puts back a bend or a size alike.
+    private var earlier: [[CanvasPoint]] = []
 
-    public init(kind: LineShape) { self.kind = kind }
+    public init(kind: LineShape, pen: StrokeInProgress? = nil) {
+        self.kind = kind
+        self.pen = pen
+    }
+
+    /// The stroke a shape from this draft becomes: the pen, colour and width it started with, the shape's points.
+    public func inked(_ shape: DrawnShape) -> StrokeInProgress? { pen?.snapped(to: shape.shape) }
 
     /// The point perpendicular, tangent and the angle catch work from: the last one placed.
     public var anchor: CanvasPoint? { placed.last }
@@ -462,26 +473,32 @@ public struct ShapeDraft: Hashable, Sendable {
                     return finish().map(Placement.finished) ?? .waiting
                 }
             }
+            earlier.append(placed)
             placed.append(point)
             return .waiting
         }
         // The same place twice isn't a second point: a line or a circle needs a length, an arc its two ends.
         if let last = placed.last, screenDistance(point, last) < Self.samePlaceReach { return .waiting }
+        earlier.append(placed)
         placed.append(point)
         guard placed.count >= (kind == .arc ? 3 : 2) else { return .waiting }
         return finish().map(Placement.finished) ?? .waiting
     }
 
-    /// Takes the last point back: an undo while drawing, or a drag let go. False when none was left to take.
+    /// Takes the last change back, a point placed or a size corrected: an undo while drawing, or a drag let go. False when
+    /// nothing is left placed.
     @discardableResult
-    public mutating func removeLast() -> Bool {
-        guard !placed.isEmpty else { return false }
-        placed.removeLast()
+    public mutating func undo() -> Bool {
+        if let before = earlier.popLast() { placed = before }
         return !placed.isEmpty
     }
 
-    /// Replaces the placed points of a polyline being drawn, its last segment corrected through its tag.
-    public mutating func replacePoints(_ points: [CanvasPoint]) { placed = points }
+    /// Corrects the placed points of a polyline being drawn, its last segment set through its tag. One undo puts them back.
+    /// They are ink only when the polyline is.
+    public mutating func correct(to points: [CanvasPoint]) {
+        earlier.append(placed)
+        placed = points
+    }
 
     /// The shape as the points placed make it; nil when too few are placed. A polyline's Done comes here.
     public func finish() -> DrawnShape? { shape(with: placed) }
@@ -561,6 +578,28 @@ public struct ExactPlacement: Hashable, Sendable {
         }
         return ScreenPoint(x: clamp(centre.x, left + radius, right - radius),
                            y: clamp(centre.y, top + radius, bottom - radius))
+    }
+
+    /// The top-left corner of the running size beside the tip: up and to the right of its point, or the first of the other
+    /// corners round it, then beside, under or over the loupe, that is clear of the loupe and on the free part of the screen.
+    public func labelOrigin(spot: ScreenPoint, tip: ScreenPoint, width: Double, height: Double, loupeRadius: Double,
+                            loupeLift: Double) -> ScreenPoint {
+        let loupe = loupeCentre(tip: tip, radius: loupeRadius, lift: loupeLift)
+        let candidates = [ScreenPoint(x: spot.x + 14, y: spot.y - 34), ScreenPoint(x: spot.x - 14 - width, y: spot.y - 34),
+                          ScreenPoint(x: spot.x + 14, y: spot.y + 16), ScreenPoint(x: spot.x - 14 - width, y: spot.y + 16),
+                          ScreenPoint(x: loupe.x - loupeRadius - 4 - width, y: spot.y - 34),
+                          ScreenPoint(x: loupe.x + loupeRadius + 4, y: spot.y - 34),
+                          ScreenPoint(x: spot.x + 14, y: loupe.y + loupeRadius + 4),
+                          ScreenPoint(x: spot.x + 14, y: loupe.y - loupeRadius - 4 - height)]
+        var placed = ScreenPoint(x: 0, y: 0)
+        for candidate in candidates {
+            placed = ScreenPoint(x: clamp(candidate.x, left, right - width), y: clamp(candidate.y, top, bottom - height))
+            // The nearest the box comes to the loupe's centre, against its radius.
+            let dx = max(placed.x - loupe.x, 0, loupe.x - placed.x - width)
+            let dy = max(placed.y - loupe.y, 0, loupe.y - placed.y - height)
+            if dx * dx + dy * dy > loupeRadius * loupeRadius { return placed }
+        }
+        return placed
     }
 
     /// The top-left corner of the polyline's Done button, in the free part's bottom right corner.

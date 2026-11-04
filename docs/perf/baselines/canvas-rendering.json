@@ -181,6 +181,26 @@
       "note": "The same lookups: points read from the strokes near the tip, each such stroke's points once. Nearly every stroke in this thicket runs through the place, which is what makes it the worst case: the index can rule out only what isn't near. Before: every point on that canvas."
     },
     {
+      "metric": "point_snap_arc_centres_visited_per_lookup",
+      "kind": "count",
+      "value": 3,
+      "before": 5003,
+      "unit": "arc centres",
+      "tolerance": 0,
+      "measured": "feat/drawing-tools 2026-11-04, the fixture's own count (deterministic; checked by CI VellumCore tests)",
+      "note": "A snap lookup with 5,003 arcs on the canvas (#40), three with their centres by the tip and 5,000 far off: arc centres or cells of them read, looked up by the centre's own place in cells of 64 inches. Before: every arc on the canvas on every lookup."
+    },
+    {
+      "metric": "point_snap_crowded_round_pairs_per_lookup",
+      "kind": "count",
+      "value": 496,
+      "before": 44850,
+      "unit": "pairs",
+      "tolerance": 0,
+      "measured": "feat/drawing-tools 2026-11-04, the cap's own count, 32 x 31 / 2 (deterministic; checked by CI VellumCore tests)",
+      "note": "A snap lookup with 300 circles all through the tip (#40): pairs tested for crossing, stopped by the cap of 32 circles and arcs. Before: every pair of the 300."
+    },
+    {
       "metric": "point_snap_points_inspected_per_tap",
       "kind": "count",
       "value": 9485,

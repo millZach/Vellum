@@ -122,7 +122,10 @@ final class ShapeDrawing {
 
     /// The tip touched down with a shape in hand: the first point, or the next.
     func down(at location: CGPoint) {
-        if draft == nil { draft = ShapeDraft(kind: editor.lineShape) }
+        // The pen, colour and width are fixed here, as a stroke's are at touchdown, so what comes later can't change them.
+        if draft == nil, let host {
+            draft = ShapeDraft(kind: editor.lineShape, pen: editor.beginStroke(at: host.canvasPointForShape(location)))
+        }
         isDown = true
         hasMoved = false
         placedByThisDrag = false
@@ -168,7 +171,7 @@ final class ShapeDrawing {
         tipMoved = false
         host.hideShapeLoupe()
         guard keep, var current = draft else {
-            if placedByThisDrag { draft?.removeLast() }
+            if placedByThisDrag { draft?.undo() }
             if draft?.placed.isEmpty == true { draft = nil }
             aimed = nil
             restoreTag()
@@ -188,7 +191,7 @@ final class ShapeDrawing {
             }
         case .finished(let shape):
             draft = nil
-            commit(shape)
+            commit(shape, from: current)
         }
         render()
         publishStep()
@@ -199,8 +202,8 @@ final class ShapeDrawing {
         return { $0.distance(to: $1).inches * ppi }
     }
 
-    private func commit(_ shape: DrawnShape) {
-        guard let host, let stroke = host.commitShape(shape.shape) else { return }
+    private func commit(_ shape: DrawnShape, from drawn: ShapeDraft) {
+        guard let host, let inked = drawn.inked(shape), let stroke = host.commitShape(inked) else { return }
         show(tag: shape, stroke: stroke.id)
         UIAccessibility.post(notification: .announcement, argument: "\(shape.shape.name): \(shape.tag(units: editor.canvas.units))")
     }
@@ -216,7 +219,7 @@ final class ShapeDrawing {
             host?.hideShapeLoupe()
         }
         if current.kind == .polyline, let shape = current.finish() {
-            commit(shape)
+            commit(shape, from: current)
         } else if tagged?.stroke == nil {
             clearTag()
         }
@@ -224,11 +227,11 @@ final class ShapeDrawing {
         publishStep()
     }
 
-    /// An undo with a shape part way through takes its last point back, as on the prototype. False when there is none, so
-    /// the undo is the ink's.
+    /// An undo with a shape part way through takes its last change back: a point, as on the prototype, or a size corrected.
+    /// False when there is none, so the undo is the ink's.
     func undoLastPoint() -> Bool {
         guard var current = draft, !isDown else { return false }
-        current.removeLast()
+        current.undo()
         draft = current.placed.isEmpty ? nil : current
         clearTag()
         if let draft, draft.kind == .polyline, let drawn = draft.finish() { show(tag: drawn, stroke: nil) }
@@ -286,8 +289,11 @@ final class ShapeDrawing {
                 for point in points.dropFirst() { path.addLine(to: screen(point)) }
             }
             previewLayer.path = path
-            previewLayer.strokeColor = Palette.ink(editor.colour, dark: isDark).cgColor
-            previewLayer.lineWidth = editor.weight.screenWidth(for: .pen)
+            // As it will be drawn: the pen it started with.
+            if let pen = draft.pen {
+                previewLayer.strokeColor = Palette.ink(pen.colour, dark: isDark).cgColor
+                previewLayer.lineWidth = max(pen.width.inches * viewport.pointsPerInch, InkTileRenderer.minimumWidth)
+            }
         } else {
             previewLayer.path = nil
         }
@@ -317,18 +323,12 @@ final class ShapeDrawing {
             }
             let spot = aimed.map { screen($0.point) } ?? tip
             let size = label.layer.bounds.size
-            let free = host.exactPlacement
-            let x = max(CGFloat(free.left), min(spot.x + 14, CGFloat(free.right) - size.width))
-            var y = max(CGFloat(free.top), min(spot.y - 34, CGFloat(free.bottom) - size.height))
-            // Under the tip instead when the loupe is where it would go.
-            let loupe = free.loupeCentre(tip: ScreenPoint(x: Double(tip.x), y: Double(tip.y)), radius: Double(Loupe.radius),
-                                         lift: Double(Loupe.lift))
-            let loupeRect = CGRect(x: loupe.x - Double(Loupe.radius), y: loupe.y - Double(Loupe.radius),
-                                   width: Double(Loupe.radius) * 2, height: Double(Loupe.radius) * 2)
-            if loupeRect.intersects(CGRect(x: x, y: y, width: size.width, height: size.height)) {
-                y = min(spot.y + 16, CGFloat(free.bottom) - size.height)
-            }
-            label.layer.position = CGPoint(x: x, y: y)
+            // Where the loupe isn't.
+            let origin = host.exactPlacement.labelOrigin(
+                spot: ScreenPoint(x: Double(spot.x), y: Double(spot.y)), tip: ScreenPoint(x: Double(tip.x), y: Double(tip.y)),
+                width: Double(size.width), height: Double(size.height), loupeRadius: Double(Loupe.radius),
+                loupeLift: Double(Loupe.lift))
+            label.layer.position = CGPoint(x: origin.x, y: origin.y)
             label.layer.isHidden = false
         } else {
             label.layer.isHidden = true
@@ -461,7 +461,7 @@ final class ShapeDrawing {
             if let stroke = tagged.stroke {
                 editor.correct(stroke, to: corrected.shape.points)
             } else if var drawing = draft {
-                drawing.replacePoints(corrected.shape.points)
+                drawing.correct(to: corrected.shape.points)
                 draft = drawing
                 render()
             }

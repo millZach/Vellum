@@ -346,6 +346,44 @@ final class ShapeDraftTests: XCTestCase {
         }
     }
 
+    /// A shape keeps the pen, colour and width it started with, whatever is in hand when it is finished, and is one undo step.
+    func testAShapeCommitsAsItStartedWhateverIsInHandLater() throws {
+        for tool in [CanvasTool.measure, .lasso, .highlighter, .eraser, .textBox] {
+            var pen = PenSettings(tool: .lineAndShape, colour: .red, weights: [.pen: .fine, .highlighter: .bold])
+            let begun = pen.beginStroke(at: p(0, 0), pointsPerInch: 2)
+            var draft = ShapeDraft(kind: .polyline, pen: begun)
+            for point in [p(0, 0), p(100, 0), p(100, 100)] { _ = draft.place(point, screenDistance: onScreen) }
+            pen.tool = tool
+            pen.colour = .blue
+            var session = InkSession()
+            let shape = try XCTUnwrap(draft.finish())
+            let stroke = try XCTUnwrap(session.commit(try XCTUnwrap(draft.inked(shape))))
+            XCTAssertEqual(stroke.tool, .pen, tool.title)
+            XCTAssertEqual(stroke.colour, .red, tool.title)
+            XCTAssertEqual(stroke.width, begun?.width, tool.title)
+            XCTAssertEqual(stroke.points, [p(0, 0), p(100, 0), p(100, 100)], tool.title)
+            session.undo()
+            XCTAssertTrue(session.ink.strokes.isEmpty, "one undo step")
+        }
+    }
+
+    /// Undo with a polyline part way through takes back the last change: a bend, or a size corrected through its tag.
+    func testAnUndoPutsACorrectedSizeBackBeforeItTakesABend() throws {
+        var draft = ShapeDraft(kind: .polyline)
+        for point in [p(0, 0), p(100, 0), p(100, -100)] { _ = draft.place(point, screenDistance: onScreen) }
+        let drawn = try XCTUnwrap(draft.finish())
+        let exact = try XCTUnwrap(drawn.corrected([.length: .length(.inches(150))]))
+        draft.correct(to: exact.shape.points)
+        XCTAssertEqual(draft.finish()?.tag(units: .feetAndInches), "12'-6\"  90°")
+        XCTAssertTrue(draft.undo())
+        XCTAssertEqual(draft.placed, [p(0, 0), p(100, 0), p(100, -100)], "one undo puts the size back and keeps the bend")
+        XCTAssertTrue(draft.undo())
+        XCTAssertEqual(draft.placed, [p(0, 0), p(100, 0)], "the next takes the bend")
+        XCTAssertTrue(draft.undo())
+        XCTAssertFalse(draft.undo(), "nothing left")
+        XCTAssertTrue(draft.placed.isEmpty)
+    }
+
     func testAnArcTakesThreePoints() {
         var draft = ShapeDraft(kind: .arc)
         XCTAssertEqual(draft.place(p(0, 0), screenDistance: onScreen), .waiting)
@@ -470,6 +508,35 @@ final class ExactPlacementTests: XCTestCase {
         XCTAssertEqual(strip.tagCentre(spot: ScreenPoint(x: 400, y: 70), width: 100, height: 28).y, 110)
         XCTAssertEqual(strip.padOrigin(spot: ScreenPoint(x: 400, y: 70), width: 162, height: 300).y, 96)
         XCTAssertEqual(ExactPlacement(width: 951, height: 669, chrome: chrome, stripBottom: 20).top, 60, "a strip higher than the bar")
+    }
+
+    /// The running size goes where the loupe isn't, as `unfolded-drawing-mid` showed it didn't.
+    func testTheRunningSizeStaysClearOfTheLoupe() {
+        let (r, lift) = (60.0, 104.0)
+        func clear(_ o: ScreenPoint, _ w: Double, _ h: Double, tip: ScreenPoint) -> Bool {
+            let c = free.loupeCentre(tip: tip, radius: r, lift: lift)
+            let dx = max(o.x - c.x, 0, c.x - o.x - w), dy = max(o.y - c.y, 0, c.y - o.y - h)
+            return dx * dx + dy * dy > r * r
+        }
+        let open = ScreenPoint(x: 400, y: 400)
+        XCTAssertEqual(free.labelOrigin(spot: open, tip: open, width: 90, height: 20, loupeRadius: r, loupeLift: lift),
+                       ScreenPoint(x: 414, y: 366), "up and to the right, in the open")
+        // The `mid` capture: the tip near the top bar, the loupe aside to the right, where the label would go.
+        let mid = ScreenPoint(x: 314, y: 185)
+        let moved = free.labelOrigin(spot: ScreenPoint(x: 310, y: 180), tip: mid, width: 90, height: 20, loupeRadius: r,
+                                     loupeLift: lift)
+        XCTAssertEqual(moved, ScreenPoint(x: 206, y: 146), "to the left instead")
+        for x in stride(from: 80.0, through: 850, by: 35) {
+            for y in stride(from: 60.0, through: 610, by: 25) {
+                let tip = ScreenPoint(x: x, y: y)
+                let o = free.labelOrigin(spot: tip, tip: tip, width: 120, height: 20, loupeRadius: r, loupeLift: lift)
+                XCTAssertTrue(clear(o, 120, 20, tip: tip), "\(x), \(y)")
+                XCTAssertGreaterThanOrEqual(o.x, free.left)
+                XCTAssertLessThanOrEqual(o.x + 120, free.right)
+                XCTAssertGreaterThanOrEqual(o.y, free.top)
+                XCTAssertLessThanOrEqual(o.y + 20, free.bottom)
+            }
+        }
     }
 
     func testTheLoupeMovesAsideRatherThanSlidingUnderTheChrome() {

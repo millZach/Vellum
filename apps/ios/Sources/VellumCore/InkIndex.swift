@@ -65,13 +65,48 @@ public struct InkIndex: Sendable {
     private var levels: [Int: [Cell: [StrokeID]]] = [:]
     /// Every stroke's id, in ascending order, which is the order the ink keeps them in.
     private var ids: [StrokeID] = []
-    /// The centres of the arcs among the strokes (#40). An arc's centre can lie well off its bounds, where a lookup by place
-    /// would never find it, so a snap reads these as well. Only strokes that really are arcs are here, so it stays short.
+    /// The centres of the arcs among the strokes (#40). An arc's centre can lie well off its bounds, where a lookup by the
+    /// stroke's place would never find it, so a snap looks these up by the centre's own place, in cells of `arcCellSize`.
+    /// Only strokes that really are arcs are here, so everything else pays one comparison of its point count.
     private(set) var arcCentres: [StrokeID: ArcCentre] = [:]
+    private var arcCells: [Cell: [StrokeID]] = [:]
+    static let arcCellSize = 64.0
 
     struct ArcCentre: Sendable {
         var x: Double
         var y: Double
+    }
+
+    /// Calls `body` with each arc centre inside a box, looking only in the cells it covers, or at the cells holding any when
+    /// those are fewer, as a very zoomed-out box would cover more cells than hold arcs. What it looks at is counted.
+    func visitArcCentres(in box: Box, work: inout Work, _ body: (ArcCentre) -> Void) {
+        guard !arcCells.isEmpty else { return }
+        let size = Self.arcCellSize
+        let lowX = (box.minX / size).rounded(.down), highX = (box.maxX / size).rounded(.down)
+        let lowY = (box.minY / size).rounded(.down), highY = (box.maxY / size).rounded(.down)
+        func look(_ members: [StrokeID], _ work: inout Work) {
+            work.arcCentresVisited += members.count
+            for id in members {
+                guard let centre = arcCentres[id], centre.x >= box.minX, centre.x <= box.maxX, centre.y >= box.minY,
+                      centre.y <= box.maxY else { continue }
+                body(centre)
+            }
+        }
+        let span = (highX - lowX + 1) * (highY - lowY + 1)
+        if span.isFinite, span <= Double(arcCells.count) {
+            for x in Int(lowX)...Int(highX) {
+                for y in Int(lowY)...Int(highY) {
+                    if let members = arcCells[Cell(x: x, y: y)] { look(members, &work) }
+                }
+            }
+        } else {
+            work.arcCentresVisited += arcCells.count
+            for (cell, members) in arcCells {
+                let x = Double(cell.x), y = Double(cell.y)
+                guard x >= lowX, x <= highX, y >= lowY, y <= highY else { continue }
+                look(members, &work)
+            }
+        }
     }
 
     public init() {}
@@ -102,16 +137,27 @@ public struct InkIndex: Sendable {
         let cell = Cell(x: Self.cellIndex(box.minX, size), y: Self.cellIndex(box.minY, size))
         entries[stroke.id] = Entry(stroke: stroke, box: box, level: level, cell: cell)
         levels[level, default: [:]][cell, default: []].append(stroke.id)
-        if let centre = PointSnap.arcCentre(of: stroke.points) { arcCentres[stroke.id] = centre }
+        if let centre = PointSnap.arcCentre(of: stroke.points) {
+            arcCentres[stroke.id] = centre
+            arcCells[Self.arcCell(centre), default: []].append(stroke.id)
+        }
         let at = Self.insertionPoint(of: stroke.id, in: ids)
         ids.insert(stroke.id, at: at)
+    }
+
+    private static func arcCell(_ centre: ArcCentre) -> Cell {
+        Cell(x: cellIndex(centre.x, arcCellSize), y: cellIndex(centre.y, arcCellSize))
     }
 
     /// Takes a stroke out; returns it, or nil when it was not in the index.
     @discardableResult
     public mutating func remove(_ id: StrokeID) -> InkStroke? {
         guard let entry = entries.removeValue(forKey: id) else { return nil }
-        arcCentres[id] = nil
+        if let centre = arcCentres.removeValue(forKey: id) {
+            let cell = Self.arcCell(centre)
+            arcCells[cell]?.removeAll { $0 == id }
+            if arcCells[cell]?.isEmpty == true { arcCells[cell] = nil }
+        }
         // In place, so a level's table of cells is never copied to take one stroke out of it.
         levels[entry.level]?[entry.cell]?.removeAll { $0 == id }
         if levels[entry.level]?[entry.cell]?.isEmpty == true {
@@ -212,11 +258,12 @@ public struct InkIndex: Sendable {
     // MARK: Looking things up
 
     /// The work a lookup did, for the work budgets (docs/perf): strokes whose cached bounds it compared, stroke points it
-    /// looked at, and pairs of segments or round strokes a snap tested for crossing.
+    /// looked at, pairs of segments or round strokes a snap tested for crossing, and arc centres or cells of them it read.
     public struct Work: Hashable, Sendable {
         public var strokesVisited = 0
         public var pointsInspected = 0
         public var segmentPairsTested = 0
+        public var arcCentresVisited = 0
         public init() {}
     }
 

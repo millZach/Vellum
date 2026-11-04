@@ -11,9 +11,9 @@ import Darwin
 /// It looks only at the strokes whose bounds come within the radius of the tip, found through the `InkIndex`, never the
 /// whole canvas, and reads each of those strokes' points once. Everything is worked out from the points, since ink keeps no
 /// shape. A stroke's shape is read like this:
-/// - A **round** stroke is a snapped circle, or an arc: its points all as far from one centre, within `roundTolerance`. A
-///   circle is closed with at least `centreMinimumPoints` points; an arc is open with exactly `SnappedShape.arcSegments`
-///   segments. Lengths on it are the true circle's, not its chords'.
+/// - A **round** stroke is a snapped circle, or an arc. A circle is closed, with more segments than a polygon has and its
+///   points all as far from one centre, within `roundTolerance`. An arc is open, with exactly `SnappedShape.arcSegments`
+///   segments of equal length on one circle (`arcFit`). Lengths on it are the true circle's, not its chords'.
 /// - A **straight** stroke has at most `straightMaximumSegments` segments and isn't round: a line, a rectangle, a polyline, a
 ///   polygon. Each of its segments is a straight run; a hand-drawn stroke's many short samples are not.
 ///
@@ -21,13 +21,15 @@ import Darwin
 /// - **End**: an open stroke's first and last points.
 /// - **Corner**: a point where the stroke turns by more than `cornerTurn`, or at all on a straight stroke (a polygon's 24
 ///   sides turn 15°); and the ends of a closed stroke, which meet at one.
-/// - **Centre**: a round stroke's centre, which for an arc comes from the index, since it can lie well off the arc's bounds; a regular polygon's, of 3 or from 5 sides; or that of any other closed stroke of at
+/// - **Centre**: a round stroke's centre, which for an arc the index finds by the centre's own place, since it can lie well off
+///   the arc's bounds; a regular polygon's, of 3 or from 5 sides; or that of any other closed stroke of at
 ///   least `centreMinimumPoints` points that stay within a factor `centreRoundness` of each other's distance from it, which
 ///   a snapped ellipse does. A rectangle has none, even a square one.
 /// - **Mid**: the middle of a straight stroke's segment.
 /// - **Intersection**: where two strokes cross or meet, on the true circle for a round one. Found only among the segments
 ///   within reach of the tip, and no further than the best point so far, since nearer is all that can win. At most
-///   `intersectionSegmentLimit` segments are looked at, the latest strokes first.
+///   `intersectionSegmentLimit` segments and `roundLimit` circles and arcs are looked at, the latest strokes first, so past
+///   those a nearer crossing among older strokes can lose to a farther point.
 /// - **Perpendicular** and **Tangent** need a point to work from (`anchor`): the foot of the perpendicular on a straight
 ///   stroke's segment or a circle, and the two points where a line from the anchor just touches a circle. So a measure's or
 ///   dimension's first point has neither, and its second has both. An arc has neither, as on the prototype.
@@ -50,6 +52,10 @@ public enum PointSnap {
     public static let roundTolerance = 1e-3
     /// The most segments intersections are looked for among, so a crowded place stays quick; zooming in leaves fewer.
     public static let intersectionSegmentLimit = 128
+    /// The most circles and arcs crossings are looked for among, the latest strokes first, so a pile of them stays quick.
+    public static let roundLimit = 32
+    /// How far past a circle, in inches, a line still touches it: the rounding of its fitted radius, 4 grid units.
+    static let touchReach = 4 / CanvasPoint.gridUnitsPerInch
     /// A polygon's most sides, which is what makes it a regular polygon rather than a circle.
     static let polygonMaximumSides = 24
     /// A turn smaller than this on a straight stroke is the rounding of a straight run, not a corner: 1°.
@@ -216,7 +222,9 @@ public enum PointSnap {
             }
             if let round {
                 consider(round.x, round.y, .centre)
-                if abs((round.x - tx).magnitudeHypot(round.y - ty) - round.r) <= radius { rounds.append(round) }
+                if abs((round.x - tx).magnitudeHypot(round.y - ty) - round.r) <= radius, rounds.count < roundLimit {
+                    rounds.append(round)
+                }
                 if round.arc == nil, let ax, let ay { tangentAndPerpendicular(round, ax, ay, consider) }
             } else if closed, let centre = centre(of: points.dropLast()) {
                 consider(centre.x, centre.y, .centre)
@@ -238,7 +246,7 @@ public enum PointSnap {
         }
 
         // An arc's centre may be far off its own bounds, so the strokes found above don't always include it.
-        for centre in index.arcCentres.values { consider(centre.x, centre.y, .centre) }
+        index.visitArcCentres(in: probe, work: &work) { consider($0.x, $0.y, .centre) }
 
         intersections(segments, rounds, tx, ty, radius, best?.distance, &work, consider)
 
@@ -326,8 +334,13 @@ public enum PointSnap {
         let a = dx * dx + dy * dy
         guard a > 0 else { return }
         let b = 2 * (dx * fx + dy * fy), c = fx * fx + fy * fy - round.r * round.r
-        let discriminant = b * b - 4 * a * c
-        guard discriminant >= 0 else { return }
+        var discriminant = b * b - 4 * a * c
+        if discriminant < 0 {
+            // A line just touching: the rounding of the fitted radius may leave it just outside. How far outside decides.
+            let off = abs(dx * fy - dy * fx) / a.squareRoot() - round.r
+            guard off <= touchReach else { return }
+            discriminant = 0
+        }
         let root = discriminant.squareRoot()
         for t in [(-b - root) / (2 * a), (-b + root) / (2 * a)] where t >= -1e-6 && t <= 1 + 1e-6 {
             let (x, y) = (segment.ax + t * dx, segment.ay + t * dy)
@@ -358,35 +371,80 @@ public enum PointSnap {
                   let r = commonDistance(of: points.dropLast(), from: centre.x, centre.y) else { return nil }
             return Round(stroke: stroke, x: centre.x, y: centre.y, r: r, arc: nil)
         }
-        guard points.count == SnappedShape.arcSegments + 1 else { return nil }
-        let a = points[0], m = points[SnappedShape.arcSegments / 2], b = points[SnappedShape.arcSegments]
-        guard let centre = circumcentre(a, m, b),
-              let r = commonDistance(of: points[...], from: centre.x, centre.y) else { return nil }
-        let start = atan2(a.y.inches - centre.y, a.x.inches - centre.x)
+        guard let fit = arcFit(points) else { return nil }
+        let a = points[0]
+        let start = atan2(a.y.inches - fit.y, a.x.inches - fit.x)
         // Its turn at each step, from the first two points, gives the sweep with its direction.
-        let second = atan2(points[1].y.inches - centre.y, points[1].x.inches - centre.x)
+        let second = atan2(points[1].y.inches - fit.y, points[1].x.inches - fit.x)
         var step = second - start
         if step > Double.pi { step -= 2 * Double.pi } else if step < -Double.pi { step += 2 * Double.pi }
-        return Round(stroke: stroke, x: centre.x, y: centre.y, r: r,
+        return Round(stroke: stroke, x: fit.x, y: fit.y, r: fit.r,
                      arc: (start: start, sweep: step * Double(SnappedShape.arcSegments)))
     }
 
-    /// Where an arc's centre is, if these points are an arc: exactly `SnappedShape.arcSegments` segments, all as far from it.
+    /// Where an arc's centre is, if these points are an arc.
     static func arcCentre(of points: [CanvasPoint]) -> InkIndex.ArcCentre? {
-        guard points.count == SnappedShape.arcSegments + 1,
-              let centre = circumcentre(points[0], points[SnappedShape.arcSegments / 2], points[SnappedShape.arcSegments]),
-              commonDistance(of: points[...], from: centre.x, centre.y) != nil else { return nil }
-        return InkIndex.ArcCentre(x: centre.x, y: centre.y)
+        arcFit(points).map { InkIndex.ArcCentre(x: $0.x, y: $0.y) }
     }
 
-    private static func circumcentre(_ a: CanvasPoint, _ b: CanvasPoint, _ c: CanvasPoint) -> (x: Double, y: Double)? {
-        let (ax, ay) = (a.x.inches, a.y.inches), (bx, by) = (b.x.inches - ax, b.y.inches - ay)
-        let (cx, cy) = (c.x.inches - ax, c.y.inches - ay)
-        let d = 2 * (bx * cy - by * cx)
-        guard d != 0 else { return nil }
-        let (b2, c2) = (bx * bx + by * by, cx * cx + cy * cy)
-        return (ax + (cy * b2 - by * c2) / d, ay + (bx * c2 - cx * b2) / d)
+    /// The circle these points lie on, if they are what `SnappedShape.arc` makes: exactly `arcSegments` segments of equal
+    /// length, which a hand-drawn stroke's never are, within the rounding of moves, turns and scale changes, all on one circle
+    /// fitted to all of them by least squares. Distance from a circle is judged in lengths, never as a share of its radius, or
+    /// the huge circle through a nearly straight stroke would take in any wobble.
+    ///
+    /// The ink grid limits a very shallow arc's centre, which lies far off along its axis. With a height of at least 1/200 of
+    /// its length the centre is good to 1/16"; at 1/500 it can be about 0.35 inch out, and shallower is worse.
+    private static func arcFit(_ points: [CanvasPoint]) -> (x: Double, y: Double, r: Double)? {
+        guard points.count == SnappedShape.arcSegments + 1 else { return nil }
+        // Read in order and given up on at the first chord that differs, so a hand-drawn stroke costs a few points.
+        let firstChord = points[0].distance(to: points[1]).inches
+        guard firstChord > 0 else { return nil }
+        let reach = arcChordRounding + 1e-4 * firstChord
+        var shortest = firstChord, longest = firstChord
+        for i in 2..<points.count {
+            let chord = points[i - 1].distance(to: points[i]).inches
+            shortest = min(shortest, chord)
+            longest = max(longest, chord)
+            if longest - shortest > reach { return nil }
+        }
+        // Worked from the points' mean, which keeps the sums small far from the origin.
+        var mx = 0.0, my = 0.0
+        for p in points {
+            mx += p.x.inches
+            my += p.y.inches
+        }
+        let n = Double(points.count)
+        mx /= n
+        my /= n
+        var suu = 0.0, svv = 0.0, suv = 0.0, suuu = 0.0, svvv = 0.0, suvv = 0.0, svuu = 0.0
+        for p in points {
+            let u = p.x.inches - mx, v = p.y.inches - my
+            suu += u * u
+            svv += v * v
+            suv += u * v
+            suuu += u * u * u
+            svvv += v * v * v
+            suvv += u * v * v
+            svuu += v * u * u
+        }
+        let determinant = suu * svv - suv * suv
+        guard determinant > 0 else { return nil }
+        let x = mx + (svv * (suuu + suvv) - suv * (svvv + svuu)) / (2 * determinant)
+        let y = my + (suu * (svvv + svuu) - suv * (suuu + suvv)) / (2 * determinant)
+        guard x.isFinite, y.isFinite else { return nil }
+        var nearest = Double.infinity, farthest = 0.0
+        for p in points {
+            let d = (p.x.inches - x).magnitudeHypot(p.y.inches - y)
+            nearest = min(nearest, d)
+            farthest = max(farthest, d)
+        }
+        guard farthest - nearest <= arcChordRounding + 1e-4 * firstChord else { return nil }
+        return (x, y, (nearest + farthest) / 2)
     }
+
+    /// How far, in inches, rounding to the ink grid through a few moves, turns and scale changes can set an arc's chords apart:
+    /// 16 grid units, about 1/4096 inch.
+    private static let arcChordRounding = 16 / CanvasPoint.gridUnitsPerInch
 
     /// The distance all these points are from a centre, within `roundTolerance`; nil when they aren't.
     private static func commonDistance(of points: ArraySlice<CanvasPoint>, from x: Double, _ y: Double) -> Double? {

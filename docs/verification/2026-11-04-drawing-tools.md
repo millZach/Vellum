@@ -35,13 +35,13 @@ The shapes:
 - [ ] Line, Rectangle, Circle and Polygon, each by a drag and by two taps. A polygon has 6 sides until 8 is typed.
 - [ ] Arc: tap the start, the end, then the bulge. Correct its radius: its ends stay put.
 - [ ] Polyline: tap each bend, then finish once each way: Done, tapping the last point again, and closing on the first. The tag shows the last segment. Correct it part way through and go on drawing.
-- [ ] Undo with a polyline part way through: it takes the last bend back. With Draw with finger on, rest a finger, then use the Pencil: the Pencil takes over and nothing lands under the finger.
+- [ ] Undo with a polyline part way through: it takes the last bend back, and after a correction it puts the size back first. With Draw with finger on, rest a finger, then use the Pencil: the Pencil takes over and nothing lands under the finger.
 
 Ink and saving:
 
 - [ ] Correct a shape, undo: the shape as drawn comes back. Undo again: it goes. Redo twice: the correction returns.
 - [ ] Correct a shape, force-quit Vellum and reopen: it stands as corrected, and undo still takes the correction back.
-- [ ] Leave a polyline part way through and switch tool or leave the canvas: it is kept as ink. Force-quit part way through: at most that polyline is lost, as a stroke still being drawn is.
+- [ ] Leave a polyline part way through and switch to Measure, the lasso and the highlighter, or leave the canvas: it is kept as ink, a pen stroke in its first colour and width, one undo step. Change colour part way: it stays in its first. Force-quit part way through: at most that polyline is lost, with any correction made to it, as a stroke still being drawn is.
 - [ ] Correct a shape, leave the canvas, and watch Dropbox: only a new log part appears.
 
 The flyout:

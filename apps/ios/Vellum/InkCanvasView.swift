@@ -1106,11 +1106,10 @@ extension InkCanvasUIView {
 
     // MARK: The shape tools (#40)
 
-    /// A shape finished with the line and shape tool, as ink: shown at once through the live layers, which go to the renderer
-    /// with the committed stroke, as a stroke's do, so it never blinks. The stroke, or nil when nothing was added.
-    func commitShape(_ shape: SnappedShape) -> InkStroke? {
-        guard let first = shape.points.first, let begun = editor.beginStroke(at: first) else { return nil }
-        let stroke = begun.snapped(to: shape)
+    /// A shape finished with the line and shape tool, as ink, with the pen, colour and width it started with: shown at once
+    /// through the live layers, which go to the renderer with the committed stroke, as a stroke's do, so it never blinks. The
+    /// stroke, or nil when nothing was added.
+    func commitShape(_ stroke: StrokeInProgress) -> InkStroke? {
         liveStroke = stroke
         startLive(stroke)
         defer {

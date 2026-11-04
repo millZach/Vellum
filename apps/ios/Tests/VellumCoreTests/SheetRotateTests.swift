@@ -249,8 +249,8 @@ final class SheetRotateTests: XCTestCase {
         var strokes: [InkStroke] = []
         func wave(_ x: Double, _ y: Double) -> [CanvasPoint] { (0..<120).map { at(x + Double($0) * 0.5, y + Double($0 % 7)) } }
         for i in 1...1_000 { strokes.append(stroke(i, wave(Double(i % 25) * 60 + 20, Double(i % 40) * 25 + 20))) }
-        // Three strokes across the right-hand edge.
-        for i in 1_001...1_003 { strokes.append(stroke(i, wave(1_700, Double(i - 1_000) * 80))) }
+        // Three strokes across the right-hand edge at 1,728, most of each on the sheet.
+        for i in 1_001...1_003 { strokes.append(stroke(i, wave(1_680, Double(i - 1_000) * 80))) }
         var work = InkIndex.Work()
         let picked = sheet.markups(in: InkIndex(Ink(strokes: strokes)), texts: [], dimensions: [], work: &work)
         XCTAssertEqual(picked.strokes.count, 1_000 + 3)

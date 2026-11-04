@@ -555,6 +555,8 @@ final class CanvasEditor {
         // Nothing to follow when the change did nothing (an empty stroke, undo with nothing to undo).
         guard !session.unsavedEvents.isEmpty else { return }
         let change = session.lastChange
+        // First, so a dimension drawn again below reads against the sheets as they now stand (#44).
+        if change.touchesSheets { canvas.sheets = session.sheets }
         inkDidChange?(change)
         onInkChange?(inkIndex.apply(change))
         if change.touchesText { onTextsChange?(change) }
@@ -562,10 +564,7 @@ final class CanvasEditor {
             onAnnotationsChange?(change)
             if frameCount != session.frames.count { frameCount = session.frames.count }
         }
-        if change.touchesSheets {
-            canvas.sheets = session.sheets
-            onSheetsChange?(change)
-        }
+        if change.touchesSheets { onSheetsChange?(change) }
         if let after = session.selectionAfterLastChange {
             // A sheet is picked up only with the lasso in hand, so undoing its turn with the pen selects nothing.
             if after.sheet == nil || tool == .lasso { select(after) }

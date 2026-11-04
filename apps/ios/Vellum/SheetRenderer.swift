@@ -166,6 +166,9 @@ final class SheetRenderer {
         let size = sheet.size
         holder.paper.frame = CGRect(x: origin.x, y: origin.y, width: size.width.inches * ppi,
                                     height: size.height.inches * ppi)
+        // The shadow's shape is given, so the render server need not work it out afresh from the layer at each angle.
+        let paperBounds = CGRect(origin: .zero, size: holder.paper.bounds.size)
+        if holder.paper.shadowPath?.boundingBox != paperBounds { holder.paper.shadowPath = CGPath(rect: paperBounds, transform: nil) }
         holder.container.setAffineTransform(Self.turn(sheet, viewport))
         for (level, container) in holder.levels {
             let k = ppi * sheet.canvasPerPrinted / SheetTileBook.scale(level: level)

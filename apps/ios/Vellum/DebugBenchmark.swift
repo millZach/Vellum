@@ -69,6 +69,9 @@ final class DebugBenchmark: NSObject {
     private var placedSheet: Sheet?
     /// Sheet tiles asked for when the turn's measured frames began.
     private var tilesBeforeTurn = 0
+    /// Whether the warm-up waits for the ink tiles to finish drawing.
+    private var holdsForTiles = false
+    private var holdStart: CFTimeInterval = 0
     /// The speed probe's time before each scenario.
     private var probes: [Double] = []
     private static let probePath: CGPath = {
@@ -269,28 +272,37 @@ final class DebugBenchmark: NSObject {
                 }
             }, tearDown: { _ in }),
             // #44: the placed sheet twisted with two fingers, a degree and a half a frame, through the catches at each
-            // quarter turn: a turn is one transform, and no sheet tile is drawn. The set-up picks the sheet up and chooses
-            // what comes along, in its warm-up; the last frame saves the turn as one record.
-            Scenario(name: "sheet_turn", frames: 240, setUp: { b in
-                b.zoomToSheet()
-                b.editor.tool = .lasso
-                guard let view = b.view, let sheet = b.placedSheet else { return }
-                b.editor.select(CanvasSelection(sheet: sheet.id))
-                _ = view.beginSheetTwist(fingerAngle: 0)
-            }, step: { b, i in
-                guard let view = b.view else { return }
-                if i == 0 { b.tilesBeforeTurn = view.debugSheetTiles.drawn }
-                if i == 239 {
-                    view.finishSheetDrag(keep: true)
-                } else {
-                    view.twistSheet(fingerAngle: -1.5 * Double(i + 1))
-                }
-            }, tearDown: { b in
-                let drawn = (b.view?.debugSheetTiles.drawn ?? 0) - b.tilesBeforeTurn
-                b.record("  sheet_turn tiles_drawn_during_turn=\(drawn) angle=\(b.editor.sheets.last?.angle ?? -1) undo_steps_added=1")
-                b.editor.tool = .pen
-            }),
+            // quarter turn: a turn is one transform, and no sheet tile is drawn. Picking the sheet up lifts what comes
+            // along out of the ink tiles, which then redraw without it off the main thread, so `sheet_turn_lift` starts at
+            // once, as a turn on the Duo does, and `sheet_turn` waits for them, to show the turn alone.
+            turnScenario(name: "sheet_turn_lift", settles: false),
+            turnScenario(name: "sheet_turn", settles: true),
         ]
+    }
+
+    private static func turnScenario(name: String, settles: Bool) -> Scenario {
+        Scenario(name: name, frames: 240, setUp: { b in
+            b.zoomToSheet()
+            b.editor.tool = .lasso
+            guard let view = b.view, let sheet = b.placedSheet else { return }
+            b.editor.select(CanvasSelection(sheet: sheet.id))
+            _ = view.beginSheetTwist(fingerAngle: 0)
+            b.holdsForTiles = settles
+            b.record("  \(name) came_along=\(view.debugSheetDragStrokes) pending_at_lift=\(view.pendingRenderCount)")
+        }, step: { b, i in
+            guard let view = b.view else { return }
+            if i == 0 { b.tilesBeforeTurn = view.debugSheetTiles.drawn }
+            if i % 60 == 0 { b.record("  \(name) frame=\(i) pending=\(view.pendingRenderCount)") }
+            if i == 239 {
+                view.finishSheetDrag(keep: true)
+            } else {
+                view.twistSheet(fingerAngle: -1.5 * Double(i + 1))
+            }
+        }, tearDown: { b in
+            let drawn = (b.view?.debugSheetTiles.drawn ?? 0) - b.tilesBeforeTurn
+            b.record("  \(name) tiles_drawn_during_turn=\(drawn) angle=\(b.editor.sheets.last?.angle ?? -1)")
+            b.editor.tool = .pen
+        })
     }
 
     /// How fast this runner is just now, from work that no change to Vellum can touch: a fixed path stroked into a
@@ -362,6 +374,7 @@ final class DebugBenchmark: NSObject {
         scenarios[scenarioIndex].setUp(self)
         frame = 0
         warmUp = 30
+        holdStart = CACurrentMediaTime()
         work.removeAll()
         intervals.removeAll()
         keptRedraws.removeAll()
@@ -401,6 +414,10 @@ final class DebugBenchmark: NSObject {
         if warmUp > 0 {
             warmUp -= 1
             return
+        }
+        if holdsForTiles {
+            if (view?.pendingRenderCount ?? 0) > 0, now - holdStart < Self.settleLimit { return }
+            holdsForTiles = false
         }
         if let last = lastTimestamp { intervals.append((link.timestamp - last) * 1000) }
         lastTimestamp = link.timestamp

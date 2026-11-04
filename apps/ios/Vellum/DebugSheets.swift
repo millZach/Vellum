@@ -357,7 +357,7 @@ enum DebugSheets {
         // Across Detail 2's printed 2'-0", as Measure would read it.
         let printed = MadeUpSheets.detailSheet.dimensions[1]
         editor.addDimension(start: sheet.canvasPoint(at: printed.from), end: sheet.canvasPoint(at: printed.to),
-                            through: at(7.5, 2.2))
+                            through: at(7.5, 3.1))
         editor.colour = .red
         // A frame beside it, which stays square to the canvas.
         let corner = at(-5, -3)
@@ -368,7 +368,7 @@ enum DebugSheets {
     /// Every printed dimension as measured on the sheet where it now stands, what a kept dimension reads, and what the
     /// labels do.
     private static func logTurned(_ editor: CanvasEditor) {
-        guard let sheet = editor.sheets.last else { return }
+        guard let sheet = editor.selectedSheet ?? editor.sheets.last else { return }
         log(String(format: "turned %@ at %@, origin %.3f, %.3f", sheet.label, SheetAngle.reading(sheet.angle),
                    sheet.origin.x.inches, sheet.origin.y.inches))
         for printed in MadeUpSheets.detailSheet.dimensions {

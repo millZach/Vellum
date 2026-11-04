@@ -176,6 +176,9 @@ final class AnnotationOverlay {
         withoutAnimation {
             for id in change.removedSheets { items.removeValue(forKey: .sheet(id))?.removeFromSuperlayer() }
             for sheet in change.addedSheets where editor.sheet(sheet.id) != nil { build(sheet) }
+            // What a dimension reads depends on the sheets under its points, so each reads again, once per change: one
+            // that stayed where a sheet moved off or on, as well as one that came along.
+            for dimension in editor.dimensions { build(dimension) }
         }
     }
 

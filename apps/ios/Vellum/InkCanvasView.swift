@@ -1516,6 +1516,8 @@ extension InkCanvasUIView {
         sheetRenderer.setSheets(editor.sheets)
         renderer.lightPaper = sheetRenderer.lightPaper
         annotationOverlay.sheetsChanged(change)
+        // An undo or redo of a turn moves a selected sheet's edge with it.
+        updateSelectedSheet()
     }
 
     /// A sheet started or stopped waiting to be placed: its outline shows in the middle of the view until the Pencil
@@ -1830,6 +1832,11 @@ extension InkCanvasUIView {
         sheetStrip.show(angle: sheet?.angle, in: bounds)
         if sheet != nil, subviews.last !== sheetStrip { bringSubviewToFront(sheetStrip) }
     }
+
+    #if DEBUG || BENCHMARK
+    /// How many strokes came along with the turn or move under way, for the benchmark's log.
+    var debugSheetDragStrokes: Int { sheetDrag?.lift.strokes.count ?? 0 }
+    #endif
 
     #if DEBUG
     /// A tap of the Pencil at a canvas point, as a tap with the lasso in hand: for the captures.

@@ -105,7 +105,7 @@ benchmark() {
 
 # PART splits the work between CI jobs (the captures job outgrew its 45 minutes with #8): "captures" runs every capture
 # and the Debug benchmark, "sheets" the sheet captures (#11, their own job so the captures job stays under its
-# hour) and the sync captures (#12), "release-benchmark" only the optimised build's benchmark; unset, it runs them all.
+# hour), the sync captures (#12) and the drawing tools' captures (#40), "release-benchmark" only the optimised build's benchmark; unset, it runs them all.
 part=${PART:-all}
 
 # Placing sheets (#11), in light and dark, on the made-up Dropbox (`--ui-dropbox sheets`) and made-up PDFs
@@ -181,9 +181,29 @@ sync_captures() {
   xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
 }
 
+# Exact drawing, snap points and shapes (#40), in light and dark. The Debug-only `--ui-drawing` (Vellum/DebugDrawingTools.swift)
+# drives the canvas view's own input paths on a made-up scene: the flyout with line weight at its foot, the tag, the pad over a
+# shape, the tag after Enter (12'-6"  30), the angle guide, the loupe naming each new snap kind, each new shape, and the tag,
+# pad and loupe staying clear of the chrome; then the longest of the shapes' prompts in full.
+# In the sheets job, since the captures job was at its hour without them.
+drawing_captures() {
+  for appearance in light dark; do
+    xcrun simctl ui "$udid" appearance "$appearance"
+    saved_wait=${WAIT:-6}; WAIT=${DRAWING_WAIT:-8}
+    for step in flyout tag pad corrected guide mid intersection perpendicular tangent \
+      line polyline rectangle circle arc polygon tag-chrome pad-chrome loupe-chrome; do
+      capture "drawing-$step" --ui-tab canvases --ui-reset --ui-new-canvas --ui-drawing "$step"
+    done
+    WAIT=${SELECTION_WAIT:-10}
+    capture drawing-prompt-longest --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold centre,feetAndInches,1.5
+    WAIT=$saved_wait
+  done
+}
+
 if [ "$part" = sheets ]; then
   sheet_captures
   sync_captures
+  drawing_captures
   exit 0
 fi
 
@@ -255,24 +275,6 @@ for appearance in light dark; do
   WAIT=$saved_wait
 done
 
-# Exact drawing, snap points and shapes (#40), in light and dark. The Debug-only `--ui-drawing` (Vellum/DebugDrawingTools.swift)
-# drives the canvas view's own input paths on a made-up scene: the flyout with line weight at its foot, the tag, the pad over a
-# shape, the tag after Enter (12'-6"  30), the angle guide, the loupe naming each new snap kind, each new shape, and the tag,
-# pad and loupe staying clear of the chrome; then the longest of the shapes' prompts in full.
-drawing_captures() {
-  for appearance in light dark; do
-    xcrun simctl ui "$udid" appearance "$appearance"
-    saved_wait=${WAIT:-6}; WAIT=${DRAWING_WAIT:-8}
-    for step in flyout tag pad corrected guide mid intersection perpendicular tangent \
-      line polyline rectangle circle arc polygon tag-chrome pad-chrome loupe-chrome; do
-      capture "drawing-$step" --ui-tab canvases --ui-reset --ui-new-canvas --ui-drawing "$step"
-    done
-    WAIT=$saved_wait
-    capture drawing-prompt-longest --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold centre,feetAndInches,1.5
-  done
-}
-drawing_captures
-
 # Measure, dimension, frame and window (#8), in light and dark. Debug-only launch arguments
 # (Vellum/DebugMeasureFrame.swift) drive the canvas view's own input paths on the fixture, tapping a few points off the
 # ink so each tap snaps to it: a measure (36'-8 1/16"), two dimensions pulled off (horizontal 8'-0" and aligned
@@ -337,7 +339,7 @@ python3 Scripts/status-bar-check.py "$out/status-bar-walk.txt"
 
 benchmark ""
 
-if [ "$part" = all ]; then sheet_captures; sync_captures; fi
+if [ "$part" = all ]; then sheet_captures; sync_captures; drawing_captures; fi
 
 # The Home Screen, to show the installed app icon. Vellum has to be on the first page: if SpringBoard put it on a later
 # page, it swaps places with the first page's first app in SpringBoard's saved layout while the simulator is shut down.

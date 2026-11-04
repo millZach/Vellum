@@ -314,7 +314,15 @@ final class ShapeDrawing {
             let size = label.layer.bounds.size
             let free = host.exactPlacement
             let x = max(CGFloat(free.left), min(spot.x + 14, CGFloat(free.right) - size.width))
-            let y = max(CGFloat(free.top), min(spot.y - 34, CGFloat(free.bottom) - size.height))
+            var y = max(CGFloat(free.top), min(spot.y - 34, CGFloat(free.bottom) - size.height))
+            // Under the tip instead when the loupe is where it would go.
+            let loupe = free.loupeCentre(tip: ScreenPoint(x: Double(tip.x), y: Double(tip.y)), radius: Double(Loupe.radius),
+                                         lift: Double(Loupe.lift))
+            let loupeRect = CGRect(x: loupe.x - Double(Loupe.radius), y: loupe.y - Double(Loupe.radius),
+                                   width: Double(Loupe.radius) * 2, height: Double(Loupe.radius) * 2)
+            if loupeRect.intersects(CGRect(x: x, y: y, width: size.width, height: size.height)) {
+                y = min(spot.y + 16, CGFloat(free.bottom) - size.height)
+            }
             label.layer.position = CGPoint(x: x, y: y)
             label.layer.isHidden = false
         } else {

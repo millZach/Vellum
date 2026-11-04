@@ -24,6 +24,7 @@ final class Loupe {
     private let crossHairs = CAShapeLayer()
     private let marker = CAShapeLayer()
     private let name = Pill()
+    private var nameIsDark = false
 
     init() {
         let side = Self.radius * 2
@@ -117,9 +118,14 @@ final class Loupe {
         marker.path = target.kind.map { SnapMarker.path($0, at: local, size: 7) }
         // Its name, at the foot of the circle (#40).
         if let kind = target.kind {
-            name.set(kind.title, size: 12, colour: Palette.snapText(dark: dark), fill: Palette.snap(dark: dark), weight: .semibold,
-                     radius: 6)
-            name.layer.position = CGPoint(x: r, y: 2 * r - 14)
+            // Set only when it changes: new text is drawn again, and the tip moves every frame.
+            if name.text != kind.title || nameIsDark != dark {
+                nameIsDark = dark
+                name.set(kind.title, size: 11, colour: Palette.snapText(dark: dark), fill: Palette.snap(dark: dark),
+                         weight: .semibold, radius: 6)
+                // High enough that the circle's edge clears the longest name, Perpendicular.
+                name.layer.position = CGPoint(x: r, y: r + 30)
+            }
             name.layer.isHidden = false
         } else {
             name.layer.isHidden = true

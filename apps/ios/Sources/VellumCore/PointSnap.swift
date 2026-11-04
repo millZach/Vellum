@@ -49,7 +49,7 @@ public enum PointSnap {
     /// How far a round stroke's points may be from its radius, as a share of it, past the rounding to the ink grid.
     public static let roundTolerance = 1e-3
     /// The most segments intersections are looked for among, so a crowded place stays quick; zooming in leaves fewer.
-    public static let intersectionSegmentLimit = 256
+    public static let intersectionSegmentLimit = 128
     /// A polygon's most sides, which is what makes it a regular polygon rather than a circle.
     static let polygonMaximumSides = 24
     /// A turn smaller than this on a straight stroke is the rounding of a straight run, not a corner: 1°.
@@ -141,10 +141,23 @@ public enum PointSnap {
         let ay: Double
         let bx: Double
         let by: Double
-        var minX: Double { min(ax, bx) }
-        var maxX: Double { max(ax, bx) }
-        var minY: Double { min(ay, by) }
-        var maxY: Double { max(ay, by) }
+        // Worked out once: the sweep compares them for every pair it looks at.
+        let minX: Double
+        let maxX: Double
+        let minY: Double
+        let maxY: Double
+
+        init(stroke: Int, ax: Double, ay: Double, bx: Double, by: Double) {
+            self.stroke = stroke
+            self.ax = ax
+            self.ay = ay
+            self.bx = bx
+            self.by = by
+            minX = min(ax, bx)
+            maxX = max(ax, bx)
+            minY = min(ay, by)
+            maxY = max(ay, by)
+        }
     }
 
     /// The same, counting the strokes looked at, the points read and the pairs tested for crossing, for the budget tests.

@@ -113,17 +113,19 @@ jobs:
   # Evidence, not part of the merge bar: placing sheets (#11) on the iPhone Duo simulator, unfolded, in light and dark:
   # Add sheet's browser, page grid and confirm steps, the outline before the tap, and placed sheets measured against
   # their printed dimensions. Its own job, so the captures job stays under its hour. Since #12 it also captures the
-  # sync status in each state and the airplane-mode proof on the made-up Dropbox (about 22 minutes before #12).
+  # sync status in each state and the airplane-mode proof on the made-up Dropbox (about 22 minutes before #12), and since
+  # #40 the drawing tools: the flyout, tag, pad, angle guide, loupe naming each snap kind, and each shape.
   duo-sheet-captures:
     name: Duo sheet and sync captures
     runs-on: xcode-27
-    timeout-minutes: 45
+    # About 33 minutes before #40, whose 38 captures add about 16.
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Capture placing sheets and the sync status unfolded, in light and dark
+      - name: Capture placing sheets, the sync status and the drawing tools unfolded, in light and dark
         run: PART=sheets sh apps/ios/Scripts/capture-duo.sh .build-captures
       - name: Keep the captures
         if: always()

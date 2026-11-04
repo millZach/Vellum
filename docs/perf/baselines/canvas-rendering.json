@@ -163,7 +163,7 @@
     {
       "metric": "point_snap_crowded_segment_pairs_per_lookup",
       "kind": "count",
-      "value": 32640,
+      "value": 8128,
       "before": 0,
       "unit": "pairs",
       "tolerance": 0,

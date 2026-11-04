@@ -255,6 +255,24 @@ for appearance in light dark; do
   WAIT=$saved_wait
 done
 
+# Exact drawing, snap points and shapes (#40), in light and dark. The Debug-only `--ui-drawing` (Vellum/DebugDrawingTools.swift)
+# drives the canvas view's own input paths on a made-up scene: the flyout with line weight at its foot, the tag, the pad over a
+# shape, the tag after Enter (12'-6"  30), the angle guide, the loupe naming each new snap kind, each new shape, and the tag,
+# pad and loupe staying clear of the chrome; then the longest of the shapes' prompts in full.
+drawing_captures() {
+  for appearance in light dark; do
+    xcrun simctl ui "$udid" appearance "$appearance"
+    saved_wait=${WAIT:-6}; WAIT=${DRAWING_WAIT:-8}
+    for step in flyout tag pad corrected guide mid intersection perpendicular tangent \
+      line polyline rectangle circle arc polygon tag-chrome pad-chrome loupe-chrome; do
+      capture "drawing-$step" --ui-tab canvases --ui-reset --ui-new-canvas --ui-drawing "$step"
+    done
+    WAIT=$saved_wait
+    capture drawing-prompt-longest --ui-tab canvases --ui-reset --ui-fixture --ui-status-hold centre,feetAndInches,1.5
+  done
+}
+drawing_captures
+
 # Measure, dimension, frame and window (#8), in light and dark. Debug-only launch arguments
 # (Vellum/DebugMeasureFrame.swift) drive the canvas view's own input paths on the fixture, tapping a few points off the
 # ink so each tap snaps to it: a measure (36'-8 1/16"), two dimensions pulled off (horizontal 8'-0" and aligned

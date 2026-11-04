@@ -55,6 +55,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             annotationOverlay.isDark = isDark
             selectionOverlay.setDark(isDark)
             sheetStrip.applyColours(dark: isDark)
+            shapeDrawing.setDark(isDark)
             applyColours()
         }
     }
@@ -68,6 +69,11 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             updateSheetTap()
             scribble?.isActive = tool == .textBox
             if oldValue == .textBox { textOverlay.finishEditing() }
+            // A polyline part way through is finished, not lost; the tag goes with the tool.
+            if oldValue == .lineAndShape {
+                shapeDrawing.finishDraft()
+                shapeDrawing.clearTag()
+            }
             // A measure, a dimension half placed, a window: each belongs to its tool and goes when it is put down.
             // SwiftUI hands the tool over a moment after the editor took it, so state the new tool already started
             // stays.
@@ -81,6 +87,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             guard units != oldValue else { return }
             shownViewport = nil
             annotationOverlay.unitsChanged()
+            shapeDrawing.refreshTag()
             viewportDidChange()
         }
     }
@@ -220,6 +227,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private var scribble: CanvasScribble?
     private let textTap = UITapGestureRecognizer()
 
+    /// The line and shape tool's shapes, tag and number pad (#40).
+    private let shapeDrawing: ShapeDrawing
+
     // Measure, dimension, frame and window (#8).
     private let annotationOverlay: AnnotationOverlay
     private let loupe = Loupe()
@@ -258,6 +268,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         sheetRenderer = SheetRenderer(pdfURL: { [unowned editor] sheet in editor.pdfURL(for: sheet) })
         textOverlay = TextBoxOverlay(editor: editor)
         annotationOverlay = AnnotationOverlay(editor: editor)
+        shapeDrawing = ShapeDrawing(editor: editor)
         super.init(frame: .zero)
         isOpaque = true
         isMultipleTouchEnabled = true
@@ -276,6 +287,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         layer.addSublayer(loupe.layer)
         addSubview(windowMenu)
         addSubview(sheetStrip)
+        shapeDrawing.install(in: self, below: loupe.layer)
         selectionOverlay.setDark(isDark)
         applyColours()
 
@@ -292,13 +304,22 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         editor.onSheetsChange = { [weak self] change in self?.sheetsDidChange(change) }
         editor.onPlacingChange = { [weak self] in self?.placingDidChange() }
         sheetRenderer.setSheets(editor.sheets)
+        editor.onLineShapeChange = { [weak self] in
+            self?.shapeDrawing.finishDraft()
+            self?.shapeDrawing.clearTag()
+        }
+        editor.undoShapePoint = { [weak self] in self?.shapeDrawing.undoLastPoint() ?? false }
         editor.willChangeHistory = { [weak self] in
+            self?.shapeDrawing.clearTag()
             self?.textOverlay.finishEditing()
             self?.finishSheetDrag(keep: false)
             // Undo part way through a dimension or measure starts it again, as the prototype does.
             self?.resetLengthsAndRegions(keepingMeasure: true)
         }
-        editor.onFinishTextEditing = { [weak self] in self?.textOverlay.finishEditing() }
+        editor.onFinishTextEditing = { [weak self] in
+            self?.textOverlay.finishEditing()
+            self?.shapeDrawing.finishDraft()
+        }
         #if DEBUG
         editor.onDebugOpenStroke = { [weak self] stroke in self?.showOpenStroke(stroke) }
         #endif
@@ -373,6 +394,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         DebugMeasureFrame.attach(self, editor: editor)
         DebugSheets.attach(self, editor: editor)
         DebugStatusBar.attach(self, editor: editor)
+        DebugDrawingTools.attach(self, editor: editor)
         #endif
     }
 
@@ -415,6 +437,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         if editor.placingSheet != nil { updatePlacingOutline() }
         updateSelectionOverlay()
         keepSheetDragUnderTip()
+        shapeDrawing.viewChanged()
     }
 
     private func applyColours() {
@@ -558,7 +581,10 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             // The Pencil takes over from a finger (a resting hand, most often): a confirmed finger stroke is kept, a
             // pending one dropped, and the Pencil draws as always.
             if let live = liveTouch, live.type == .direct, touches.contains(where: { $0.type == .pencil }) {
-                endInput(samples: [], keep: fingerGate.interrupted())
+                // With a shape in hand, a finger that only rested places nothing: the Pencil takes over (#40).
+                let stands = shapeDrawing.isDown ? fingerGate.takenOverByPencil(moved: shapeDrawing.hasMoved)
+                    : fingerGate.interrupted()
+                endInput(samples: [], keep: stands)
             }
         }
         // A finger starts a stroke only alone on the glass; the Pencil always does.
@@ -633,6 +659,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         }
         let point = canvasPoint(location)
         lastSample = location
+        // The next thing has started: the tag goes (#40), and the flyout closes.
+        shapeDrawing.nextThingStarted()
+        if editor.showsShapeFlyout { editor.showsShapeFlyout = false }
         if editor.tool == .lasso {
             beginLasso(at: location, point: point)
         } else if editor.tool.group == .lengthsAndRegions {
@@ -646,6 +675,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
                 editor.beginEraserSweep()
                 editor.erase(at: point)
             }
+        } else if editor.tool == .lineAndShape, editor.lineShape != .drawIt {
+            shapeDrawing.down(at: location)
         } else if let stroke = editor.beginStroke(at: point) {
             liveStroke = stroke
             liveSnaps = editor.tool == .pen || editor.tool == .lineAndShape
@@ -721,6 +752,13 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             regionMoved(samples)
             return
         }
+        if shapeDrawing.isDown {
+            if let last = samples.last {
+                shapeDrawing.moved(to: last)
+                pendingPenPosition = canvasPoint(last)
+            }
+            return
+        }
         if snappedShape != nil {
             // Snapped: the shape stays as it is until the Pencil lifts.
             if let last = samples.last {
@@ -748,6 +786,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         if regionInput != nil {
             regionMoved(samples)
             finishRegionInput(keep: keep)
+        } else if shapeDrawing.isDown {
+            if let last = samples.last { pendingPenPosition = canvasPoint(last) }
+            shapeDrawing.up(at: samples.last, keep: keep)
         } else if lassoing || drag != nil || sheetDrag != nil {
             lassoMoved(samples)
         } else if !samples.isEmpty, snappedShape == nil {
@@ -811,15 +852,18 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             }
             let committed = stroke
             let live = liveLayer
+            var added: InkStroke?
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             liveTailLayer.path = nil
             if keep {
-                renderer.commitLive(live, drawnAt: base) { editor.commit(committed) }
+                renderer.commitLive(live, drawnAt: base) { added = editor.commit(committed) }
             } else {
                 live.removeFromSuperlayer()
             }
             CATransaction.commit()
+            // Draw it's shape shows its size in a tag (#40); the pen's hold-to-snap stays as it was.
+            if liveIsLineTool, let shape, let added { shapeDrawing.showTag(for: DrawnShape(shape), stroke: added.id) }
         }
         if pencilIsDown {
             editor.pencilDidTouch(false)
@@ -851,7 +895,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     private func stopDisplayLinkIfIdle() {
         guard liveTouch == nil, liveStroke == nil, !erasing, !lassoing, drag == nil, sheetDrag == nil, regionInput == nil,
-              fingersDown == 0 else { return }
+              !shapeDrawing.isDown, fingersDown == 0 else { return }
         displayLink?.invalidate()
         displayLink = nil
     }
@@ -868,6 +912,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         // A measure's or dimension's point, a dimension's line, a frame or a window: followed once a frame, never
         // per sample.
         if regionTipMoved { regionTick() }
+        if shapeDrawing.tipMoved { shapeDrawing.tick() }
         if placingMoved {
             placingMoved = false
             updatePlacingOutline()
@@ -943,6 +988,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     private func gestureBegan() {
         fingersDown += 1
+        if editor.showsShapeFlyout { editor.showsShapeFlyout = false }
         textOverlay.isGesturing = true
         annotationOverlay.isGesturing = true
         startDisplayLink()
@@ -989,7 +1035,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         guard let view = touch.view, view !== self else { return true }
         if let typing = textOverlay.editing?.view, view.isDescendant(of: typing) { return false }
         return !view.isDescendant(of: selectionOverlay.menu) && !view.isDescendant(of: windowMenu)
-            && !view.isDescendant(of: sheetStrip)
+            && !view.isDescendant(of: sheetStrip) && !shapeDrawing.owns(view)
     }
 
     /// Two fingers both on the selected sheet twist it, so they never pinch the canvas (#44), and a move by a finger holds
@@ -1057,6 +1103,65 @@ extension InkCanvasUIView {
         liveTailLayer.path = nil
         CATransaction.commit()
     }
+
+    // MARK: The shape tools (#40)
+
+    /// A shape finished with the line and shape tool, as ink: shown at once through the live layers, which go to the renderer
+    /// with the committed stroke, as a stroke's do, so it never blinks. The stroke, or nil when nothing was added.
+    func commitShape(_ shape: SnappedShape) -> InkStroke? {
+        guard let first = shape.points.first, let begun = editor.beginStroke(at: first) else { return nil }
+        let stroke = begun.snapped(to: shape)
+        liveStroke = stroke
+        startLive(stroke)
+        defer {
+            liveStroke = nil
+            liveBase = nil
+            liveChunkLayers = []
+        }
+        guard let base = liveBase else { return nil }
+        let live = liveLayer
+        var added: InkStroke?
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        liveTailLayer.path = nil
+        renderer.commitLive(live, drawnAt: base) { added = editor.commit(stroke) }
+        CATransaction.commit()
+        return added
+    }
+
+    func canvasPointForShape(_ location: CGPoint) -> CanvasPoint { canvasPoint(location) }
+
+    /// Shows the loupe and the snap marker for a shape's point being found.
+    func showShapeLoupe(tip: CGPoint, raw: CanvasPoint, target: PointSnap.Target) {
+        annotationOverlay.tool.tip = (raw, target)
+        loupe.show(tip: tip, target: target, viewport: editor.viewport, renderer: renderer, placement: exactPlacement, dark: isDark)
+    }
+
+    func hideShapeLoupe() {
+        annotationOverlay.tool.tip = nil
+        loupe.hide()
+    }
+
+    /// The free part of the screen: clear of the rail, the top bar, the status bar and the tab rail, and below any strip open
+    /// under the top bar (the frame paper picker, the waiting sheet's pill, the selected sheet's strip).
+    var exactPlacement: ExactPlacement {
+        let safe = safeAreaInsets, base = CanvasEditor.chromeInsets
+        let chrome = ScreenInsets(top: Double(safe.top) + base.top, left: Double(safe.left) + base.left,
+                                  bottom: Double(safe.bottom) + base.bottom, right: max(base.right, Double(safe.right) + 8))
+        var strip: Double?
+        if editor.selectedSheet != nil {
+            strip = Double(sheetStrip.frame.maxY)
+        } else if editor.placingSheet != nil {
+            strip = chrome.top + 40
+        } else if editor.tool == .frame {
+            strip = chrome.top + 36
+        }
+        return ExactPlacement(width: Double(bounds.width), height: Double(bounds.height), chrome: chrome, stripBottom: strip)
+    }
+
+    #if DEBUG
+    var debugShapeDrawing: ShapeDrawing { shapeDrawing }
+    #endif
 
     // MARK: The lasso
 
@@ -1362,12 +1467,14 @@ extension InkCanvasUIView {
         let point = canvasPoint(tip)
         switch input {
         case .point:
-            let target = editor.snapTarget(at: point)
+            // The second point works from the first, so it has perpendicular and tangent too (#40).
+            let target = editor.snapTarget(at: point, anchor: firstTarget?.point)
             var state = annotationOverlay.tool
             state.tip = (point, target)
             state.isMeasure = editor.tool == .measure
             annotationOverlay.tool = state
-            loupe.show(tip: tip, target: target, viewport: editor.viewport, renderer: renderer, in: bounds, dark: isDark)
+            loupe.show(tip: tip, target: target, viewport: editor.viewport, renderer: renderer, placement: exactPlacement,
+                       dark: isDark)
         case .pull:
             guard let first = firstTarget?.point, let second = secondPoint else { return }
             annotationOverlay.tool.pulling = CanvasDimension.pulled(
@@ -1397,7 +1504,7 @@ extension InkCanvasUIView {
         }
         switch input {
         case .point:
-            takePoint(editor.snapTarget(at: point))
+            takePoint(editor.snapTarget(at: point, anchor: firstTarget?.point))
         case .pull:
             guard let first = firstTarget?.point, let second = secondPoint else { return }
             let placed = editor.addDimension(start: first, end: second, through: point)

@@ -6,8 +6,8 @@ import VellumCore
 /// Debug-only launch arguments for the status bar's room (#45), on the fixture, with the pen's position at the longest
 /// under 100' so the usual width is full. The captures launch with `--ui-reset`, so what this changes doesn't last.
 ///
-/// - `--ui-status-hold <prompt>,<units>,<points per inch>`: holds that prompt (`line`, `dimension` or `sheet`) at that
-///   zoom, for a capture.
+/// - `--ui-status-hold <prompt>,<units>,<points per inch>`: holds that prompt (`line`, `dimension`, `sheet`, or `centre`, the
+///   longest of the shapes' at 27 characters, #40) at that zoom, for a capture.
 /// - `--ui-status-walk`: walks every scale label in every units with each prompt, then the feet-and-inches labels again
 ///   with the longest position, and writes `status-bar-walk.txt` to Documents: one tab-separated line for each, ending
 ///   in the count wording that showed (`full`, `short` or `shortest`) and the bar's width in points.
@@ -21,11 +21,15 @@ enum DebugStatusBar {
     static let isWalking = DebugLaunch.has("--ui-status-walk")
     private static var started = false
 
-    private enum Prompt: String, CaseIterable {
-        case line, dimension, sheet
+    private enum Prompt: String {
+        case line, dimension, sheet, centre
+
+        /// What the walk holds the count to, as `Scripts/status-bar-check.py` expects.
+        static let walked: [Prompt] = [.line, .dimension, .sheet]
 
         @MainActor func show(in editor: CanvasEditor) {
             editor.tool = self == .dimension ? .dimension : .lineAndShape
+            editor.lineShape = self == .centre ? .circle : .drawIt
             editor.toolStep = self == .sheet ? .placeSheet : .start
         }
 
@@ -34,6 +38,7 @@ enum DebugStatusBar {
             case .line: CanvasTool.lineAndShape.prompt
             case .dimension: CanvasTool.dimension.prompt
             case .sheet: CanvasTool.placeSheetPrompt
+            case .centre: LineShape.circle.prompt
             }
         }
     }
@@ -102,7 +107,7 @@ enum DebugStatusBar {
         for pointsPerInch in zooms(units) {
             zoom(to: pointsPerInch, view, editor)
             let label = ScaleBar.mark(fitting: StatusBarText.scaleBarLongest, pointsPerInch: pointsPerInch, units: units).label
-            for prompt in Prompt.allCases {
+            for prompt in Prompt.walked {
                 prompt.show(in: editor)
                 try? await Task.sleep(for: .milliseconds(200))
                 lines.append([units.rawValue, name, prompt.text, label, wording(editor),

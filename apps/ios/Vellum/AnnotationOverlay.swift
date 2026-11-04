@@ -91,7 +91,6 @@ final class AnnotationOverlay {
     private let windowShape = CAShapeLayer()
     private let firstDot = CAShapeLayer()
     private let marker = CAShapeLayer()
-    private let markerPill = Pill()
     private let ghostSheet = CAShapeLayer()
     private let ghostSheetPill = Pill()
 
@@ -109,7 +108,7 @@ final class AnnotationOverlay {
             toolLayer.addSublayer(shape)
         }
         toolLayer.addSublayer(pullingLayer)
-        for pill in [measurePill, bandPill, ghostLabel, markerPill, ghostSheetPill] { toolLayer.addSublayer(pill.layer) }
+        for pill in [measurePill, bandPill, ghostLabel, ghostSheetPill] { toolLayer.addSublayer(pill.layer) }
         ghostSheet.lineDashPattern = [10, 6]
         ghostSheet.lineWidth = 2
         measureLine.lineDashPattern = [6, 4]
@@ -643,24 +642,12 @@ final class AnnotationOverlay {
                 ghostSheetPill.layer.isHidden = true
             }
 
-            // Where the tip snaps: a square on an end, corner or centre, with its name up and to the right; cross
-            // hairs on blank canvas.
+            // Where the tip snaps: its kind's mark, named in the loupe (#40); cross hairs on blank canvas.
             if let tip = tool.tip {
                 let s = screen(tip.target.point)
-                if let kind = tip.target.kind {
-                    marker.path = CGPath(rect: CGRect(x: s.x - 6, y: s.y - 6, width: 12, height: 12), transform: nil)
-                    markerPill.set(kind.title, size: 11, colour: Palette.snapText(dark: isDark),
-                                   fill: Palette.snap(dark: isDark), weight: .semibold, radius: 8)
-                    markerPill.layer.anchorPoint = .zero
-                    markerPill.layer.position = CGPoint(x: s.x + 14, y: max(4, s.y - 42))
-                    markerPill.layer.isHidden = false
-                } else {
-                    marker.path = Self.crossHairs(at: s)
-                    markerPill.layer.isHidden = true
-                }
+                marker.path = tip.target.kind.map { SnapMarker.path($0, at: s, size: 6) } ?? Self.crossHairs(at: s)
             } else {
                 marker.path = nil
-                markerPill.layer.isHidden = true
             }
         }
     }

@@ -420,6 +420,8 @@ public struct ShapeDraft: Hashable, Sendable {
     public static let closingReach = 12.0
     /// How near the last point on screen, in points, a polyline's tap finishes it.
     public static let finishingReach = 6.0
+    /// How near the last point on screen, in points, a tap is the same place.
+    public static let samePlaceReach = 2.0
 
     public let kind: LineShape
     public private(set) var placed: [CanvasPoint] = []
@@ -463,6 +465,8 @@ public struct ShapeDraft: Hashable, Sendable {
             placed.append(point)
             return .waiting
         }
+        // The same place twice isn't a second point: a line or a circle needs a length, an arc its two ends.
+        if let last = placed.last, screenDistance(point, last) < Self.samePlaceReach { return .waiting }
         placed.append(point)
         guard placed.count >= (kind == .arc ? 3 : 2) else { return .waiting }
         return finish().map(Placement.finished) ?? .waiting

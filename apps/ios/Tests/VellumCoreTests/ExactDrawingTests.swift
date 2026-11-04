@@ -337,6 +337,15 @@ final class ShapeDraftTests: XCTestCase {
         }
     }
 
+    func testTheSamePlaceTwiceIsNotASecondPoint() {
+        for kind in [LineShape.line, .rectangle, .circle, .polygon, .arc] {
+            var draft = ShapeDraft(kind: kind)
+            _ = draft.place(p(0, 0), screenDistance: onScreen)
+            XCTAssertEqual(draft.place(p(0.5, 0), screenDistance: onScreen), .waiting, kind.title)
+            XCTAssertEqual(draft.placed.count, 1, kind.title)
+        }
+    }
+
     func testAnArcTakesThreePoints() {
         var draft = ShapeDraft(kind: .arc)
         XCTAssertEqual(draft.place(p(0, 0), screenDistance: onScreen), .waiting)

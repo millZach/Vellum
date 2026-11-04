@@ -22,6 +22,7 @@ struct CanvasScreen: View {
                 let safe = proxy.safeAreaInsets
                 HStack(alignment: .top, spacing: 8) {
                     ToolRail(editor: editor)
+                        .zIndex(1)
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(alignment: .top) {
                             // The top bar takes the room it needs before the spacer does, so the canvas name shows
@@ -128,14 +129,25 @@ private struct ToolRail: View {
     private func toolButton(_ tool: CanvasTool) -> some View {
         let selected = editor.tool == tool
         return Button {
-            if selected, tool.inkTool != nil {
+            if selected, tool == .lineAndShape {
+                editor.showsShapeFlyout.toggle()
+            } else if selected, tool.inkTool != nil {
                 weightsFor = tool
             } else {
                 editor.tool = tool
             }
         } label: {
-            Image(systemName: tool.systemImage)
-                .font(.system(size: 18, weight: .regular))
+            Group {
+                if tool == .lineAndShape {
+                    // The shape picked (#40).
+                    LineShapeIcon(shape: editor.lineShape)
+                        .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                        .frame(width: 22, height: 22)
+                } else {
+                    Image(systemName: tool.systemImage)
+                        .font(.system(size: 18, weight: .regular))
+                }
+            }
                 .frame(width: 42, height: 38)
                 .foregroundStyle(selected ? Chrome.accent : Chrome.text)
                 .background(selected ? Chrome.selected : Color.clear, in: RoundedRectangle(cornerRadius: 9))
@@ -144,8 +156,18 @@ private struct ToolRail: View {
         .buttonStyle(.plain)
         .disabled(!tool.isAvailable)
         .accessibilityLabel(tool.title)
-        .accessibilityHint(selected && tool.inkTool != nil ? "Choose the line weight" : tool.hint)
+        .accessibilityValue(tool == .lineAndShape ? editor.lineShape.title : "")
+        .accessibilityHint(selected && tool == .lineAndShape ? "Choose the shape and the line weight"
+            : selected && tool.inkTool != nil ? "Choose the line weight" : tool.hint)
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .overlay(alignment: .topLeading) {
+            if tool == .lineAndShape, editor.showsShapeFlyout {
+                // Beside the rail, level with the button, as the prototype has it.
+                ShapeFlyout(editor: editor)
+                    .fixedSize()
+                    .offset(x: 52, y: -4)
+            }
+        }
         .popover(isPresented: Binding(get: { weightsFor == tool }, set: { if !$0 { weightsFor = nil } }),
                  arrowEdge: .trailing) {
             WeightPicker(editor: editor)
@@ -187,6 +209,119 @@ private struct ToolRail: View {
 private struct RailDivider: View {
     var body: some View {
         Rectangle().fill(Chrome.border).frame(width: 32, height: 1).padding(.vertical, 4)
+    }
+}
+
+/// The line and shape tool's flyout (#40), opened by tapping it while it is in hand: what it draws, and at its foot the line
+/// weight, which that second tap used to open. The pen and highlighter keep `WeightPicker`.
+private struct ShapeFlyout: View {
+    @Bindable var editor: CanvasEditor
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(LineShape.allCases) { shape in
+                let picked = editor.lineShape == shape
+                Button {
+                    editor.lineShape = shape
+                    editor.showsShapeFlyout = false
+                } label: {
+                    HStack(spacing: 7) {
+                        LineShapeIcon(shape: shape)
+                            .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
+                            .frame(width: 19, height: 19)
+                        Text(shape.title).font(.system(size: 13, weight: picked ? .semibold : .regular))
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.leading, 7)
+                    .padding(.trailing, 10)
+                    .frame(height: 34)
+                    .foregroundStyle(picked ? Chrome.accent : Chrome.text)
+                    .background(picked ? Chrome.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(shape.title)
+                .accessibilityHint(shape.hint)
+                .accessibilityAddTraits(picked ? .isSelected : [])
+            }
+            Rectangle().fill(Chrome.border).frame(height: 1).padding(.vertical, 3)
+            Text("Line weight")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Chrome.secondaryText)
+                .padding(.leading, 7)
+                .padding(.bottom, 2)
+            ForEach(LineWeight.allCases, id: \.self) { weight in
+                let picked = editor.weight == weight
+                Button {
+                    editor.weight = weight
+                } label: {
+                    HStack(spacing: 8) {
+                        Capsule()
+                            .frame(width: 26, height: max(1.5, weight.screenWidth(for: .pen) / 2))
+                        Text(weight.title).font(.system(size: 13, weight: picked ? .semibold : .regular))
+                        Spacer(minLength: 0)
+                        if picked { Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)) }
+                    }
+                    .padding(.horizontal, 7)
+                    .frame(height: 30)
+                    .foregroundStyle(picked ? Chrome.accent : Chrome.text)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(weight.title) line weight")
+                .accessibilityAddTraits(picked ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .frame(width: 150)
+        .chromePanel(cornerRadius: 12)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Each shape's mark, on the 24-point square of the prototype's icons.
+private struct LineShapeIcon: Shape {
+    let shape: LineShape
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) }
+        switch shape {
+        case .drawIt:
+            path.move(to: p(3, 17))
+            path.addCurve(to: p(11, 14), control1: p(6, 8), control2: p(8, 20))
+            path.addCurve(to: p(21, 5), control1: p(14, 8), control2: p(15, 7))
+        case .line:
+            path.move(to: p(4, 19))
+            path.addLine(to: p(20, 5))
+        case .polyline:
+            path.move(to: p(3, 19))
+            path.addLine(to: p(9, 8))
+            path.addLine(to: p(15, 15))
+            path.addLine(to: p(21, 5))
+        case .rectangle:
+            path.addRect(CGRect(x: 4, y: 6, width: 16, height: 12))
+        case .circle:
+            path.addEllipse(in: CGRect(x: 4, y: 4, width: 16, height: 16))
+        case .arc:
+            // From (4, 18) over the top to (20, 18), round (12, 12).
+            let from = atan2(6.0, -8.0), to = 2 * Double.pi + atan2(6.0, 8.0)
+            for i in 0...16 {
+                let a = from + (to - from) * Double(i) / 16
+                let point = p(12 + 10 * cos(a), 12 + 10 * sin(a))
+                if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+            }
+        case .polygon:
+            path.move(to: p(12, 3))
+            path.addLine(to: p(20, 8))
+            path.addLine(to: p(20, 16))
+            path.addLine(to: p(12, 21))
+            path.addLine(to: p(4, 16))
+            path.addLine(to: p(4, 8))
+            path.closeSubpath()
+        }
+        return path.applying(CGAffineTransform(scaleX: rect.width / 24, y: rect.height / 24))
+            .offsetBy(dx: rect.minX, dy: rect.minY)
     }
 }
 
@@ -517,7 +652,8 @@ private struct ToolPrompt: View {
 
     var body: some View {
         Text(editor.tool.prompt(fingerDraws: fingerDraws, hasSelection: !editor.selection.isEmpty,
-                                hasSheet: editor.selection.sheet != nil, step: editor.toolStep))
+                                hasSheet: editor.selection.sheet != nil, shape: editor.lineShape,
+                                step: editor.toolStep))
             .foregroundStyle(Chrome.secondaryText)
             .lineLimit(1)
             .truncationMode(.tail)

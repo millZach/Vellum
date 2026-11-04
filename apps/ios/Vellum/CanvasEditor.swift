@@ -112,11 +112,30 @@ final class CanvasEditor {
             pen.tool = newValue
             if newValue != .lasso { select(.empty) }
             toolStep = placingSheet == nil ? .start : .placeSheet
+            if showsShapeFlyout { showsShapeFlyout = false }
         }
     }
 
     /// Where a measure, dimension or window is up to, for the status bar's prompt (#8). The canvas view sets it.
     var toolStep = CanvasTool.Step.start
+
+    /// What the line and shape tool draws, picked from its flyout (#40). Picking another finishes the shape in hand.
+    var lineShape = LineShape.default {
+        didSet { if lineShape != oldValue { onLineShapeChange?() } }
+    }
+    /// Whether the flyout beside the rail is open.
+    var showsShapeFlyout = false
+    @ObservationIgnored var onLineShapeChange: (@MainActor () -> Void)?
+    /// Asked first by an undo: true when it took a point back from a shape part way through.
+    @ObservationIgnored var undoShapePoint: (@MainActor () -> Bool)?
+    /// A shape part way through has points to take back, so Undo is on with nothing else to undo.
+    @ObservationIgnored private var draftInProgress = false
+
+    func setDraftInProgress(_ inProgress: Bool) {
+        draftInProgress = inProgress
+        let can = session.canUndo || inProgress
+        if canUndo != can { canUndo = can }
+    }
 
     var colour: MarkupColour {
         get { pen.colour }
@@ -158,9 +177,17 @@ final class CanvasEditor {
         saver?.setPencilDown(down)
     }
 
-    /// Adds a stroke the Pencil has finished to the ink.
-    func commit(_ stroke: StrokeInProgress) {
-        session.commit(stroke)
+    /// Adds a stroke the Pencil has finished to the ink, and returns it.
+    @discardableResult
+    func commit(_ stroke: StrokeInProgress) -> InkStroke? {
+        let committed = session.commit(stroke)
+        syncInk()
+        return committed
+    }
+
+    /// Corrects a shape just drawn through its tag (#40), as its own undo step, written to the ink log like any change.
+    func correct(_ id: StrokeID, to points: [CanvasPoint]) {
+        session.correct(id, to: points)
         syncInk()
     }
 
@@ -184,6 +211,7 @@ final class CanvasEditor {
     }
 
     func undo() {
+        if undoShapePoint?() == true { return }
         willChangeHistory?()
         endEraserSweep()
         cancelLift()
@@ -484,10 +512,10 @@ final class CanvasEditor {
     /// The paper a new frame is drawn on, chosen beside the top bar while the frame tool is in hand.
     var framePaper = PaperSize.defaultFrame
 
-    /// Where a measure or dimension tap at a canvas point lands: the ink end, corner or circle centre within 20 screen
-    /// points, found through the index, or the point itself.
-    func snapTarget(at point: CanvasPoint) -> PointSnap.Target {
-        PointSnap.target(at: point, pointsPerInch: viewport.pointsPerInch, in: inkIndex)
+    /// Where a tap at a canvas point lands: the nearest snap point within 20 screen points, found through the index, or the
+    /// point itself. `anchor` is the point being worked from, which perpendicular and tangent need (#40).
+    func snapTarget(at point: CanvasPoint, anchor: CanvasPoint? = nil) -> PointSnap.Target {
+        PointSnap.target(at: point, pointsPerInch: viewport.pointsPerInch, in: inkIndex, anchor: anchor)
     }
 
     /// A length between two points as the canvas shows it: in its units, or printed inches marked NTS on an NTS sheet.
@@ -579,7 +607,8 @@ final class CanvasEditor {
                                    sheet: selection.sheet.flatMap { session.sheet($0)?.id }))
         }
         if !sweeping { inkRevision += 1 }
-        if canUndo != session.canUndo { canUndo = session.canUndo }
+        let can = session.canUndo || draftInProgress
+        if canUndo != can { canUndo = can }
         if canRedo != session.canRedo { canRedo = session.canRedo }
         save()
     }

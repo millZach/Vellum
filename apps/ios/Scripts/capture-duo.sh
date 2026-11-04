@@ -244,6 +244,7 @@ for appearance in light dark; do
   capture canvas-snap --ui-tab canvases --ui-reset --ui-new-canvas --ui-snap
   capture canvas-lasso --ui-tab canvases --ui-reset --ui-fixture --ui-lasso
   capture canvas-lasso-moved --ui-tab canvases --ui-reset --ui-fixture --ui-lasso-move
+  capture canvas-lasso-offscreen --ui-tab canvases --ui-reset --ui-new-canvas --ui-lasso-offscreen
   capture canvas-text --ui-tab canvases --ui-reset --ui-new-canvas --ui-text
   WAIT=$saved_wait
 done
@@ -350,5 +351,14 @@ xcodebuild -project Vellum.xcodeproj -scheme Vellum -configuration Release -sdk 
   -destination 'generic/platform=iOS Simulator' -derivedDataPath .build-native CODE_SIGNING_ALLOWED=NO \
   SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) BENCHMARK' build -quiet
 xcrun simctl install "$udid" .build-native/Build/Products/Release-iphonesimulator/Vellum.app
-benchmark "-release"
+# Several launches, each its own whole run on a fresh canvas with its own wait, because a runner's speed moves within a
+# job; perf-passes.py keeps the median of each timing for perf-compare.py. Each launch takes about 90 seconds.
+passes=${BENCHMARK_PASSES:-3}
+rm -f "$out"/benchmark-release*
+pass=1
+while [ "$pass" -le "$passes" ]; do
+  benchmark "-release-$pass"
+  pass=$((pass + 1))
+done
+python3 Scripts/perf-passes.py "$out/benchmark-release.json" "$out"/benchmark-release-[0-9]*.json
 fi

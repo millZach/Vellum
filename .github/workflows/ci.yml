@@ -96,7 +96,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Capture every tab and the Home Screen unfolded, in light and dark
         run: PART=captures sh apps/ios/Scripts/capture-duo.sh .build-captures
-      # Timings are recorded and compared with docs/perf/baselines, warning at 25% worse; they never fail the build.
+      # Timings are recorded and compared with docs/perf/baselines (docs/perf/README.md); they never fail the build.
       - name: Compare canvas frame timings with the baseline
         if: always()
         run: python3 apps/ios/Scripts/perf-compare.py canvas-rendering apps/ios/.build-captures/benchmark.json
@@ -136,7 +136,7 @@ jobs:
           retention-days: 14
 
   # Evidence, not part of the merge bar: the canvas benchmark in an optimised (Release, BENCHMARK) build on the iPhone
-  # Duo simulator. Split from the captures job when the #8 captures took that job past its 45 minutes.
+  # Duo simulator, three launches. Split from the captures job when the #8 captures took that job past its 45 minutes.
   duo-release-benchmark:
     name: Duo release benchmark
     runs-on: xcode-27

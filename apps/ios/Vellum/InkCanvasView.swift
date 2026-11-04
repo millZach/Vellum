@@ -1048,6 +1048,12 @@ extension InkCanvasUIView {
         let strokes = editor.liftSelection()
         let base = editor.viewport
         let layer = dragLayer(for: strokes, drawnAt: base)
+        // A move only slides the ink, so the render server draws it once and slides the image, rather than stroking
+        // every path again each frame with the main thread waiting on it (#32). A resize stays as paths, to stay sharp.
+        if case .move = kind {
+            layer.shouldRasterize = true
+            layer.rasterizationScale = traitCollection.displayScale
+        }
         self.layer.addSublayer(layer)
         selectionOverlay.bringToFront(in: self)
         drag = SelectionDrag(kind: kind, start: point, base: base, layer: layer)

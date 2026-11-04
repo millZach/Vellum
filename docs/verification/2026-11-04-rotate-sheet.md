@@ -30,6 +30,9 @@ Moving, with a finger and with the Pencil:
 - [ ] Drag the selected sheet with one finger: it follows, and a stroke, text box and dimension on it come along, while a stroke mostly off it stays and a frame over it stays.
 - [ ] Drag it the same way with the Pencil.
 - [ ] Rest a finger or the Pencil on it without dragging: nothing moves and no undo step appears.
+- [ ] Hold the Pencil on the sheet and drag it, and with the other hand pinch and then pan with two fingers: the canvas zooms and pans, the sheet stays under the tip, and on lift it lands there as one undo step. Two fingers both on the sheet zoom and pan here too, and start no twist.
+- [ ] Rest the Pencil on the sheet without dragging and pinch with the other hand: the canvas zooms, and on lift the sheet hasn't moved and no undo step appears.
+- [ ] Drag the sheet with one finger and add a second: the view holds still while the finger moves it, and the move gives way to a twist or a pan.
 - [ ] Undo once: the sheet and everything that came along go back together. Redo: they return.
 
 Scale, lengths and saving:

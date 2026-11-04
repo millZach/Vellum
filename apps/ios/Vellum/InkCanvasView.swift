@@ -404,6 +404,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         if let drag {
             drag.layer.transform = Self.transform(from: drag.base, to: viewport, applying: drag.transform)
         }
+        if let sheetDrag {
+            sheetDrag.layer.transform = Self.transform(from: sheetDrag.base, to: viewport, applying: sheetDrag.motion)
+        }
         CATransaction.commit()
         textOverlay.show(viewport)
         annotationOverlay.show(viewport)
@@ -411,6 +414,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         if case .point? = regionInput { regionTipMoved = true }
         if editor.placingSheet != nil { updatePlacingOutline() }
         updateSelectionOverlay()
+        keepSheetDragUnderTip()
     }
 
     private func applyColours() {
@@ -927,8 +931,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             lastPinchScale = 1
             gestureBegan()
         case .changed:
-            // A selected sheet's turn or move holds the view still.
-            if sheetDrag == nil { zoomBy(pinch.scale / lastPinchScale, about: pinch.location(in: self)) }
+            // A selected sheet's turn or move by fingers holds the view still; the Pencil's leaves the other hand free.
+            if sheetDrag?.byFinger != true { zoomBy(pinch.scale / lastPinchScale, about: pinch.location(in: self)) }
             lastPinchScale = pinch.scale
         case .ended, .cancelled, .failed:
             gestureEnded()
@@ -988,10 +992,17 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             && !view.isDescendant(of: sheetStrip)
     }
 
-    /// Two fingers both on the selected sheet twist it, so they never pinch the canvas (#44). Any others pinch as they do
-    /// today.
+    /// Two fingers both on the selected sheet twist it, so they never pinch the canvas (#44), and a move by a finger holds
+    /// the view still. Any others pinch as they do today, and so do any two fingers while the Pencil moves the sheet, as
+    /// during a selection's drag: they start no twist then (`beginSheetFingers`).
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if gestureRecognizer === pinch, fingersAreOnSelectedSheet(pinch) || sheetDrag != nil { return false }
+        if gestureRecognizer === pinch {
+            if let sheetDrag {
+                if sheetDrag.byFinger { return false }
+            } else if fingersAreOnSelectedSheet(pinch) {
+                return false
+            }
+        }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 }
@@ -1088,6 +1099,7 @@ extension InkCanvasUIView {
         guard let last = samples.last else { return }
         pendingPenPosition = canvasPoint(last)
         if sheetDrag != nil {
+            lastSample = last
             moveSheetDrag(to: canvasPoint(last))
             return
         }
@@ -1696,6 +1708,20 @@ extension InkCanvasUIView {
         current.motion = change.motion
         sheetDrag = current
         showSheetDrag(current)
+    }
+
+    /// The other hand panned or pinched under the Pencil's move. A sheet being moved stays under the tip, which is now over
+    /// another canvas point; one not yet moved stays put, and goes on from that point, so a rested tip never makes a move.
+    fileprivate func keepSheetDragUnderTip() {
+        guard var current = sheetDrag, !current.byFinger, let tip = lastSample,
+              case .move(_, let moved) = current.kind else { return }
+        let point = canvasPoint(tip)
+        if moved {
+            moveSheetDrag(to: point)
+        } else {
+            current.kind = .move(start: point, moved: false)
+            sheetDrag = current
+        }
     }
 
     /// Starts a twist of the selected sheet from the fingers' angle, in degrees. False with nothing selected.

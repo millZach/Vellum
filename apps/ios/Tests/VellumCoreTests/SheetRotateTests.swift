@@ -195,6 +195,157 @@ final class SheetRotateTests: XCTestCase {
         XCTAssertEqual(reading(printed, on: back.sheet), "24'-0\"")
     }
 
+    /// D-501 turned and then moved: every length still reads its own scale, and the lookups name the right areas.
+    func testATurnedAndMovedDetailSheetReadsItsOwnScales() {
+        let printed = MadeUpSheets.detailSheet.dimensions
+        for angle in [30, 33.5, 90, 123.4, 270] as [Double] {
+            let sheet = detail().turned(to: angle).sheet.moved(dx: .feet(40), dy: .feet(-25)).sheet
+            XCTAssertEqual(reading(printed[0], on: sheet), "3'-0\"", "\(angle)")
+            XCTAssertEqual(reading(printed[1], on: sheet), "2'-0\"", "\(angle)")
+            XCTAssertEqual(reading(printed[2], on: sheet), "2\" NTS", "\(angle)")
+            XCTAssertNil(sheet.area(at: sheet.canvasPoint(at: printed[0].from)), "Detail 1 is at the sheet's own scale")
+            XCTAssertEqual(sheet.area(at: sheet.canvasPoint(at: printed[1].from))?.name, "Detail 2", "\(angle)")
+            let third = sheet.area(at: sheet.canvasPoint(at: printed[2].from))
+            XCTAssertEqual(third?.name, "Detail 3", "\(angle)")
+            XCTAssertEqual(third?.scale, .notToScale, "\(angle)")
+        }
+    }
+
+    /// To NTS and back at an oblique angle, as at 0°: 6" NTS, then 24'-0" again, about the same centre.
+    func testAScaleChangeToAndFromNTSAtAnObliqueAngle() {
+        let printed = MadeUpSheets.quarterInchPlan.dimensions[0]
+        for angle in [30, 123.4] as [Double] {
+            let turned = plan().turned(to: angle).sheet
+            let nts = turned.rescaled(to: .notToScale)
+            XCTAssertEqual(nts.sheet.angle, angle)
+            XCTAssertEqual(nts.sheet.size.width.inches, 36)
+            XCTAssertEqual(reading(printed, on: nts.sheet), "6\" NTS", "\(angle)")
+            let back = nts.sheet.rescaled(to: quarter)
+            XCTAssertEqual(back.sheet.angle, angle)
+            XCTAssertEqual(back.sheet.size.width.inches, 1_728)
+            XCTAssertEqual(reading(printed, on: back.sheet), "24'-0\"", "\(angle)")
+            assertSame(back.sheet.centre, turned.centre.x.inches, turned.centre.y.inches)
+        }
+    }
+
+    /// D-501 made NTS at an angle. With its page read again, Detail 3 is at the sheet's own scale, so it stops being an
+    /// area and still reads NTS, and Detail 1 becomes an area at its own 1" = 1'-0", so nothing reads differently. With
+    /// the areas it had (a page that can't be read), Detail 1 has no area and reads its printed inches marked NTS.
+    func testADetailSheetMadeNTSAtAnAngle() {
+        let printed = MadeUpSheets.detailSheet.dimensions
+        for angle in [30, 123.4] as [Double] {
+            let turned = detail().turned(to: angle).sheet
+            let read = turned.rescaled(to: .notToScale, areas: detailReading.areas(placedAt: .notToScale)).sheet
+            XCTAssertEqual(read.areas.map(\.name), ["Detail 1", "Detail 2"])
+            XCTAssertEqual(reading(printed[0], on: read), "3'-0\"", "\(angle)")
+            XCTAssertEqual(reading(printed[1], on: read), "2'-0\"", "\(angle)")
+            XCTAssertEqual(reading(printed[2], on: read), "2\" NTS", "\(angle)")
+            let kept = turned.rescaled(to: .notToScale).sheet
+            XCTAssertEqual(kept.areas.map(\.name), ["Detail 2", "Detail 3"])
+            XCTAssertEqual(reading(printed[0], on: kept), "3\" NTS", "\(angle)")
+            XCTAssertEqual(reading(printed[1], on: kept), "2'-0\"", "\(angle)")
+            XCTAssertEqual(reading(printed[2], on: kept), "2\" NTS", "\(angle)")
+        }
+    }
+
+    // MARK: A mark exactly on an edge
+
+    private let edgeAngles = [45, 33.5, 123.4] as [Double]
+    private let oneToFortyEight = Sheet.Scale.drawn(.ratio(48))
+
+    /// A 10 × 10 sheet at 1:48 holding an area at (1, 1, 4, 4) printed inches, at the area's scale.
+    private func edgeSheet(area: Sheet.Scale, origin: CanvasPoint = .origin) -> Sheet {
+        Sheet(id: SheetID(1), paper: .inches(10, by: 10), scale: oneToFortyEight, origin: origin,
+              areas: [ScaleArea(name: "Detail", rect: .inches(x: 1, y: 1, width: 4, height: 4), scale: area)])
+    }
+
+    /// A dimension between two paper points on a sheet at 0°, kept on the ink grid as a placed one is.
+    private func edgeDimension(_ sheet: Sheet, _ a: (Double, Double), _ b: (Double, Double)) -> CanvasDimension {
+        func at(_ p: (Double, Double)) -> CanvasPoint { sheet.canvasPoint(at: PaperPoint(x: .inches(p.0), y: .inches(p.1))) }
+        return CanvasDimension.pulled(id: DimensionID(1), start: at(a), end: at(b), through: at((0.5, 2)), colour: .blue,
+                                      textHeight: .inches(4)).onInkGrid
+    }
+
+    private func read(_ dimension: CanvasDimension, on sheet: Sheet) -> String {
+        let canvas = Canvas(sheets: [sheet])
+        return canvas.format(canvas.measure(dimension))
+    }
+
+    /// Printed 2" along the area's edge, 4'-0" at 1:24 and 8'-0" at the sheet's 1:48. Turned, its points land on the ink
+    /// grid a fraction of a step off the edge, and must still read the area's scale.
+    func testAMarkOnAScaleAreasEdgeKeepsItsScaleThroughATurn() {
+        let sheet = edgeSheet(area: .drawn(.ratio(24)))
+        let dimension = edgeDimension(sheet, (1, 1), (1, 3))
+        XCTAssertEqual(read(dimension, on: sheet), "4'-0\"")
+        for angle in edgeAngles {
+            let (turned, motion) = sheet.turned(to: angle)
+            let moved = dimension.moved(by: motion)
+            XCTAssertEqual(turned.area(at: moved.start)?.name, "Detail", "\(angle)")
+            XCTAssertEqual(turned.area(at: moved.end)?.name, "Detail", "\(angle)")
+            XCTAssertEqual(read(moved, on: turned), "4'-0\"", "\(angle)")
+        }
+    }
+
+    func testAMarkOnAnNTSAreasEdgeKeepsItsMarkThroughATurn() {
+        let sheet = edgeSheet(area: .notToScale)
+        let dimension = edgeDimension(sheet, (1, 1), (1, 3))
+        XCTAssertEqual(read(dimension, on: sheet), "2\" NTS")
+        for angle in edgeAngles {
+            let (turned, motion) = sheet.turned(to: angle)
+            XCTAssertEqual(read(dimension.moved(by: motion), on: turned), "2\" NTS", "\(angle)")
+        }
+    }
+
+    /// An NTS sheet's own edge: a mark along it stays marked NTS.
+    func testAMarkOnAnNTSSheetsEdgeKeepsItsMarkThroughATurn() {
+        let sheet = Sheet(id: SheetID(1), paper: .inches(10, by: 10), scale: .notToScale)
+        let dimension = edgeDimension(sheet, (0, 1), (0, 3))
+        XCTAssertEqual(read(dimension, on: sheet), "2\" NTS")
+        for angle in edgeAngles {
+            let (turned, motion) = sheet.turned(to: angle)
+            let moved = dimension.moved(by: motion)
+            XCTAssertTrue(turned.contains(moved.start), "\(angle)")
+            XCTAssertEqual(read(moved, on: turned), "2\" NTS", "\(angle)")
+        }
+    }
+
+    /// A scale change rounds too, at 0° as well: 1:48 to 1:50 from a corner off the grid's even steps. Printed 2" in the
+    /// 1:24 area is still 4'-0", and in the NTS area still 2" NTS.
+    func testAMarkOnAScaleAreasEdgeKeepsItsScaleThroughARescale() {
+        let origin = at(0.3, 0.7).onInkGrid
+        let main = Sheet.Scale.drawn(.ratio(50))
+        for (area, expected) in [(Sheet.Scale.drawn(.ratio(24)), "4'-0\""), (.notToScale, "2\" NTS")] {
+            let sheet = edgeSheet(area: area, origin: origin)
+            let dimension = edgeDimension(sheet, (1, 1), (1, 3))
+            XCTAssertEqual(read(dimension, on: sheet), expected)
+            let (after, motion) = sheet.rescaled(to: main)
+            let moved = dimension.moved(by: motion)
+            XCTAssertEqual(after.area(at: moved.start)?.name, "Detail")
+            XCTAssertEqual(after.area(at: moved.end)?.name, "Detail")
+            XCTAssertEqual(read(moved, on: after), expected)
+        }
+    }
+
+    /// The allowance is one ink-grid step: a point clearly outside still reads outside, turned or not.
+    func testAPointClearlyOutsideStillReadsOutside() {
+        let sheet = edgeSheet(area: .drawn(.ratio(24)))
+        // A hundredth of a printed inch: 655 grid steps at full size, far past the allowance.
+        for angle in [0] + edgeAngles {
+            let turned = sheet.turned(to: angle).sheet
+            let beside = turned.canvasPoint(at: PaperPoint(x: .inches(0.99), y: .inches(2)))
+            XCTAssertNil(turned.area(at: beside), "\(angle)")
+            let inside = turned.canvasPoint(at: PaperPoint(x: .inches(1.01), y: .inches(2)))
+            XCTAssertEqual(turned.area(at: inside)?.name, "Detail", "\(angle)")
+            XCTAssertFalse(turned.contains(turned.canvasPoint(at: PaperPoint(x: .inches(-0.01), y: .inches(2)))), "\(angle)")
+            XCTAssertFalse(turned.contains(turned.canvasPoint(at: PaperPoint(x: .inches(10.01), y: .inches(2)))), "\(angle)")
+            // Printed 2" just outside the area reads the sheet's 1:48.
+            let start = turned.canvasPoint(at: PaperPoint(x: .inches(0.99), y: .inches(1)))
+            let end = turned.canvasPoint(at: PaperPoint(x: .inches(0.99), y: .inches(3)))
+            let canvas = Canvas(sheets: [turned])
+            XCTAssertEqual(canvas.format(canvas.measure(from: start, to: end)), "8'-0\"", "\(angle)")
+        }
+    }
+
     /// A turn keeps the corner the sheet stands on, so 360 turns of a degree leave it where it was, to the bit.
     func testTurnsNeverDrift() {
         var sheet = plan()

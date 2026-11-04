@@ -286,13 +286,15 @@ final class DebugBenchmark: NSObject {
             b.editor.tool = .lasso
             guard let view = b.view, let sheet = b.placedSheet else { return }
             b.editor.select(CanvasSelection(sheet: sheet.id))
+            // The lift: choosing what comes along and building its strokes' paths, on the main thread, once per turn.
+            let liftStart = CACurrentMediaTime()
             _ = view.beginSheetTwist(fingerAngle: 0)
+            let lift = (CACurrentMediaTime() - liftStart) * 1000
             b.holdsForTiles = true
-            b.record("  \(name) came_along=\(view.debugSheetDragStrokes) pending_at_lift=\(view.pendingRenderCount)")
+            b.record("  \(name) came_along=\(view.debugSheetDragStrokes) lift_ms=\(b.format(lift)) pending_at_lift=\(view.pendingRenderCount)")
         }, step: { b, i in
             guard let view = b.view else { return }
             if i == 0 { b.tilesBeforeTurn = view.debugSheetTiles.drawn }
-            if i % 60 == 0 { b.record("  \(name) frame=\(i) pending=\(view.pendingRenderCount)") }
             if i == 239 {
                 view.finishSheetDrag(keep: true)
             } else {

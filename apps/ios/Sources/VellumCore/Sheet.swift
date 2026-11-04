@@ -69,6 +69,12 @@ public struct PaperRect: Hashable, Sendable {
         point.x.inches >= minX && point.x.inches <= maxX && point.y.inches >= minY && point.y.inches <= maxY
     }
 
+    /// Whether a point is inside, or within `slack` printed inches of an edge.
+    func contains(_ point: PaperPoint, within slack: Double) -> Bool {
+        point.x.inches >= minX - slack && point.x.inches <= maxX + slack
+            && point.y.inches >= minY - slack && point.y.inches <= maxY + slack
+    }
+
     /// The smallest rectangle holding both.
     public func union(_ other: PaperRect) -> PaperRect {
         let x0 = min(minX, other.minX), y0 = min(minY, other.minY)
@@ -206,12 +212,16 @@ public struct Sheet: Hashable, Sendable, Identifiable {
         canvasCorners(of: PaperRect(x: .inches(0), y: .inches(0), width: paper.width, height: paper.height))
     }
 
+    /// Whether a canvas point is on the sheet, within one ink-grid step of its edge (`inkGridStepOnPaper`).
     public func contains(_ point: CanvasPoint) -> Bool {
-        if angle == 0 { return bounds.contains(point) }
-        let onPaper = paperPoint(at: point)
-        return onPaper.x.inches >= 0 && onPaper.x.inches <= paper.width.inches
-            && onPaper.y.inches >= 0 && onPaper.y.inches <= paper.height.inches
+        PaperRect(x: .inches(0), y: .inches(0), width: paper.width, height: paper.height)
+            .contains(paperPoint(at: point), within: inkGridStepOnPaper)
     }
+
+    /// One step of the ink grid in printed inches of this sheet. A mark's points are kept on the grid, so a turn or a scale
+    /// change can leave one that lay exactly on an edge of the sheet or a scale area a fraction of a step past it. It must
+    /// still read as on it (#44): a mark on a scale area's edge would otherwise lose the area's scale, or its NTS.
+    private var inkGridStepOnPaper: Double { 1 / CanvasPoint.gridUnitsPerInch / canvasPerPrinted }
 
     /// Where a point on the sheet's paper lands on the canvas.
     public func canvasPoint(at paperPoint: PaperPoint) -> CanvasPoint {
@@ -238,7 +248,7 @@ public struct Sheet: Hashable, Sendable, Identifiable {
     public func area(at point: CanvasPoint) -> ScaleArea? {
         guard contains(point), !areas.isEmpty else { return nil }
         let onPaper = paperPoint(at: point)
-        return areas.last { $0.rect.contains(onPaper) }
+        return areas.last { $0.rect.contains(onPaper, within: inkGridStepOnPaper) }
     }
 
     /// The scale lengths read at a canvas point on this sheet: its scale area's, or the sheet's own.

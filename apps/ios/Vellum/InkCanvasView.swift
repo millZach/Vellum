@@ -321,6 +321,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         DebugSelection.attach(self, editor: editor)
         DebugMeasureFrame.attach(self, editor: editor)
         DebugSheets.attach(self, editor: editor)
+        DebugStatusBar.attach(self, editor: editor)
         #endif
     }
 

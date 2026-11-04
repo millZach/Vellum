@@ -47,6 +47,43 @@ final class StatusBarTextTests: XCTestCase {
         XCTAssertEqual(StatusBarText.counts(sheets: 12, frames: 1), ["12 sheets · 1 frame", "12 sh · 1 fr", "12 · 1"])
     }
 
+    /// The labels the readout's room is set for (#45): `Scripts/status-bar-check.py` holds the count to its full wording
+    /// beside these, and a label outside them may shorten it.
+    func testTheUsualZoomsShowOnlyTheScaleLabelsTheFullCountIsHeldTo() {
+        var labels: [String] = []
+        var pointsPerInch = 0.0501
+        while pointsPerInch <= 60 {
+            let label = ScaleBar.mark(fitting: StatusBarText.scaleBarLongest, pointsPerInch: pointsPerInch,
+                                      units: .feetAndInches).label
+            if labels.last != label { labels.append(label) }
+            pointsPerInch *= 1.01
+        }
+        XCTAssertEqual(labels, ["50'-0\"", "20'-0\"", "10'-0\"", "5'-0\"", "2'-0\"", "1'-0\"",
+                                "0'-6\"", "0'-3\"", "0'-2\"", "0'-1\""])
+    }
+
+    /// Work count: the readout's width follows its label, and a pinch across the whole zoom changes the label only at a
+    /// mark, never once per frame.
+    func testAPinchAcrossTheWholeZoomChangesTheScaleLabelOnlyAtAMark() {
+        let unitsAndChanges: [(CanvasUnits, Int)] = [(.feetAndInches, 18), (.decimalFeet, 17), (.metric, 17)]
+        for (units, most) in unitsAndChanges {
+            var changes = 0
+            var frames = 0
+            var last: String?
+            var pointsPerInch = Viewport.minimumPointsPerInch
+            while pointsPerInch <= Viewport.maximumPointsPerInch {
+                let label = ScaleBar.mark(fitting: StatusBarText.scaleBarLongest, pointsPerInch: pointsPerInch,
+                                          units: units).label
+                if let last, last != label { changes += 1 }
+                last = label
+                frames += 1
+                pointsPerInch *= 1.005
+            }
+            XCTAssertGreaterThan(frames, 2_000, "\(units)")
+            XCTAssertLessThanOrEqual(changes, most, "\(units)")
+        }
+    }
+
     func testTheWindowMenusDisabledSendReachesTheContrastOnItsPill() {
         for dark in [false, true] {
             XCTAssertGreaterThanOrEqual(ChromeColourPair.windowMenuDisabled(dark: dark).contrast, 4.5, "dark \(dark)")

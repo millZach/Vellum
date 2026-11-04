@@ -445,6 +445,13 @@ private struct FramePaperPicker: View {
 
 // MARK: - Status bar
 
+#if !DEBUG
+private extension View {
+    func debugReportsCountWidth() -> some View { self }
+    func debugReportsStatusBarWidth() -> some View { self }
+}
+#endif
+
 /// The pen's position, the scale bar, what the tool expects next, the sheet and frame count, zoom to everything, and
 /// whether the canvas is saved.
 private struct StatusBar: View {
@@ -466,6 +473,7 @@ private struct StatusBar: View {
             ViewThatFits(in: .horizontal) {
                 ForEach(counts, id: \.self) { Text($0).lineLimit(1) }
             }
+            .debugReportsCountWidth()
             .foregroundStyle(Chrome.secondaryText)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(counts[0])
@@ -485,6 +493,7 @@ private struct StatusBar: View {
         .padding(.horizontal, 12)
         .frame(height: 34)
         .chromePanel(cornerRadius: 11)
+        .debugReportsStatusBarWidth()
     }
 
     /// Saved on the Duo first, then synced to Dropbox (#12).
@@ -542,27 +551,37 @@ private struct PenReadout: View {
     }
 }
 
-/// The scale bar: the longest round length that fits, labelled exactly.
+/// The scale bar: the longest round length that fits, labelled exactly. Its width follows the label alone, never the
+/// bar, so a pinch lays out only the bar until the label changes, and only a label too long for `labelRoom` moves the
+/// prompt and may shorten the count (#45). The hidden copy is what sets the width; the label stays on one line, whole.
 private struct ScaleReadout: View {
     let editor: CanvasEditor
-    /// The bar's longest, and the room for a label beside it. Short, for the pen's position (#33). The very longest
-    /// label, `500.000 m` far zoomed out, runs a few points into the gap after it rather than being cut.
-    private static let space = 60.0
-    private static let labelRoom = 60.0
+    private static let gap = 6.0
+    /// Room for any label up to `50'-0"`, so the prompt holds still through the usual zooms and the three longer prompts
+    /// keep the full count beside them.
+    private static let labelRoom = 40.0
 
     var body: some View {
         let pointsPerInch = editor.viewport.pointsPerInch
-        let bar = ScaleBar.mark(fitting: Self.space, pointsPerInch: pointsPerInch, units: editor.canvas.units)
-        HStack(spacing: 6) {
-            ScaleBarShape()
-                .stroke(Chrome.text, lineWidth: 1.5)
-                .frame(width: ScaleBar.points(for: bar.length, pointsPerInch: pointsPerInch), height: 6)
-            Text(bar.label).monospacedDigit()
-        }
-        .frame(width: Self.space + Self.labelRoom, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Scale bar")
-        .accessibilityValue(bar.label)
+        let bar = ScaleBar.mark(fitting: StatusBarText.scaleBarLongest, pointsPerInch: pointsPerInch,
+                                units: editor.canvas.units)
+        Text(bar.label).monospacedDigit().fixedSize().hidden()
+            .frame(minWidth: Self.labelRoom, alignment: .leading)
+            // Rigid: without this the bar's row is told the readout can squeeze to its minimum, gives the count that
+            // room, and a longer label then pushes the whole bar wider.
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.leading, StatusBarText.scaleBarLongest + Self.gap)
+            .overlay(alignment: .leading) {
+                HStack(spacing: Self.gap) {
+                    ScaleBarShape()
+                        .stroke(Chrome.text, lineWidth: 1.5)
+                        .frame(width: ScaleBar.points(for: bar.length, pointsPerInch: pointsPerInch), height: 6)
+                    Text(bar.label).monospacedDigit().fixedSize()
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Scale bar")
+            .accessibilityValue(bar.label)
     }
 }
 

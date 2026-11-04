@@ -272,7 +272,7 @@ final class DebugBenchmark: NSObject {
     /// Places the made-up sheet in the middle of the canvas, with no saver (the test canvas is never saved), and
     /// zooms to it.
     /// How fast this runner is just now, from work that no change to Vellum can touch: a fixed path stroked into a
-    /// bitmap, five times, the median in milliseconds. `Scripts/perf-compare.py` scales the timing baselines by it.
+    /// bitmap, five times, the median in milliseconds. `Scripts/perf-compare.py` scales the Release timing baselines by it.
     private func speedProbe() -> Double {
         guard let space = CGColorSpace(name: CGColorSpace.sRGB) else { return 0 }
         var times: [Double] = []
@@ -431,9 +431,7 @@ final class DebugBenchmark: NSObject {
     private func finish() {
         link?.invalidate()
         if let observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
-        #if DEBUG
-        measurements["speed_probe_ms"] = percentile(probes.sorted(), 0.5)
-        #else
+        #if !DEBUG
         measurements["speed_probe_ms_release"] = percentile(probes.sorted(), 0.5)
         #endif
         record("speed_probe_ms=\(format(percentile(probes.sorted(), 0.5)))")

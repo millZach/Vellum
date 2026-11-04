@@ -1,7 +1,7 @@
 {
   "area": "canvas-rendering",
   "issue": 21,
-  "about": "Canvas rendering, input and eraser work (docs/perf/README.md). Counts are budgets enforced by apps/ios/Tests/VellumCoreTests/CanvasRenderingBudgetTests.swift. Times are main-thread busy time per frame from the benchmark on the iPhone Duo simulator in CI, stated for the runner whose speed probe reads the reference entry's value, and compared by apps/ios/Scripts/perf-compare.py after scaling by the measured probe. Release p50 warns at 25% worse and Release p95 at 40%; Debug p50 warns at 25%; the rest only record.",
+  "about": "Canvas rendering, input and eraser work (docs/perf/README.md). Counts are budgets enforced by apps/ios/Tests/VellumCoreTests/CanvasRenderingBudgetTests.swift. Times are main-thread busy time per frame from the benchmark on the iPhone Duo simulator in CI, compared by apps/ios/Scripts/perf-compare.py: Release times after scaling by the measured probe, Release p50 warning at 25% worse and Release p95 at 40%; Debug p50, unscaled, warning at 25%; the rest only record.",
   "entries": [
     {
       "metric": "paths_rebuilt_per_redraw",
@@ -173,14 +173,13 @@
     {
       "metric": "draw_frame_ms_max",
       "kind": "time",
-      "value": 31.29,
+      "value": 22.54,
       "before": 20.5,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 4.27 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 4.27 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "draw_frame_ms_max_release",
@@ -196,13 +195,12 @@
     {
       "metric": "draw_frame_ms_p50",
       "kind": "time",
-      "value": 2.9,
+      "value": 3.12,
       "before": 1.47,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 1.28 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 1.28 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "draw_frame_ms_p50_release",
@@ -217,14 +215,13 @@
     {
       "metric": "draw_frame_ms_p95",
       "kind": "time",
-      "value": 6.03,
+      "value": 4.92,
       "before": 3.56,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 1.46 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame wavy stroke across the screen at everything, two samples and two predictions a frame, committed on the last frame. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 1.46 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "draw_frame_ms_p95_release",
@@ -239,14 +236,13 @@
     {
       "metric": "erase_frame_ms_max",
       "kind": "time",
-      "value": 25.31,
+      "value": 17.27,
       "before": 6230.71,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 14.93 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 14.93 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "erase_frame_ms_max_release",
@@ -262,13 +258,12 @@
     {
       "metric": "erase_frame_ms_p50",
       "kind": "time",
-      "value": 7.19,
+      "value": 6.76,
       "before": 5946.98,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 4.78 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 4.78 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "erase_frame_ms_p50_release",
@@ -283,14 +278,13 @@
     {
       "metric": "erase_frame_ms_p95",
       "kind": "time",
-      "value": 13.11,
+      "value": 12.61,
       "before": 6230.71,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 8 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame zigzag eraser sweep, two samples a frame, across the middle at everything (it erases about 1,860 strokes). The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 8 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "erase_frame_ms_p95_release",
@@ -305,14 +299,13 @@
     {
       "metric": "pan_frame_ms_max",
       "kind": "time",
-      "value": 7.9,
+      "value": 5.97,
       "before": 7750.47,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 4.36 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 4.36 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "pan_frame_ms_max_release",
@@ -328,13 +321,12 @@
     {
       "metric": "pan_frame_ms_p50",
       "kind": "time",
-      "value": 2.49,
+      "value": 2.3,
       "before": 7439.08,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 1.45 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 1.45 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "pan_frame_ms_p50_release",
@@ -349,14 +341,13 @@
     {
       "metric": "pan_frame_ms_p95",
       "kind": "time",
-      "value": 4.65,
+      "value": 3.65,
       "before": 7750.47,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 1.87 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. 6 pt a frame back and forth at zoom to everything, all 10,000 strokes in view. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 1.87 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "pan_frame_ms_p95_release",
@@ -371,14 +362,13 @@
     {
       "metric": "pinch_frame_ms_max",
       "kind": "time",
-      "value": 16.57,
+      "value": 13.12,
       "before": 6911.45,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 9.97 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 9.97 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "pinch_frame_ms_max_release",
@@ -394,13 +384,12 @@
     {
       "metric": "pinch_frame_ms_p50",
       "kind": "time",
-      "value": 6.25,
+      "value": 5.38,
       "before": 6541.58,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 4.44 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 4.44 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "pinch_frame_ms_p50_release",
@@ -415,14 +404,13 @@
     {
       "metric": "pinch_frame_ms_p95",
       "kind": "time",
-      "value": 11.42,
+      "value": 9.1,
       "before": 6911.45,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 7.11 from one run on the captures job, before the Release benchmark had its own job (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 23 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. Zoom in about 11x over 120 frames and back out, about the centre, from everything. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 7.11 from one run on the captures job, before the Release benchmark had its own job (#32)."
     },
     {
       "metric": "pinch_frame_ms_p95_release",
@@ -437,14 +425,13 @@
     {
       "metric": "drag_frame_ms_max",
       "kind": "time",
-      "value": 49.73,
+      "value": 53.97,
       "before": 37.79,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. Each frame moves one transform. Until #32 the slow frames came throughout the 240 frames with about 2 ms of main-thread CPU in about 30 ms of wall time: the main thread waited on the render server, which stroked every path of the moved layer again each frame. The layer is rasterized for a move now, so the render server draws it once. The before is the baseline from one run, with the layer as paths. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone, with the drag layer rasterized; 4 jobs of 3 launches, CI run 41764008766",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. Each frame moves one transform. Until #32 the slow frames came throughout the 240 frames with about 2 ms of main-thread CPU in about 30 ms of wall time: the main thread waited on the render server, which stroked every path of the moved layer again each frame. The layer is rasterized for a move now, so the render server draws it once. The before is the baseline from one run, with the layer as paths. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "drag_frame_ms_max_release",
@@ -461,13 +448,12 @@
     {
       "metric": "drag_frame_ms_p50",
       "kind": "time",
-      "value": 3.8,
+      "value": 3.83,
       "before": 2.26,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. Each frame moves one transform. Until #32 the slow frames came throughout the 240 frames with about 2 ms of main-thread CPU in about 30 ms of wall time: the main thread waited on the render server, which stroked every path of the moved layer again each frame. The layer is rasterized for a move now, so the render server draws it once. The before is the baseline from one run, with the layer as paths. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone, with the drag layer rasterized; 4 jobs of 3 launches, CI run 41764008766",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. Each frame moves one transform. Until #32 the slow frames came throughout the 240 frames with about 2 ms of main-thread CPU in about 30 ms of wall time: the main thread waited on the render server, which stroked every path of the moved layer again each frame. The layer is rasterized for a move now, so the render server draws it once. The before is the baseline from one run, with the layer as paths. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "drag_frame_ms_p50_release",
@@ -483,14 +469,13 @@
     {
       "metric": "drag_frame_ms_p95",
       "kind": "time",
-      "value": 16.18,
+      "value": 17.91,
       "before": 30.57,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. Each frame moves one transform. Until #32 the slow frames came throughout the 240 frames with about 2 ms of main-thread CPU in about 30 ms of wall time: the main thread waited on the render server, which stroked every path of the moved layer again each frame. The layer is rasterized for a move now, so the render server draws it once. The before is the baseline from one run, with the layer as paths. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone, with the drag layer rasterized; 4 jobs of 3 launches, CI run 41764008766",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A lasso selection of 657 strokes above the eraser's band at everything, lifted onto its own layer when the Pencil lands (in the set-up), dragged 240 frames, dropped on the last. Each frame moves one transform. Until #32 the slow frames came throughout the 240 frames with about 2 ms of main-thread CPU in about 30 ms of wall time: the main thread waited on the render server, which stroked every path of the moved layer again each frame. The layer is rasterized for a move now, so the render server draws it once. The before is the baseline from one run, with the layer as paths. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "drag_frame_ms_p95_release",
@@ -506,13 +491,12 @@
     {
       "metric": "snap_frame_ms_max",
       "kind": "time",
-      "value": 28.86,
+      "value": 15.32,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 14.33 from one run (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 22 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 14.33 from one run (#32)."
     },
     {
       "metric": "snap_frame_ms_max_release",
@@ -528,12 +512,11 @@
     {
       "metric": "snap_frame_ms_p50",
       "kind": "time",
-      "value": 1.99,
+      "value": 1.6,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 1.31 from one run (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 22 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 1.31 from one run (#32)."
     },
     {
       "metric": "snap_frame_ms_p50_release",
@@ -548,13 +531,12 @@
     {
       "metric": "snap_frame_ms_p95",
       "kind": "time",
-      "value": 5.06,
+      "value": 3.88,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 1.74 from one run (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 22 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A rough box drawn with the pen over 120 frames, held still 80 frames (the hold snaps it to a rectangle, recognised once), lifted on the last. New with #7. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 1.74 from one run (#32)."
     },
     {
       "metric": "snap_frame_ms_p95_release",
@@ -569,66 +551,60 @@
     {
       "metric": "frame_frame_ms_p50",
       "kind": "time",
-      "value": 3.51,
+      "value": 3.08,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A frame dragged across the middle of the 10,000-stroke canvas at everything over 240 frames: each frame fits the smallest covering scale and places the ghost frame and its label; the last places the frame. New with #8. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 1.49 from one run (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 19 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A frame dragged across the middle of the 10,000-stroke canvas at everything over 240 frames: each frame fits the smallest covering scale and places the ghost frame and its label; the last places the frame. New with #8. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 1.49 from one run (#32)."
     },
     {
       "metric": "frame_frame_ms_p95",
       "kind": "time",
-      "value": 8.51,
+      "value": 5.59,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A frame dragged across the middle of the 10,000-stroke canvas at everything over 240 frames: each frame fits the smallest covering scale and places the ghost frame and its label; the last places the frame. New with #8. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 3.82 from one run (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 19 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A frame dragged across the middle of the 10,000-stroke canvas at everything over 240 frames: each frame fits the smallest covering scale and places the ghost frame and its label; the last places the frame. New with #8. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 3.82 from one run (#32)."
     },
     {
       "metric": "frame_frame_ms_max",
       "kind": "time",
-      "value": 36.3,
+      "value": 14.06,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A frame dragged across the middle of the 10,000-stroke canvas at everything over 240 frames: each frame fits the smallest covering scale and places the ghost frame and its label; the last places the frame. New with #8. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 5.65 from one run (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 19 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A frame dragged across the middle of the 10,000-stroke canvas at everything over 240 frames: each frame fits the smallest covering scale and places the ghost frame and its label; the last places the frame. New with #8. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 5.65 from one run (#32)."
     },
     {
       "metric": "loupe_frame_ms_p50",
       "kind": "time",
-      "value": 7.43,
+      "value": 6.44,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The measure tool's Pencil down and wandering over the 10,000-stroke canvas for 240 frames: each frame snaps the tip through the ink index (PointSnap) and moves the loupe, which shows the tiles already drawn, never a second render. New with #8. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 4.43 from one run (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 19 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The measure tool's Pencil down and wandering over the 10,000-stroke canvas for 240 frames: each frame snaps the tip through the ink index (PointSnap) and moves the loupe, which shows the tiles already drawn, never a second render. New with #8. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 4.43 from one run (#32)."
     },
     {
       "metric": "loupe_frame_ms_p95",
       "kind": "time",
-      "value": 20.72,
+      "value": 11.46,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The measure tool's Pencil down and wandering over the 10,000-stroke canvas for 240 frames: each frame snaps the tip through the ink index (PointSnap) and moves the loupe, which shows the tiles already drawn, never a second render. New with #8. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 6.04 from one run (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 19 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The measure tool's Pencil down and wandering over the 10,000-stroke canvas for 240 frames: each frame snaps the tip through the ink index (PointSnap) and moves the loupe, which shows the tiles already drawn, never a second render. New with #8. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 6.04 from one run (#32)."
     },
     {
       "metric": "loupe_frame_ms_max",
       "kind": "time",
-      "value": 39.25,
+      "value": 26.67,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The measure tool's Pencil down and wandering over the 10,000-stroke canvas for 240 frames: each frame snaps the tip through the ink index (PointSnap) and moves the loupe, which shows the tiles already drawn, never a second render. New with #8. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe. Was 7.69 from one run (#32)."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 19 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The measure tool's Pencil down and wandering over the 10,000-stroke canvas for 240 frames: each frame snaps the tip through the ink index (PointSnap) and moves the loupe, which shows the tiles already drawn, never a second render. New with #8. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings. Was 7.69 from one run (#32)."
     },
     {
       "metric": "frame_frame_ms_p50_release",
@@ -705,12 +681,11 @@
     {
       "metric": "sheet_pan_frame_ms_p50",
       "kind": "time",
-      "value": 2.66,
+      "value": 2.46,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A made-up 36 x 24 sheet at 1/4\" = 1'-0\" placed in the middle of the canvas, its tiles drawn off the main thread, panned 6 pt a frame back and forth at zoom to the sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 14 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A made-up 36 x 24 sheet at 1/4\" = 1'-0\" placed in the middle of the canvas, its tiles drawn off the main thread, panned 6 pt a frame back and forth at zoom to the sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "sheet_pan_frame_ms_p95_release",
@@ -725,13 +700,12 @@
     {
       "metric": "sheet_pan_frame_ms_p95",
       "kind": "time",
-      "value": 4.98,
+      "value": 4.38,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A made-up 36 x 24 sheet at 1/4\" = 1'-0\" placed in the middle of the canvas, its tiles drawn off the main thread, panned 6 pt a frame back and forth at zoom to the sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 14 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A made-up 36 x 24 sheet at 1/4\" = 1'-0\" placed in the middle of the canvas, its tiles drawn off the main thread, panned 6 pt a frame back and forth at zoom to the sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "sheet_pan_frame_ms_max_release",
@@ -747,13 +721,12 @@
     {
       "metric": "sheet_pan_frame_ms_max",
       "kind": "time",
-      "value": 8.06,
+      "value": 6.73,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A made-up 36 x 24 sheet at 1/4\" = 1'-0\" placed in the middle of the canvas, its tiles drawn off the main thread, panned 6 pt a frame back and forth at zoom to the sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 14 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A made-up 36 x 24 sheet at 1/4\" = 1'-0\" placed in the middle of the canvas, its tiles drawn off the main thread, panned 6 pt a frame back and forth at zoom to the sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "sheet_pinch_frame_ms_p50_release",
@@ -768,12 +741,11 @@
     {
       "metric": "sheet_pinch_frame_ms_p50",
       "kind": "time",
-      "value": 4.71,
+      "value": 4.53,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The same sheet pinched in about 11x over 120 frames and back out. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 14 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The same sheet pinched in about 11x over 120 frames and back out. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "sheet_pinch_frame_ms_p95_release",
@@ -788,13 +760,12 @@
     {
       "metric": "sheet_pinch_frame_ms_p95",
       "kind": "time",
-      "value": 9.24,
+      "value": 8.47,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The same sheet pinched in about 11x over 120 frames and back out. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 14 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The same sheet pinched in about 11x over 120 frames and back out. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "sheet_pinch_frame_ms_max_release",
@@ -810,13 +781,12 @@
     {
       "metric": "sheet_pinch_frame_ms_max",
       "kind": "time",
-      "value": 16.8,
+      "value": 18.52,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The same sheet pinched in about 11x over 120 frames and back out. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 14 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. The same sheet pinched in about 11x over 120 frames and back out. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "sheet_draw_frame_ms_p50_release",
@@ -831,12 +801,11 @@
     {
       "metric": "sheet_draw_frame_ms_p50",
       "kind": "time",
-      "value": 3.12,
+      "value": 3.3,
       "unit": "ms",
       "tolerance": 0.25,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame stroke drawn with the pen over the same sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 14 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame stroke drawn with the pen over the same sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "sheet_draw_frame_ms_p95_release",
@@ -851,13 +820,12 @@
     {
       "metric": "sheet_draw_frame_ms_p95",
       "kind": "time",
-      "value": 5.94,
+      "value": 6.27,
       "unit": "ms",
       "tolerance": 0.4,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame stroke drawn with the pen over the same sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 14 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame stroke drawn with the pen over the same sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "sheet_draw_frame_ms_max_release",
@@ -873,13 +841,12 @@
     {
       "metric": "sheet_draw_frame_ms_max",
       "kind": "time",
-      "value": 31.76,
+      "value": 29.27,
       "unit": "ms",
       "tolerance": 0.25,
       "warn": false,
-      "scaled_by": "speed_probe_ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame stroke drawn with the pen over the same sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of the samples, each scaled to the reference runner by the speed probe."
+      "measured": "main and branches to 2026-11-04, GitHub xcode-27 hosted runner, Duo simulator captures job, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build; one launch in each of 14 CI runs, the newest 41730118496",
+      "note": "Main-thread busy time per display frame (DebugBenchmark), indicative only, on a shared simulator at 60 Hz. A 240-frame stroke drawn with the pen over the same sheet. New with #32. The stalls of #42 land in the maxes of the sheet scenarios, which is one reason maxes only record. The value is the upper quartile of those launches (a max, their median), not scaled: the probe does not follow this job's timings."
     },
     {
       "metric": "speed_probe_ms_release",
@@ -888,14 +855,6 @@
       "unit": "ms",
       "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Duo release benchmark job's steps (PART=release-benchmark), Xcode 27.2, iPhone Duo simulator iOS 27.1, Release (optimised, BENCHMARK flag) build; 12 samples, each the median of 3 launches: CI runs 41763939781 (6 jobs) and 41760453185 (6 sets)",
       "note": "The speed probe (DebugBenchmark): a fixed path stroked into a bitmap, no Vellum code in it, the median of five before each scenario. This is its value on the runner the Release timings are stated for. Across 12 samples each scenario's time rose with the probe at a slope of 1.00 (log-log, r 0.85), so perf-compare.py scales a timing's baseline by measured probe / this."
-    },
-    {
-      "metric": "speed_probe_ms",
-      "kind": "reference",
-      "value": 2.47,
-      "unit": "ms",
-      "measured": "perf/release-baselines 2026-11-04 GitHub xcode-27 hosted runner, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build, the benchmark alone as the Duo simulator captures job runs it; 4 jobs of 3 launches, CI run 41764008766",
-      "note": "The speed probe in a Debug build: the same fixed work. This is its value on the runner the Debug timings are stated for."
     }
   ]
 }

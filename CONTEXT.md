@@ -109,7 +109,7 @@ The number a sheet's title block gives it, such as M-101, read off the PDF page'
 _Avoid_: drawing number (a drawing's number is the index's), page number
 
 **Scale area**:
-A region of a sheet drawn at a scale of its own, such as a detail marked `SCALE: 1 1/2" = 1'-0"` on an AS NOTED sheet. The sheet is placed at its main scale; inside a scale area, Measure and Dimension read the area's scale, or printed inches marked NTS in an NTS area. Vellum finds them from the scales written under the details and outlines them on the sheet. They are on the paper, so they always turn with it, and their labels stay level.
+A region of a sheet drawn at a scale of its own, such as a detail marked `SCALE: 1 1/2" = 1'-0"` on an AS NOTED sheet. The sheet is placed at its main scale; inside a scale area, Measure and Dimension read the area's scale, or printed inches marked NTS in an NTS area. Where sheets overlap, a scale area reads only where its sheet is the topmost under the point, except that an NTS area reads NTS under any sheet. Vellum finds them from the scales written under the details and outlines them on the sheet. They are on the paper, so they always turn with it, and their labels stay level.
 _Avoid_: viewport, detail sheet, crop
 
 **Drawing scale**:

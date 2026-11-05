@@ -13,7 +13,9 @@ final class SpeedCheckRecorder {
     private(set) var gestures: [SpeedCheckGesture] = []
     @ObservationIgnored private var nextID = 0
 
+    /// Keeps a finished gesture; one too short to have a gap between two frames says nothing and is let go.
     func add(_ gesture: GestureTiming.Finished) {
+        guard gesture.summary.frames > 1 else { return }
         nextID += 1
         let parts = Calendar.current.dateComponents([.hour, .minute], from: gesture.startedAt)
         let timed = SpeedCheckGesture(id: nextID, kind: gesture.kind, overSheet: gesture.overSheet, hour: parts.hour ?? 0,

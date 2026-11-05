@@ -52,6 +52,10 @@ _Avoid_: group, highlight
 The switch in Settings, off by default and kept on the Duo, that lets one finger draw, erase or use the selected tool as the Pencil does, with two fingers left to pan and pinch. A finger stroke is ink only once it is clearly one finger: a second finger landing within 130 ms of the first cancels it and becomes a pan or pinch, with nothing saved.
 _Avoid_: finger mode, touch drawing, palm rejection (the Pencil needs none of this)
 
+**Speed check**:
+The switch in Settings, off by default and kept on the Duo, that times each pan and pinch on a canvas from touch-down to the fingers lifting: frames drawn, frames missed, the worst gap, gaps over 50 ms, and what ran on the main thread before the worst few frames. It keeps only the numbers, the last ten gestures in memory and never the drawing, and Settings lists them with Copy all for pasting into an issue. While it is on the status bar shows a red dot.
+_Avoid_: profiler, benchmark (the benchmark is CI's), diagnostics
+
 **Markup colour**:
 What a colour of ink means to an agent: red is something to add, green is something to delete, blue is a note. Ink in other colours is a sketch.
 _Avoid_: pen colour, highlight

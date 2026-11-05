@@ -555,9 +555,10 @@ final class DebugBenchmark: NSObject {
                 totals[part.name] = (was.count + part.count, was.ms + part.ms, max(was.most, part.ms))
             }
         }
-        let busy = ledgerFrames.map(\.busyMs).sorted()
+        let busy = ledgerFrames.map(\.busyMs).sorted(), cpu = ledgerFrames.map { $0.cpuMs ?? 0 }.sorted()
         record("  main busy_ms median=\(format(percentile(busy, 0.5))) p95=\(format(percentile(busy, 0.95)))"
-            + " max=\(format(busy.last ?? 0)); parts " + order.map { name in
+            + " max=\(format(busy.last ?? 0)) cpu_ms median=\(format(percentile(cpu, 0.5)))"
+            + " p95=\(format(percentile(cpu, 0.95))) max=\(format(cpu.last ?? 0)); parts " + order.map { name in
                 let t = totals[name]!
                 return "\(name.replacingOccurrences(of: " ", with: "_"))=\(t.count)/\(format(t.ms))ms(most \(format(t.most)))"
             }.joined(separator: " "))

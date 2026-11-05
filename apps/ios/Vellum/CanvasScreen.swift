@@ -89,10 +89,11 @@ private struct CanvasLayer: View {
     let editor: CanvasEditor
     let isDark: Bool
     @AppStorage(FingerDrawingSetting.storageKey) private var fingerDraws = FingerDrawingSetting.default
+    @AppStorage(SpeedCheckSetting.storageKey) private var speedCheck = SpeedCheckSetting.default
 
     var body: some View {
         InkCanvasView(editor: editor, isDark: isDark, viewport: editor.viewport, units: editor.canvas.units,
-                      fingerDraws: fingerDraws, tool: editor.tool)
+                      fingerDraws: fingerDraws, tool: editor.tool, speedCheck: speedCheck)
     }
 }
 
@@ -601,8 +602,8 @@ private struct StatusBar: View {
             PenReadout(editor: editor)
             ScaleReadout(editor: editor)
             // The prompt always shows in full (#12): the status wording is kept short enough to leave it room.
-            ToolPrompt(editor: editor)
-                .fixedSize()
+            // The Speed check's mark (#42) takes only the room the prompt leaves.
+            PromptAndSpeedCheck(editor: editor)
                 .frame(maxWidth: .infinity, alignment: .leading)
             // The count takes the shortest wording that leaves everything else whole (#33).
             ViewThatFits(in: .horizontal) {
@@ -640,6 +641,40 @@ private struct StatusBar: View {
 
     private var counts: [String] {
         StatusBarText.counts(sheets: editor.canvas.sheets.count, frames: editor.frameCount)
+    }
+}
+
+/// The prompt, and while the Speed check is on (#42) a red dot and "Speed check" at the right of the room the prompt
+/// leaves, with no numbers. Its own view, so turning the switch redraws only this. The mark takes only that room: where
+/// it is tight the words go and the dot stays, so the position, the prompt and the count keep the room #43 and #47
+/// fitted them in. The dot holds still; a blinking one would draw frames of its own while the canvas is being timed.
+private struct PromptAndSpeedCheck: View {
+    let editor: CanvasEditor
+    @AppStorage(SpeedCheckSetting.storageKey) private var speedCheck = SpeedCheckSetting.default
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ToolPrompt(editor: editor)
+                .fixedSize()
+            if speedCheck {
+                Spacer(minLength: 0)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 5) {
+                        dot
+                        Text("Speed check").lineLimit(1).foregroundStyle(Chrome.secondaryText)
+                    }
+                    dot
+                }
+                .padding(.leading, 8)
+                .layoutPriority(1)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Speed check is on")
+            }
+        }
+    }
+
+    private var dot: some View {
+        Circle().fill(Color.red).frame(width: 8, height: 8)
     }
 }
 

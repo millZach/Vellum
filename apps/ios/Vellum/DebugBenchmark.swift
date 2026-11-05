@@ -77,6 +77,8 @@ final class DebugBenchmark: NSObject {
     /// Whether the warm-up waits for the ink tiles to finish drawing.
     private var holdsForTiles = false
     private var holdStart: CFTimeInterval = 0
+    /// What ran on the main thread before each measured frame (#42), one per entry in `intervals`.
+    private var ledgerFrames: [MainThreadFrame] = []
     /// The speed probe's time before each scenario.
     private var probes: [Double] = []
     private static let probePath: CGPath = {
@@ -419,6 +421,7 @@ final class DebugBenchmark: NSObject {
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
         self.observer = observer
+        MainThreadLedger.start()
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
@@ -437,6 +440,7 @@ final class DebugBenchmark: NSObject {
         intervals.removeAll()
         keptRedraws.removeAll()
         stepWork.removeAll()
+        ledgerFrames.removeAll()
         lastTimestamp = nil
         tickStart = nil
     }
@@ -478,7 +482,13 @@ final class DebugBenchmark: NSObject {
             if (view?.pendingRenderCount ?? 0) > 0, now - holdStart < Self.settleLimit { return }
             holdsForTiles = false
         }
-        if let last = lastTimestamp { intervals.append((link.timestamp - last) * 1000) }
+        if let last = lastTimestamp {
+            let interval = (link.timestamp - last) * 1000
+            intervals.append(interval)
+            if let ledger = MainThreadLedger.closeFrame(gapMs: interval, keep: true) { ledgerFrames.append(ledger) }
+        } else {
+            _ = MainThreadLedger.closeFrame(gapMs: 0, keep: false)
+        }
         lastTimestamp = link.timestamp
         expectedInterval = link.targetTimestamp - link.timestamp
         let scenario = scenarios[scenarioIndex]
@@ -521,6 +531,7 @@ final class DebugBenchmark: NSObject {
         let slowGaps = intervals.enumerated().filter { $0.element > expectedInterval * 1000 * 1.5 }
             .map { "\($0.offset):\(format($0.element))" }
         record("  slow work \(slowWork), long gaps \(slowGaps), kept redraws \(keptRedraws)")
+        reportLedger(gapOver: expectedInterval * 1000 * 1.5)
         // An optimised build's metrics end in _release, so both builds compare with their own baselines.
         #if DEBUG
         let suffix = ""
@@ -532,9 +543,56 @@ final class DebugBenchmark: NSObject {
         measurements["\(scenario.name)_frame_ms_max\(suffix)"] = sortedWork.last ?? 0
     }
 
+    /// What ran on the main thread (#42): each part's total over the scenario and its most in one frame, then for every
+    /// frame that came after a long gap, what ran before it. Gap n is between measured frames n and n + 1, as above.
+    private func reportLedger(gapOver longGap: Double) {
+        var totals: [String: (count: Int, ms: Double, most: Double)] = [:]
+        var order: [String] = []
+        for frame in ledgerFrames {
+            for part in frame.parts {
+                if totals[part.name] == nil { order.append(part.name) }
+                let was = totals[part.name] ?? (0, 0, 0)
+                totals[part.name] = (was.count + part.count, was.ms + part.ms, max(was.most, part.ms))
+            }
+        }
+        let busy = ledgerFrames.map(\.busyMs).sorted()
+        record("  main busy_ms median=\(format(percentile(busy, 0.5))) p95=\(format(percentile(busy, 0.95)))"
+            + " max=\(format(busy.last ?? 0)); parts " + order.map { name in
+                let t = totals[name]!
+                return "\(name.replacingOccurrences(of: " ", with: "_"))=\(t.count)/\(format(t.ms))ms(most \(format(t.most)))"
+            }.joined(separator: " "))
+        for (n, frame) in ledgerFrames.enumerated() where frame.gapMs > longGap {
+            record("  gap \(n): \(frame.text)")
+        }
+    }
+
+    /// What the Speed check adds to a frame's main-thread work, in microseconds (#42): a gesture's per-frame bookkeeping,
+    /// three parts timed, and the three run loop observers' work, 20,000 times, on the main thread, the mean.
+    private func speedCheckCost() -> Double {
+        let rounds = 20_000
+        var timing = GestureTiming(start: CACurrentMediaTime(), overSheet: true)
+        let start = CACurrentMediaTime()
+        for i in 0..<rounds {
+            MainThreadLedger.woke()
+            for part in [MainThreadLedger.Part.sheetPlan, .inkPlan, .viewMoved] {
+                let began = MainThreadLedger.begin()
+                MainThreadLedger.end(part, began)
+            }
+            timing.frame(timestamp: Double(i) / 120, interval: 1.0 / 120)
+            MainThreadLedger.willCommit()
+            MainThreadLedger.willSleep()
+        }
+        let perFrame = (CACurrentMediaTime() - start) / Double(rounds) * 1_000_000
+        timing.cancel()
+        return perFrame
+    }
+
     private func finish() {
         link?.invalidate()
         if let observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
+        let cost = speedCheckCost()
+        MainThreadLedger.stop()
+        record("speed_check_us_per_frame=\(format(cost)) (off: one branch per hook, nothing else)")
         #if !DEBUG
         measurements["speed_probe_ms_release"] = percentile(probes.sorted(), 0.5)
         #endif

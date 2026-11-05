@@ -13,6 +13,14 @@ struct VellumApp: App {
         if ProcessInfo.processInfo.arguments.contains("--ui-draw-with-finger") {
             UserDefaults.standard.register(defaults: [FingerDrawingSetting.storageKey: true])
         }
+        // `--ui-speed-check` turns the Speed check on for this launch only (#42), the same way, and
+        // `--ui-speed-check-gestures` lists two made-up timed gestures in Settings for its capture.
+        if ProcessInfo.processInfo.arguments.contains("--ui-speed-check") {
+            UserDefaults.standard.register(defaults: [SpeedCheckSetting.storageKey: true])
+        }
+        if ProcessInfo.processInfo.arguments.contains("--ui-speed-check-gestures") {
+            SpeedCheckRecorder.shared.addMadeUpGestures()
+        }
         #endif
     }
 

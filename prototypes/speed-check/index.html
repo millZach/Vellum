@@ -1,0 +1,155 @@
+<!doctype html>
+<!--
+  PROTOTYPE - throwaway. Never merge to main; kept at the tag prototype/speed-check. Ticket #42.
+  Question: how should a TestFlight build measure a pinch over a placed sheet on the real Duo?
+  Three variants of where the numbers show, switchable with ?v=A|B|C (and the bar at the bottom, or the arrow keys).
+    A  Status bar    the numbers for the last gesture sit in the canvas status bar, with Copy
+    B  In Settings   a dot while recording; the last gestures are listed in Settings, with Copy all
+    C  Live graph    a small panel over the canvas draws each frame as it happens, then the numbers and Copy
+  ?theme=dark for dark mode. Speed check is switched on in Settings (gear, top right). It is off by default.
+  The frame numbers are made up and play back the same each time. Nothing is measured and nothing is saved.
+  Plain HTML, CSS and JS, no dependencies.
+-->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Vellum: speed check (prototype)</title><link rel="icon" href="data:,">
+<style>
+:root{--ink:#1d1d1f;--mute:#6b6b70;--line:#d9d4c9;--paper:#f3efe6;--grid:#e6e1d5;--panel:#fbf9f5;--card:#fffdf9;--page:#ece8df;--accent:#2f5d8a;--accentBg:#e6edf5;--sheet:#ffffff;--sheetLine:#3b3b3f;--warn:#b3261e;--ok:#14713c;--group:#f2f2f7;--row:#ffffff;--shadow:0 1px 3px rgba(0,0,0,.14)}
+body.dark{--ink:#e8e6e1;--mute:#a9a9ae;--line:#3a3b40;--paper:#1c1d20;--grid:#2b2c31;--panel:#242529;--card:#1f2023;--page:#141416;--accent:#9cc4ec;--accentBg:#2c3a4a;--sheet:#232428;--sheetLine:#d5d3ce;--warn:#ff8a80;--ok:#6fdc9b;--group:#000000;--row:#1c1c1e;--shadow:0 1px 3px rgba(0,0,0,.5)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.4 -apple-system,system-ui,"SF Pro Text","Segoe UI",sans-serif}
+button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+main{max-width:985px;margin:0 auto;padding:12px 12px 90px}
+h1{font-size:20px;margin:0}.top{display:flex;gap:10px;justify-content:space-between;align-items:flex-start}
+.mute{color:var(--mute)}.small{font-size:13px}p{margin:4px 0 8px}
+.tog{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none}
+.tog button{border:0;background:transparent;min-height:44px;padding:0 12px;font-size:14px}
+.tog button[aria-pressed=true]{background:var(--accentBg);color:var(--accent);font-weight:600}
+.q{background:var(--card);border-radius:14px;padding:10px 12px;margin:10px 0;box-shadow:var(--shadow)}
+.q b{color:var(--accent)}
+#stage{position:relative;margin:10px auto;width:100%;max-width:951px;aspect-ratio:951/669;border-radius:12px;overflow:hidden;box-shadow:var(--shadow);background:var(--paper);user-select:none;-webkit-user-select:none}
+#cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.panel{position:absolute;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow)}
+#rail{left:8px;top:8px;width:54px;bottom:8px;border-radius:14px;display:flex;flex-direction:column;align-items:center;padding:5px 0;gap:3px;z-index:3}
+.rb{width:44px;height:44px;border:0;background:transparent;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0}
+.rb svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.rb.on{background:var(--accentBg);color:var(--accent)}
+#bar{left:70px;top:8px;right:8px;min-height:44px;border-radius:12px;display:flex;align-items:center;gap:6px;padding:0 6px 0 12px;font-size:14px;z-index:3}
+#bar b{flex:1 1 auto}
+#status{left:70px;right:8px;bottom:8px;min-height:34px;border-radius:12px;display:flex;align-items:center;gap:10px;padding:4px 6px 4px 11px;font-size:12.5px;z-index:3}
+#prompt{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#read{flex:none;font:12px ui-monospace,Menlo,Consolas,monospace;text-align:right}
+.chip{flex:none;display:flex;align-items:center;gap:6px;font:12px ui-monospace,Menlo,Consolas,monospace}
+.chip button,.copy{min-height:30px;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:0 10px;font:600 12.5px -apple-system,system-ui,sans-serif;color:var(--accent)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--warn);display:inline-block;animation:bl 1s infinite}
+@keyframes bl{50%{opacity:.25}}
+.warn{color:var(--warn);font-weight:600}.ok{color:var(--ok)}
+#pinch{position:absolute;z-index:4;left:50%;top:66px;transform:translateX(-50%);min-height:44px;padding:0 16px;border-radius:22px;border:1.5px dashed var(--accent);background:var(--card);color:var(--accent);font-weight:600;font-size:14px}
+#graph{right:8px;bottom:50px;width:300px;border-radius:12px;padding:8px 10px;z-index:4;display:none;font-size:12.5px}
+#graph svg{display:block;width:100%;height:70px}
+#graph .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+#graph .x{border:0;background:transparent;font-size:18px;min-width:30px;min-height:30px;padding:0;color:var(--mute)}
+#graph .nums{font:12px ui-monospace,Menlo,Consolas,monospace;margin:4px 0}
+/* iOS-style Settings sheet */
+#settings{position:absolute;inset:0;z-index:8;display:none;background:rgba(0,0,0,.28);align-items:center;justify-content:center}
+#settings.on{display:flex}
+.sheet{width:540px;max-width:92%;max-height:92%;overflow:auto;background:var(--group);border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.3)}
+.nav{display:flex;align-items:center;justify-content:center;position:relative;height:50px;font-weight:600;font-size:16px}
+.nav button{position:absolute;right:10px;border:0;background:transparent;color:var(--accent);font-weight:600;min-height:44px}
+.sec{margin:0 16px 18px}.sec h3{font-size:12.5px;font-weight:400;text-transform:uppercase;color:var(--mute);margin:0 0 6px 14px}
+.rows{background:var(--row);border-radius:10px;overflow:hidden}
+.r{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:44px;padding:6px 14px;border-top:.5px solid var(--line);font-size:15px}
+.r:first-child{border-top:0}.r .m{font:12px ui-monospace,Menlo,Consolas,monospace;color:var(--mute);text-align:right}
+.foot{font-size:12.5px;color:var(--mute);margin:6px 14px 0}
+.sw{width:51px;height:31px;border-radius:16px;background:#c7c7cc;border:0;position:relative;flex:none;padding:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .15s}
+.sw[aria-pressed=true]{background:#34c759}.sw[aria-pressed=true]::after{left:22px}
+.red{color:#ff3b30}.link{color:var(--accent)}
+/* prototype switcher, not part of the design */
+#sw{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:50;display:flex;align-items:center;gap:4px;background:#111;color:#fff;border-radius:24px;padding:4px;box-shadow:0 4px 18px rgba(0,0,0,.35);font:600 14px system-ui,sans-serif}
+#sw button{border:0;background:#333;color:#fff;border-radius:20px;min-width:44px;min-height:40px;font-size:18px}
+#sw span{padding:0 12px;white-space:nowrap}
+#toast{position:fixed;left:50%;top:14px;transform:translateX(-50%);background:#111;color:#fff;padding:8px 14px;border-radius:10px;font-size:13px;display:none;z-index:60;max-width:92%}
+</style></head><body>
+<main>
+<div class="top"><div><h1>Speed check for the Duo <span class="mute small">prototype, #42</span></h1>
+<p class="mute small">The pinch over a placed sheet sometimes stalls on the simulator. Nobody can time it on the real Duo without a Mac, so this is a way for a TestFlight build to time a gesture itself. Three places the numbers could show; flip with the black bar at the bottom.</p></div>
+<div class="tog" id="theme"><button data-t="light">Light</button><button data-t="dark">Dark</button></div></div>
+<div class="q" id="how"></div>
+<div id="stage">
+  <svg id="cv" viewBox="0 0 951 669"></svg>
+  <div id="rail" class="panel"></div>
+  <div id="bar" class="panel"><b>Site walk, Level 2</b><button class="rb" id="gear" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></button></div>
+  <button id="pinch">Pinch over the sheet</button>
+  <div id="graph" class="panel"></div>
+  <div id="status" class="panel"><span id="prompt">Pen. Draw on the canvas.</span><span id="right"></span></div>
+  <div id="settings"><div class="sheet" id="sheet"></div></div>
+</div>
+<p class="mute small">Pinch with the button, two fingers on the canvas, or Ctrl + scroll. The numbers are made up and play the same each time: 1.9 s at 120 Hz, 4 frames missed, worst gap 92.4 ms.</p>
+</main>
+<div id="sw"><button id="prev" aria-label="Previous variant">&#8249;</button><span id="lbl"></span><button id="next" aria-label="Next variant">&#8250;</button></div>
+<div id="toast"></div>
+<script>
+const V={A:'Status bar',B:'In Settings',C:'Live graph'},KEYS=Object.keys(V);
+const HOW={
+ A:'<b>A, Status bar.</b> With Speed check on, every pan and pinch is timed. When you lift your fingers, the status bar shows that gesture\'s numbers on its right, with Copy. Nothing else on screen changes.',
+ B:'<b>B, In Settings.</b> With Speed check on, a red dot in the status bar shows it is recording. The canvas shows no numbers. Open Settings to see the last ten gestures, with Copy all.',
+ C:'<b>C, Live graph.</b> With Speed check on, a small panel over the canvas draws a bar for each frame as you pinch. Red bars are missed frames. When you lift your fingers it shows the numbers and Copy; × hides it until the next gesture.'};
+const url=new URL(location.href);let v=KEYS.includes(url.searchParams.get('v'))?url.searchParams.get('v'):'A';
+let dark=url.searchParams.get('theme')==='dark',on=false,zoom=1,running=false,timed=[],last=null;
+// made-up frame times (ms) for one 1.9 s pinch at 120 Hz: mostly 8.3, a few one-frame misses, one long stall
+const FR=[];for(let i=0;i<224;i++)FR.push(8.33+((i*37)%7)*0.12);[[41,33.3],[97,92.4],[142,33.6],[181,41.7]].forEach(([i,ms])=>FR[i]=ms);
+const sum={dur:1.9,frames:228,missed:4,worst:92.4,over50:1};
+const $=id=>document.getElementById(id);
+function setUrl(){url.searchParams.set('v',v);dark?url.searchParams.set('theme','dark'):url.searchParams.delete('theme');window.history.replaceState(null,'',url)}
+function text(s,when){return `Vellum speed check, build 20261105.175835, Duo unfolded, ${when}: pinch over sheet M-101, ${s.dur} s, ${s.frames} frames at 120 Hz, ${s.missed} missed, worst gap ${s.worst} ms, gaps over 50 ms: ${s.over50}`}
+function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',2600)}
+function copy(t){navigator.clipboard?.writeText(t).catch(()=>{});toast('Copied: '+t)}
+function drawCanvas(){
+ const g=[];for(let x=0;x<=951;x+=24)g.push(`<line x1="${x}" y1="0" x2="${x}" y2="669" stroke="var(--grid)"/>`);for(let y=0;y<=669;y+=24)g.push(`<line x1="0" y1="${y}" x2="951" y2="${y}" stroke="var(--grid)"/>`);
+ const w=520*zoom,h=340*zoom,x=510-w/2,y=345-h/2,L=[];
+ for(let i=1;i<6;i++)L.push(`<line x1="${x+w*i/6}" y1="${y+h*.12}" x2="${x+w*i/6}" y2="${y+h*.78}" stroke="var(--sheetLine)" stroke-width=".8" opacity=".55"/>`);
+ for(let i=1;i<4;i++)L.push(`<line x1="${x+w*.06}" y1="${y+h*i/4.6}" x2="${x+w*.94}" y2="${y+h*i/4.6}" stroke="var(--sheetLine)" stroke-width=".8" opacity=".55"/>`);
+ $('cv').innerHTML=g.join('')+`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="var(--sheet)" stroke="var(--sheetLine)" stroke-width="1.4"/>`+L.join('')+
+ `<rect x="${x+w*.72}" y="${y+h*.84}" width="${w*.26}" height="${h*.13}" fill="none" stroke="var(--sheetLine)"/><text x="${x+w*.74}" y="${y+h*.93}" font-size="${11*zoom}" fill="var(--sheetLine)">M-101  1/4" = 1'-0"</text>`;
+}
+function rail(){const ic=['M4 20l4-1L19 8l-3-3L5 16z','M3 21h18M6 17l6-12 6 12','M4 12h16M12 4v16','M5 5h14v14H5z'];$('rail').innerHTML=ic.map((d,i)=>`<button class="rb${i?'':' on'}"><svg viewBox="0 0 24 24"><path d="${d}"/></svg></button>`).join('')}
+function graphSvg(n){const bw=280/224,b=[];b.push(`<line x1="0" y1="${70-8.33*0.6}" x2="280" y2="${70-8.33*0.6}" stroke="var(--ok)" stroke-dasharray="3 3"/>`);
+ for(let i=0;i<n;i++){const ms=FR[i],h=Math.min(68,ms*0.6);b.push(`<rect x="${i*bw}" y="${70-h}" width="${Math.max(bw-.2,.8)}" height="${h}" fill="${ms>16.7?'var(--warn)':'var(--mute)'}"/>`)}
+ return `<svg viewBox="0 0 280 70" preserveAspectRatio="none">${b.join('')}</svg>`}
+function graph(n,done){const g=$('graph');if(v!=='C'||!on||(n===0&&!done)){g.style.display='none';return}
+ g.style.display='block';g.innerHTML=`<div class="hd"><b>${done?'Last pinch':'Pinch: recording'}</b><button class="x" aria-label="Hide">×</button></div>${graphSvg(n)}`+
+ (done?`<div class="nums">${sum.dur} s · ${sum.frames} frames · <span class="warn">${sum.missed} missed</span> · worst ${sum.worst} ms</div><button class="copy">Copy</button>`:`<div class="nums mute">dashed line: one frame at 120 Hz</div>`);
+ g.querySelector('.x').onclick=()=>{g.style.display='none'};const c=g.querySelector('.copy');if(c)c.onclick=()=>copy(text(sum,last))}
+function status(rec){const r=$('right');r.className='chip';
+ if(!on){r.innerHTML='';return}
+ if(v==='A'){r.innerHTML=rec?'<span class="dot"></span> timing':last?`<span>Pinch ${sum.dur} s · <span class="warn">${sum.missed} missed</span> · worst ${sum.worst} ms</span><button>Copy</button>`:'<span class="mute">Speed check on</span>';const b=r.querySelector('button');if(b)b.onclick=()=>copy(text(sum,last))}
+ else if(v==='B'){r.innerHTML='<span class="dot"></span><span class="mute">Speed check</span>'}
+ else r.innerHTML=rec?'':'<span class="mute">Speed check on</span>'}
+function settings(){const rows=timed.slice(-10).reverse();
+ $('sheet').innerHTML=`<div class="nav">Settings<button id="done">Done</button></div>
+ <div class="sec"><h3>Drawing</h3><div class="rows"><div class="r">Draw with finger<button class="sw" aria-pressed="false"></button></div></div><div class="foot">Only the Apple Pencil draws. Fingers pan and pinch.</div></div>
+ <div class="sec"><h3>Speed</h3><div class="rows"><div class="r">Speed check<button class="sw" id="spd" aria-pressed="${on}"></button></div>`+
+ (v==='B'&&on?(rows.length?rows.map(h=>`<div class="r"><span>Pinch over sheet<br><span class="mute small">${h}</span></span><span class="m">${sum.dur} s · <span class="warn">${sum.missed} missed</span><br>worst ${sum.worst} ms</span></div>`).join('')+`<div class="r"><button class="copy" id="all">Copy all</button><button class="copy" id="clr" style="color:var(--warn)">Clear</button></div>`:'<div class="r mute small">No gestures timed yet. Pan or pinch on a canvas.</div>'):'')+
+ `</div><div class="foot">${on?'Vellum times each pan and pinch on this Duo and keeps only the numbers, never the drawing. Turn it off when you are done.':'Times each pan and pinch on this Duo, to find slow frames. Off unless you turn it on.'}</div></div>
+ <div class="sec"><h3>Dropbox</h3><div class="rows"><div class="r">Connected. Vellum can read and write your whole Dropbox.</div><div class="r red">Sign Out of Dropbox</div></div></div>`;
+ $('done').onclick=()=>$('settings').classList.remove('on');
+ $('spd').onclick=()=>{on=!on;if(!on){last=null}settings();status(false);graph(0,false);$('how').innerHTML=HOW[v]+(on?'':' <span class="mute">Turn Speed check on first: gear, top right.</span>')};
+ const a=$('all');if(a)a.onclick=()=>copy(timed.map(h=>text(sum,h)).join('\n'));const c=$('clr');if(c)c.onclick=()=>{timed=[];settings()}}
+function pinch(){if(running)return;running=true;let i=0;const z0=zoom,z1=zoom<1.25?1.45:0.85;status(true);
+ const step=()=>{i+=4;zoom=z0+(z1-z0)*Math.min(1,i/224);drawCanvas();if(on)graph(Math.min(i,224),false);
+  if(i<224)requestAnimationFrame(step);else{running=false;if(on){const t=new Date();last=t.toTimeString().slice(0,5);timed.push(last);status(false);graph(224,true);if(v==='B')toast('Timed. Open Settings to see it.')}}};
+ requestAnimationFrame(step)}
+function render(){document.body.classList.toggle('dark',dark);document.querySelectorAll('#theme button').forEach(b=>b.setAttribute('aria-pressed',(b.dataset.t==='dark')===dark));
+ $('lbl').textContent=`${v} — ${V[v]}`;$('how').innerHTML=HOW[v]+(on?'':' <span class="mute">Turn Speed check on first: gear, top right.</span>');
+ drawCanvas();status(false);graph(last&&v==='C'?224:0,!!last);if($('settings').classList.contains('on'))settings();setUrl()}
+function go(d){v=KEYS[(KEYS.indexOf(v)+d+KEYS.length)%KEYS.length];render()}
+$('prev').onclick=()=>go(-1);$('next').onclick=()=>go(1);
+addEventListener('keydown',e=>{if(e.target.closest('input,textarea,[contenteditable]'))return;if(e.key==='ArrowLeft')go(-1);if(e.key==='ArrowRight')go(1)});
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{dark=b.dataset.t==='dark';render()});
+$('gear').onclick=()=>{settings();$('settings').classList.add('on')};
+$('settings').onclick=e=>{if(e.target.id==='settings')$('settings').classList.remove('on')};
+$('pinch').onclick=pinch;
+$('cv').addEventListener('wheel',e=>{if(e.ctrlKey){e.preventDefault();pinch()}},{passive:false});
+$('cv').addEventListener('touchstart',e=>{if(e.touches.length===2){e.preventDefault();pinch()}},{passive:false});
+rail();render();
+</script></body></html>

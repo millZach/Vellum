@@ -47,6 +47,9 @@ final class CanvasEditor {
     private(set) var inkRevision = 0
     /// Where every stroke is, kept in step with the ink, for the eraser and the renderer (ADR-0012).
     @ObservationIgnored private(set) var inkIndex: InkIndex
+    /// Where each placed sheet's outline is, for snapping to sheets near the tip (#57). Built again only when the sheets
+    /// change, never per frame.
+    @ObservationIgnored private(set) var sheetIndex: SheetIndex
     /// Told what changed whenever the ink does, so the renderer redraws only that, without waiting on SwiftUI.
     @ObservationIgnored var onInkChange: (@MainActor (InkIndex.Change) -> Void)?
     /// Set once the view has its size and the starting zoom has been applied.
@@ -71,6 +74,7 @@ final class CanvasEditor {
         self.canvas = canvas
         self.session = session
         inkIndex = index ?? InkIndex(session.ink)
+        sheetIndex = SheetIndex(session.sheets)
         canUndo = session.canUndo
         canRedo = session.canRedo
         frameCount = session.frames.count
@@ -512,10 +516,11 @@ final class CanvasEditor {
     /// The paper a new frame is drawn on, chosen beside the top bar while the frame tool is in hand.
     var framePaper = PaperSize.defaultFrame
 
-    /// Where a tap at a canvas point lands: the nearest snap point within 20 screen points, found through the index, or the
-    /// point itself. `anchor` is the point being worked from, which perpendicular and tangent need (#40).
+    /// Where a tap at a canvas point lands: the nearest snap point within 20 screen points, found through the index, else
+    /// the nearest point on a placed sheet's edge (#57), or the point itself. `anchor` is the point being worked from, which
+    /// perpendicular and tangent need (#40).
     func snapTarget(at point: CanvasPoint, anchor: CanvasPoint? = nil) -> PointSnap.Target {
-        PointSnap.target(at: point, pointsPerInch: viewport.pointsPerInch, in: inkIndex, anchor: anchor)
+        PointSnap.target(at: point, pointsPerInch: viewport.pointsPerInch, in: inkIndex, sheets: sheetIndex, anchor: anchor)
     }
 
     /// A length between two points as the canvas shows it: in its units, or printed inches marked NTS on an NTS sheet.
@@ -584,7 +589,10 @@ final class CanvasEditor {
         guard !session.unsavedEvents.isEmpty else { return }
         let change = session.lastChange
         // First, so a dimension drawn again below reads against the sheets as they now stand (#44).
-        if change.touchesSheets { canvas.sheets = session.sheets }
+        if change.touchesSheets {
+            canvas.sheets = session.sheets
+            sheetIndex = SheetIndex(session.sheets)
+        }
         inkDidChange?(change)
         onInkChange?(inkIndex.apply(change))
         if change.touchesText { onTextsChange?(change) }

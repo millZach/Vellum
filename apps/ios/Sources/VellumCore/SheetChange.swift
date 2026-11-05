@@ -171,7 +171,8 @@ extension Sheet {
     public func markups(in index: InkIndex, texts: [TextBox], dimensions: [CanvasDimension], work: inout InkIndex.Work)
         -> CanvasSelection {
         let edges = SheetEdges(self)
-        let strokes = index.strokeIDs(in: InkIndex.Box(bounds), work: &work).filter { id in
+        // Grown by the edge allowance, so a stroke along an edge, just outside it on the grid, is looked at.
+        let strokes = index.strokeIDs(in: InkIndex.Box(bounds).grown(by: edgeAllowanceOnCanvas), work: &work).filter { id in
             guard let box = index.bounds(of: id), let stroke = index.stroke(id) else { return false }
             switch edges.relation(of: box) {
             case .inside: return true
@@ -191,13 +192,17 @@ extension Sheet {
     }
 }
 
-/// A sheet in its own frame: points turned back about its centre and measured from its corner, for what is on it.
+/// A sheet in its own frame: points turned back about its centre and measured from its corner, for what is on it. Its edges
+/// reach `Sheet.edgeAllowance` past the paper's, as `Sheet.contains` does, so a mark snapped along an edge, a fraction of an
+/// ink-grid step outside it, comes along when the sheet turns, moves or changes scale (#57, #49).
 private struct SheetEdges {
     let origin: CanvasPoint
     let centre: CanvasPoint
     let angle: Double
     let width: Double
     let height: Double
+    /// `Sheet.edgeAllowance` on the canvas.
+    let slack: Double
 
     enum Relation { case inside, outside, crossing }
 
@@ -207,6 +212,11 @@ private struct SheetEdges {
         angle = sheet.angle
         width = sheet.size.width.inches
         height = sheet.size.height.inches
+        slack = sheet.edgeAllowanceOnCanvas
+    }
+
+    private func isOn(_ p: (x: Double, y: Double)) -> Bool {
+        p.x >= -slack && p.x <= width + slack && p.y >= -slack && p.y <= height + slack
     }
 
     private func local(_ x: Double, _ y: Double) -> (x: Double, y: Double) {
@@ -219,8 +229,10 @@ private struct SheetEdges {
     func relation(of box: InkIndex.Box) -> Relation {
         let corners = [local(box.minX, box.minY), local(box.maxX, box.minY), local(box.maxX, box.maxY), local(box.minX, box.maxY)]
         let xs = corners.map(\.x), ys = corners.map(\.y)
-        if xs.allSatisfy({ $0 >= 0 && $0 <= width }), ys.allSatisfy({ $0 >= 0 && $0 <= height }) { return .inside }
-        if xs.max()! < 0 || xs.min()! > width || ys.max()! < 0 || ys.min()! > height { return .outside }
+        if corners.allSatisfy(isOn) { return .inside }
+        if xs.max()! < -slack || xs.min()! > width + slack || ys.max()! < -slack || ys.min()! > height + slack {
+            return .outside
+        }
         return .crossing
     }
 
@@ -236,18 +248,15 @@ private struct SheetEdges {
             on += length * shareOn(a, b)
             a = b
         }
-        if total == 0 {
-            let at = local(first.x.inches, first.y.inches)
-            return at.x >= 0 && at.x <= width && at.y >= 0 && at.y <= height
-        }
+        if total == 0 { return isOn(local(first.x.inches, first.y.inches)) }
         return on * 2 > total
     }
 
-    /// The share of a segment on the sheet: Liang and Barsky's clip against its four edges.
+    /// The share of a segment on the sheet: Liang and Barsky's clip against its four edges, each `slack` out.
     private func shareOn(_ a: (x: Double, y: Double), _ b: (x: Double, y: Double)) -> Double {
         var enter = 0.0, leave = 1.0
         let (dx, dy) = (b.x - a.x, b.y - a.y)
-        for (p, q) in [(-dx, a.x), (dx, width - a.x), (-dy, a.y), (dy, height - a.y)] {
+        for (p, q) in [(-dx, a.x + slack), (dx, width + slack - a.x), (-dy, a.y + slack), (dy, height + slack - a.y)] {
             if p == 0 {
                 if q < 0 { return 0 }
             } else if p < 0 {

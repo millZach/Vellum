@@ -68,6 +68,9 @@ final class DebugBenchmark: NSObject {
     private var keptRedraws: [String] = []
     /// The made-up sheet the sheet scenarios place over the canvas.
     private var sheet: CanvasEditor.PendingSheet?
+    /// The placed sheet's left edge on screen, top corner to bottom, for the `sheet_snap` scenario (#57).
+    private var edgeFrom = CGPoint.zero
+    private var edgeTo = CGPoint.zero
     private var placedSheet: Sheet?
     /// Sheet tiles asked for when the turn's measured frames began.
     private var tilesBeforeTurn = 0
@@ -302,6 +305,34 @@ final class DebugBenchmark: NSObject {
             // quarter turn: a turn is one transform, and no sheet tile is drawn. Picking the sheet up lifts what comes along
             // out of the ink tiles in the warm-up, which waits for them to redraw; the last frame saves the turn as one record.
             turnScenario(name: "sheet_turn"),
+            // #57: the measure tool's Pencil down and wandering back and forth across the placed sheet's left edge, from
+            // its top corner to its bottom one: each frame snaps the tip through the ink index and the sheet index, to a
+            // sheet corner or a sheet edge or the ink, and moves the loupe. Lifted on the last frame, which takes the point.
+            Scenario(name: "sheet_snap", frames: 240, setUp: { b in
+                b.zoomToSheet()
+                b.editor.tool = .measure
+                guard let view = b.view, let corners = b.editor.sheets.last?.corners else { return }
+                // Out a little, so the edge is clear of the rail and the bars.
+                b.editor.viewport.zoom(by: 0.7, about: ScreenPoint(x: Double(view.bounds.midX), y: Double(view.bounds.midY)))
+                view.viewportJumped()
+                let top = b.editor.viewport.screenPoint(for: corners[0]), bottom = b.editor.viewport.screenPoint(for: corners[3])
+                b.edgeFrom = CGPoint(x: top.x, y: top.y)
+                b.edgeTo = CGPoint(x: bottom.x, y: bottom.y)
+                b.strokePoint = b.edgeFrom
+                _ = view.beginInput(at: b.strokePoint)
+            }, step: { b, i in
+                guard let view = b.view else { return }
+                let t = CGFloat(i) / 239, across = 14 * sin(CGFloat(i) / 6)
+                let (dx, dy) = (b.edgeTo.x - b.edgeFrom.x, b.edgeTo.y - b.edgeFrom.y)
+                let length = max(hypot(dx, dy), 1)
+                b.strokePoint = CGPoint(x: b.edgeFrom.x + dx * t - dy / length * across,
+                                        y: b.edgeFrom.y + dy * t + dx / length * across)
+                if i == 239 {
+                    view.endInput(samples: [b.strokePoint], keep: true)
+                } else {
+                    view.moveInput(samples: [b.strokePoint], predicted: [])
+                }
+            }, tearDown: { b in b.editor.tool = .pen }),
         ]
     }
 

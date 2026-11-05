@@ -153,8 +153,15 @@ A line of a dimension that runs from just off a point dimensioned to just past t
 _Avoid_: witness line, projection line
 
 **Snap point**:
-A point on the ink that a measure, dimension or shape's tap takes when it lands within 20 screen points of one: an end, corner, centre, mid, intersection, perpendicular or tangent, all always on, the nearest winning; otherwise the tap takes the point under the tip. Perpendicular and tangent work from a point already placed, so a first point has neither. Snap points are worked out from a stroke's points, on the ink and never on a sheet's or scale area's edge.
+A point that a measure, dimension or shape's tap takes when it lands within 20 screen points of one: on the ink an end, corner, centre, mid, intersection, perpendicular or tangent, and a placed sheet's sheet corner, all always on, the nearest winning. Where no point is in reach, a sheet edge catches; otherwise the tap takes the point under the tip. Perpendicular and tangent work from a point already placed, so a first point has neither. Ink's snap points are worked out from a stroke's points. A sheet gives only its outline: lines printed in its PDF and its scale areas' edges are never snapped to.
 _Avoid_: snap (a snap straightens a stroke), osnap, grip
+
+**Sheet corner**:
+One of the four corners of a placed sheet's paper, at whatever angle the sheet stands, taken as a snap point like an ink corner. The loupe names it "Sheet corner".
+
+**Sheet edge**:
+Anywhere along one of a placed sheet's four edges, taken by a tap within 20 screen points of it when no snap point is in reach: a point beats an edge, since the tip is nearly always nearer a whole line than a point beside it. The nearest edge wins, the topmost sheet's on a tie. The middle of an edge is not a point of its own. The loupe names it "Sheet edge". A mark on an edge reads the sheet's scale, or its scale area's where one runs along it, and comes along when the sheet turns, moves or changes scale, through any number of turns and any scale change: a point within 1/1024 printed inch of a sheet's or scale area's edge counts as on it.
+_Avoid_: border, page edge
 
 **Loupe**:
 The magnifier that shows the canvas under the Pencil or finger, three times larger, while a measure's, dimension's or shape's point is being found, with the snap point marked and named. It moves aside rather than sliding under the chrome. The point is taken when the tip lifts.

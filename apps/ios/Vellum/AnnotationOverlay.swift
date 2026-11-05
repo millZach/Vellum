@@ -645,7 +645,8 @@ final class AnnotationOverlay {
             // Where the tip snaps: its kind's mark, named in the loupe (#40); cross hairs on blank canvas.
             if let tip = tool.tip {
                 let s = screen(tip.target.point)
-                marker.path = tip.target.kind.map { SnapMarker.path($0, at: s, size: 6) } ?? Self.crossHairs(at: s)
+                marker.path = tip.target.kind.map { SnapMarker.path($0, at: s, size: 6, along: tip.target.along) }
+                    ?? Self.crossHairs(at: s)
             } else {
                 marker.path = nil
             }

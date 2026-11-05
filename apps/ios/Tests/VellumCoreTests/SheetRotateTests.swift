@@ -326,7 +326,8 @@ final class SheetRotateTests: XCTestCase {
         }
     }
 
-    /// The allowance is one ink-grid step: a point clearly outside still reads outside, turned or not.
+    /// The allowance is 1/1024 printed inch (`Sheet.edgeAllowance`, #49): a point clearly outside still reads outside, turned
+    /// or not.
     func testAPointClearlyOutsideStillReadsOutside() {
         let sheet = edgeSheet(area: .drawn(.ratio(24)))
         // A hundredth of a printed inch: 655 grid steps at full size, far past the allowance.
@@ -361,10 +362,13 @@ final class SheetRotateTests: XCTestCase {
     }
 
     func testMarkupsWithMoreThanHalfTheirLengthOnTheSheetComeAlong() {
-        // The sheet covers 0 to 1,728 across and 0 to 1,152 down.
+        // The sheet covers 0 to 1,728 across and 0 to 1,152 down, and its edges reach `Sheet.edgeAllowance` further:
+        // 1/1024 printed inch, 0.046875 inch on the canvas at 1/4" = 1'-0" (#49).
         let sheet = plan(at: .origin)
+        let reach = sheet.edgeAllowanceOnCanvas
+        XCTAssertEqual(reach, 0.046875)
         let mostlyOn = stroke(1, [at(1_600, 100), at(1_800, 100)])    // 128 of 200 on
-        let half = stroke(2, [at(1_628, 200), at(1_828, 200)])        // exactly half: stays
+        let half = stroke(2, [at(1_628 + reach, 200), at(1_828 + reach, 200)])    // exactly half: stays
         let mostlyOff = stroke(3, [at(1_700, 300), at(1_900, 300)])
         let inside = stroke(4, [at(10, 10), at(20, 20), at(30, 10)])
         let outside = stroke(5, [at(-500, -500), at(-400, -400)])

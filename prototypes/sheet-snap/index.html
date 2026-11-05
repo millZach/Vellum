@@ -1,0 +1,237 @@
+<!doctype html>
+<!--
+  PROTOTYPE - throwaway. Never merge to main; kept on the branch prototype/sheet-snap.
+  #57: Measure, Dimension and the line and shape tool catch a placed sheet's outline (corners and anywhere along its edges),
+  at any angle the sheet stands at. Settled by Zach, not asked here: page outline only; lines printed inside the PDF,
+  scale area edges and sheet-to-sheet alignment are out.
+
+  Three questions. Picks go in the URL: ?q1=A&q2=A&q3=A&theme=dark
+  q1 Point against edge   A points first   B nearest wins   C edges catch closer
+  q2 Loupe names          A Sheet corner   B Corner         C M-101 corner
+  q3 Edge midpoint        A no             B yes, as a point
+
+  Made-up sheets and ink, in feet. Mouse, finger or Pencil measures or draws; the wheel or the buttons zoom.
+  Plain HTML, CSS and JS, no dependencies.
+-->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vellum: snap to a sheet's outline (prototype)</title><link rel="icon" href="data:,">
+<style>
+:root{--ink:#1d1d1f;--mute:#6b6b70;--line:#d9d4c9;--paper:#f3efe6;--sheet:#ffffff;--printed:#b9b4aa;--panel:#fbf9f5;--card:#fffdf9;--page:#ece8df;--accent:#2f5d8a;--accentBg:#e6edf5;--teal:#0b8a83;--pen:#1f3f8f;--shadow:0 1px 5px rgba(0,0,0,.12)}
+body.dark{--ink:#e8e6e1;--mute:#a9a9ae;--line:#3a3b40;--paper:#1c1d20;--sheet:#2a2b2f;--printed:#5d5f66;--panel:#242529;--card:#1f2023;--page:#141416;--accent:#9cc4ec;--accentBg:#2c3a4a;--teal:#4fd1c7;--pen:#8fb2ff;--shadow:0 1px 5px rgba(0,0,0,.5)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.4 -apple-system,system-ui,"SF Pro Text","Segoe UI",sans-serif}
+button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+main{max-width:985px;margin:0 auto;padding:14px 14px 40px}
+h1{font-size:20px;margin:0}.top{display:flex;gap:12px;justify-content:space-between;align-items:flex-start}
+.mute{color:var(--mute)}.small{font-size:13px}p{margin:4px 0 8px}
+.tog{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none}
+.tog button{border:0;background:transparent;min-height:34px;padding:0 11px;font-size:14px}
+.tog button[aria-pressed=true]{background:var(--accentBg);color:var(--accent);font-weight:600}
+.q{background:var(--card);border-radius:14px;padding:10px 12px;margin:10px 0;box-shadow:var(--shadow)}
+.q h2{font-size:15.5px;margin:0 0 6px}
+.seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.seg.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.seg button{border:1.5px solid var(--line);background:transparent;border-radius:10px;padding:6px 9px;text-align:left;font-size:13.5px;min-height:40px}
+.seg button b{color:var(--mute);margin-right:5px}
+.seg button[aria-pressed=true]{border-color:var(--accent);background:var(--accentBg)}
+.seg button[aria-pressed=true] b{color:var(--accent)}
+.desc{margin:6px 0 0;font-size:13.5px}
+#fit{position:relative;margin:12px 0;border-radius:12px;overflow:hidden;box-shadow:var(--shadow);width:100%}
+#stage{position:absolute;left:0;top:0;width:951px;height:669px;transform-origin:0 0;background:var(--paper);user-select:none;-webkit-user-select:none;overflow:hidden}
+#stage canvas{position:absolute;inset:0;width:951px;height:669px;display:block;touch-action:none}
+.panel{position:absolute;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow)}
+#rail{left:9px;top:8px;width:54px;height:652px;border-radius:14px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0}
+.rb{flex:none;width:42px;height:38px;border:0;background:transparent;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0}
+.rb svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.rb[disabled]{opacity:.38;cursor:not-allowed}.rb.on{background:var(--accentBg);color:var(--accent)}
+#bar{left:72px;top:8px;height:40px;border-radius:12px;display:flex;align-items:center;gap:13px;padding:0 12px;font-size:14px}
+#turns{position:absolute;left:72px;top:53px;display:flex;align-items:center;gap:1px;padding:2px;border-radius:10px;font-size:12.5px}
+#turns label{padding:0 7px;color:var(--mute);font-size:12px}
+#turns button{border:0;background:transparent;border-radius:8px;padding:0 9px;height:28px;font-size:12.5px}
+#turns button.on{background:var(--accentBg);color:var(--accent);font-weight:600}
+#zoom{position:absolute;right:92px;top:8px;display:flex;gap:5px}
+#zoom button{height:36px;min-width:36px;border:1px solid var(--line);background:var(--panel);border-radius:9px;font-size:14px;padding:0 9px}
+#sys{position:absolute;right:2px;top:0;bottom:0;width:70px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+#sys i{font-style:normal;writing-mode:vertical-rl;font-size:11px;color:var(--mute);opacity:.7}
+#status{left:72px;bottom:9px;width:786px;height:34px;border-radius:12px;display:flex;align-items:center;gap:16px;padding:0 11px;font-size:12.5px;white-space:nowrap;overflow:hidden}
+#prompt{flex:1 1 auto;color:var(--mute);text-align:center;overflow:hidden;text-overflow:ellipsis}
+#state{background:var(--card);border-radius:12px;padding:9px 12px;font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace;box-shadow:var(--shadow);overflow-wrap:anywhere;min-height:44px}
+ol{margin:6px 0 0;padding-left:20px;font-size:14px}li{margin:2px 0}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0 0}.row .btn{min-height:34px;border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:0 11px;font-size:13.5px}
+@media(max-width:620px){.seg{grid-template-columns:1fr}.seg.two{grid-template-columns:1fr 1fr}}
+</style></head><body><main>
+<div class="top"><div><h1>Vellum: snap to a sheet's outline</h1>
+<p class="mute small">Prototype for #57, nothing is saved. Measure, Dimension and the line and shape tool catch a placed sheet's four corners and anywhere along its four edges, at any angle. Lines printed inside the PDF don't catch, as you decided. Pick A, B or C below and try it on the canvas, laid out at the Duo's real 951 &times; 669. It opens on the ones I recommend. Mouse, finger or Pencil measures; hold still to read the loupe.</p></div>
+<div class="tog" id="theme"><button data-t="light">Light</button><button data-t="dark">Dark</button></div></div>
+<div id="qs"></div>
+<div id="fit"><div id="stage">
+  <canvas id="cv" width="951" height="669"></canvas>
+  <div class="panel" id="rail"></div>
+  <div class="panel" id="bar"><span>&#8249;</span><b>Plant layout (made up)</b><span>ft-in</span></div>
+  <div class="panel" id="turns"><label>Turn M-101</label></div>
+  <div id="zoom"><button id="zout" aria-label="Zoom out">&minus;</button><button id="zin" aria-label="Zoom in">+</button><button id="zfit">Fit</button></div>
+  <div id="sys"><i>Duo's side bar</i></div>
+  <div class="panel" id="status"><span id="prompt"></span></div>
+</div></div>
+<div class="row"><button class="btn" id="clear">Clear what I measured and drew</button></div>
+<h2 style="font-size:15.5px;margin:12px 0 2px">What just happened</h2><div id="state">Nothing yet.</div>
+<h2 style="font-size:15.5px;margin:14px 0 2px">Try these</h2>
+<ol>
+<li>On <b>Measure</b>, bring the tip to the top-left corner of the drawn box, which sits just inside M-101's top edge. Then try it on each answer to question 1.</li>
+<li>Do the same with the end of the pipe line near M-101's bottom edge.</li>
+<li>Measure M-101's bottom edge from corner to corner: 96'-0". Turn it to 33.5&deg; and measure it again.</li>
+<li>Measure from a point anywhere along M-101's right edge to D-501's left edge: the gap between the two sheets.</li>
+<li>Pick <b>Line</b> and draw from a sheet corner to a point on an edge. The new line's ends then catch like any other ink.</li>
+</ol>
+</main>
+<script>
+"use strict";
+const $=s=>document.querySelector(s), W=951, H=669, cv=$('#cv'), ctx=cv.getContext('2d');
+const Q={
+ q1:{t:'1. A sheet edge and a point are both near the tip. Which catches?',o:{
+  A:['Points first','Any point within 20 pt wins over an edge: an ink end or corner, a sheet corner, a crossing. An edge catches only where no point is near. The edge never hides a point; you reach the edge a little away from them.'],
+  B:['Nearest wins','#40\'s rule unchanged. An edge is a whole line, so the tip is nearly always nearer to it than to a point beside it: an ink corner just inside a sheet is hard to hit.'],
+  C:['Edges catch closer','Points catch from 20 pt, edges only from 8 pt, and then the nearer wins. You touch an edge to catch it and come near a point; right on the edge, the edge still wins.']}},
+ q2:{t:'2. What does the loupe call them?',o:{
+  A:['Sheet corner, Sheet edge','Separate words from ink\'s Corner and End, so you know you caught the paper and not something drawn.'],
+  B:['Corner, Edge','The same words as ink. Shorter, but a sheet corner and a drawn box\'s corner read the same.'],
+  C:['M-101 corner, M-101 edge','Names the sheet by its number. Longest, but it tells you which sheet where two sit close.']}},
+ q3:{t:'3. Does the middle of a sheet edge catch as a point?',two:true,o:{
+  A:['No','Corners, and anywhere along an edge. What you asked for; halfway along a sheet you can measure.'],
+  B:['Yes, as a mid point','Like Mid on a drawn line: the middle of each edge is a point, and on question 1\'s A it wins over the edge.']}}
+};
+const REC={q1:'A',q2:'A',q3:'A'};
+const url=new URLSearchParams(location.search), pick={};
+for(const k in Q) pick[k]=Q[k].o[url.get(k)]?url.get(k):REC[k];
+let theme=url.get('theme')==='dark'?'dark':'light';
+function save(){const u=new URLSearchParams();for(const k in pick)u.set(k,pick[k]);u.set('theme',theme);history.replaceState(null,'','?'+u)}
+function buildQs(){const box=$('#qs');box.innerHTML='';
+ for(const k in Q){const q=Q[k],d=document.createElement('div');d.className='q';
+  d.innerHTML=`<h2>${q.t}</h2><div class="seg${q.two?' two':''}">${Object.keys(q.o).map(o=>`<button data-k="${k}" data-o="${o}" aria-pressed="${pick[k]===o}"><b>${o}</b>${q.o[o][0]}${REC[k]===o?' <span class="mute small">(recommended)</span>':''}</button>`).join('')}</div><p class="desc">${q.o[pick[k]][1]}</p>`;
+  box.appendChild(d)}
+ box.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{pick[b.dataset.k]=b.dataset.o;save();buildQs();draw()})}
+function setTheme(t){theme=t;document.body.classList.toggle('dark',t==='dark');document.querySelectorAll('#theme button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.t===t));save();draw()}
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>setTheme(b.dataset.t));
+
+// ---- model, in feet. y grows downward on screen.
+const SHEETS=[
+ {id:'M-101',scale:'1/4" = 1\'-0"',w:96,h:72,cx:0,cy:0,ang:0},
+ {id:'D-501',scale:'1/2" = 1\'-0"',w:34,h:22,cx:67,cy:-9,ang:0}];
+const A=SHEETS[0];
+// Ink on M-101, in its own feet from its top-left corner; it turns with the sheet.
+const SHEET_INK=[
+ {k:'rect',a:[60,1.1],b:[76,12]},
+ {k:'line',a:[8,70.9],b:[40,70.9]},
+ {k:'line',a:[22,18],b:[22,50]}];
+let canvasInk=[], measures=[];
+function cs(){const c=getComputedStyle(document.body);return n=>c.getPropertyValue(n).trim()}
+function rot(s,x,y){const t=s.ang*Math.PI/180,c=Math.cos(t),n=Math.sin(t);return[x*c+y*n,-x*n+y*c]}
+function toWorld(s,lx,ly){const[x,y]=rot(s,lx-s.w/2,ly-s.h/2);return[s.cx+x,s.cy+y]}
+function toLocal(s,wx,wy){const t=-s.ang*Math.PI/180,c=Math.cos(t),n=Math.sin(t),x=wx-s.cx,y=wy-s.cy;return[x*c+y*n+s.w/2,-x*n+y*c+s.h/2]}
+function corners(s){return[[0,0],[s.w,0],[s.w,s.h],[0,s.h]].map(p=>toWorld(s,...p))}
+// ---- view
+const V={s:4.6,ox:430,oy:330};
+function fitView(){V.s=4.6;V.ox=430;V.oy=330}
+const toS=(x,y)=>[V.ox+V.s*x,V.oy+V.s*y], toW=(x,y)=>[(x-V.ox)/V.s,(y-V.oy)/V.s];
+// ---- format a length in feet as ft-in to 1/16"
+function ftin(f){let t=Math.round(f*12*16),ft=Math.floor(t/192);t-=ft*192;let i=Math.floor(t/16),n=t-i*16,d=16;while(n&&n%2===0){n/=2;d/=2}
+ return `${ft}'-${i}${n?' '+n+'/'+d:''}"`.replace('-0 ','-')}
+// ---- snapping, in stage points
+const R_POINT=20,R_EDGE_C=8;
+function inkWorld(){const out=[];for(const k of SHEET_INK){if(k.k==='rect'){const[a,b]=[k.a,k.b];out.push({k:'rect',p:[[a[0],a[1]],[b[0],a[1]],[b[0],b[1]],[a[0],b[1]]].map(p=>toWorld(A,...p))})}
+ else out.push({k:'line',p:[toWorld(A,...k.a),toWorld(A,...k.b)]})}
+ for(const l of canvasInk)out.push({k:'line',p:l});return out}
+function sheetName(s,kind){const n={corner:['Sheet corner','Corner',s.id+' corner'],edge:['Sheet edge','Edge',s.id+' edge'],mid:['Sheet mid','Mid',s.id+' mid']}[kind];return n[{A:0,B:1,C:2}[pick.q2]]}
+function nearestOnSeg(p,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],L=dx*dx+dy*dy;let t=L?((p[0]-a[0])*dx+(p[1]-a[1])*dy)/L:0;t=Math.max(0,Math.min(1,t));return[a[0]+t*dx,a[1]+t*dy]}
+function snapAt(sx,sy){
+ const pts=[],edges=[],tip=[sx,sy],d=(q)=>Math.hypot(q[0]-sx,q[1]-sy);
+ for(const k of inkWorld()){const P=k.p.map(p=>toS(...p));
+  if(k.k==='rect'){P.forEach((q,i)=>pts.push({q,w:k.p[i],name:'Corner'}))}
+  else{pts.push({q:P[0],w:k.p[0],name:'End'},{q:P[1],w:k.p[1],name:'End'});const m=[(k.p[0][0]+k.p[1][0])/2,(k.p[0][1]+k.p[1][1])/2];pts.push({q:toS(...m),w:m,name:'Mid'})}}
+ for(const s of SHEETS){const C=corners(s),P=C.map(p=>toS(...p));
+  P.forEach((q,i)=>pts.push({q,w:C[i],name:sheetName(s,'corner'),sheet:s}));
+  for(let i=0;i<4;i++){const a=P[i],b=P[(i+1)%4],q=nearestOnSeg(tip,a,b);edges.push({q,w:toW(...q),name:sheetName(s,'edge'),sheet:s,seg:[a,b]});
+   if(pick.q3==='B'){const m=[(C[i][0]+C[(i+1)%4][0])/2,(C[i][1]+C[(i+1)%4][1])/2];pts.push({q:toS(...m),w:m,name:sheetName(s,'mid'),sheet:s})}}}
+ const best=(L,r)=>{let b=null,bd=r;for(const c of L){const e=d(c.q);if(e<=bd){bd=e;b=c}}return b?{...b,dist:bd}:null};
+ const bp=best(pts,R_POINT);
+ if(pick.q1==='A')return bp||best(edges,R_POINT);
+ const be=best(edges,pick.q1==='C'?R_EDGE_C:R_POINT);
+ if(!bp)return be;if(!be)return bp;return be.dist<bp.dist?be:bp}
+// Which sheet a point reads: the topmost whose outline holds it, edges included (#49).
+function sheetAt(w){for(let i=SHEETS.length-1;i>=0;i--){const s=SHEETS[i],[x,y]=toLocal(s,...w),e=1e-6;if(x>=-e&&y>=-e&&x<=s.w+e&&y<=s.h+e)return s}return null}
+// ---- drawing
+function scene(c){const C=cs();
+ c.fillStyle=C('--paper');c.fillRect(-2000,-2000,5000,5000);
+ // canvas grid
+ c.strokeStyle=C('--line');c.globalAlpha=.35;c.lineWidth=1;const g=10*V.s;
+ for(let x=((V.ox%g)+g)%g;x<W;x+=g){c.beginPath();c.moveTo(x,0);c.lineTo(x,H);c.stroke()}
+ for(let y=((V.oy%g)+g)%g;y<H;y+=g){c.beginPath();c.moveTo(0,y);c.lineTo(W,y);c.stroke()}c.globalAlpha=1;
+ for(const s of SHEETS){const P=corners(s).map(p=>toS(...p));
+  c.save();c.shadowColor='rgba(0,0,0,.18)';c.shadowBlur=8;c.fillStyle=C('--sheet');c.beginPath();P.forEach((q,i)=>i?c.lineTo(...q):c.moveTo(...q));c.closePath();c.fill();c.restore();
+  c.strokeStyle=C('--printed');c.lineWidth=1;c.stroke();
+  // printed contents: border, title block, a few walls (these never catch)
+  const ln=(pts)=>{c.beginPath();pts.forEach((p,i)=>{const q=toS(...toWorld(s,...p));i?c.lineTo(...q):c.moveTo(...q)});c.stroke()};
+  const pin=s.w/(s.id==='M-101'?24:17); // feet per printed inch
+  const b=.5*pin;c.lineWidth=1.2;ln([[b,b],[s.w-b,b],[s.w-b,s.h-b],[b,s.h-b],[b,b]]);
+  ln([[s.w-b-4*pin,s.h-b],[s.w-b-4*pin,s.h-b-1.6*pin],[s.w-b,s.h-b-1.6*pin]]);
+  c.lineWidth=.8;if(s.id==='M-101'){ln([[14,10],[52,10],[52,40],[14,40],[14,10]]);ln([[33,10],[33,26]]);ln([[52,24],[84,24],[84,44]])}
+  else{ln([[4,4],[18,4],[18,14],[4,14],[4,4]]);ln([[22,6],[30,6],[30,12]])}
+  // label, level with the sheet
+  const L=toS(...toWorld(s,b+.4*pin,b+.5*pin));c.save();c.translate(...L);c.rotate(-s.ang*Math.PI/180);c.fillStyle=C('--mute');c.font='600 11px -apple-system,system-ui,sans-serif';c.fillText(`${s.id}  ${s.scale}`,0,0);c.restore()}
+ // ink
+ c.strokeStyle=C('--pen');c.lineWidth=2;c.lineCap='round';c.lineJoin='round';
+ for(const k of inkWorld()){c.beginPath();k.p.forEach((p,i)=>i?c.lineTo(...toS(...p)):c.moveTo(...toS(...p)));if(k.k==='rect')c.closePath();c.stroke()}
+ // measures
+ for(const m of measures)drawMeasure(c,m,C);
+ if(drag&&drag.b)drawMeasure(c,drag,C,true)}
+function drawMeasure(c,m,C,live){const a=toS(...m.a),b=toS(...m.b);
+ if(m.tool==='line'){c.strokeStyle=C('--pen');c.lineWidth=2;c.beginPath();c.moveTo(...a);c.lineTo(...b);c.stroke();return}
+ c.strokeStyle=C('--accent');c.lineWidth=1.5;c.setLineDash([6,4]);c.beginPath();c.moveTo(...a);c.lineTo(...b);c.stroke();c.setLineDash([]);
+ for(const q of[a,b]){c.fillStyle=C('--accent');c.beginPath();c.arc(...q,3,0,7);c.fill()}
+ const t=ftin(Math.hypot(m.b[0]-m.a[0],m.b[1]-m.a[1])),mx=(a[0]+b[0])/2,my=(a[1]+b[1])/2;
+ c.font='600 12px ui-monospace,Menlo,Consolas,monospace';const w=c.measureText(t).width+12;
+ c.fillStyle=C('--panel');c.strokeStyle=C('--accent');c.lineWidth=1;c.beginPath();c.roundRect(mx-w/2,my-21,w,20,6);c.fill();c.stroke();
+ c.fillStyle=C('--accent');c.textAlign='center';c.fillText(t,mx,my-7);c.textAlign='left'}
+function marker(c,sn,C,k){c.strokeStyle=C('--teal');c.lineWidth=2/k;const[x,y]=sn.q;
+ if(sn.seg){const[a,b]=sn.seg,dx=b[0]-a[0],dy=b[1]-a[1],L=Math.hypot(dx,dy),ux=dx/L,uy=dy/L,r=14/k;
+  c.beginPath();c.moveTo(x-ux*r,y-uy*r);c.lineTo(x+ux*r,y+uy*r);c.stroke();c.beginPath();c.moveTo(x-uy*6/k,y+ux*6/k);c.lineTo(x+uy*6/k,y-ux*6/k);c.stroke()}
+ else{const r=5/k;c.strokeRect(x-r,y-r,2*r,2*r)}}
+let tip=null,snap=null,drag=null,tool='measure';
+function draw(){const C=cs();ctx.save();scene(ctx);
+ if(snap)marker(ctx,snap,C,1);
+ if(snap&&tip){ // loupe: 3x, above the tip, moved aside near the top bar
+  const k=3,r=50,[sx,sy]=snap.q;let lx=sx,ly=sy-92;if(ly-r<56)ly=sy+92;lx=Math.max(72+r+4,Math.min(858-r,lx));
+  ctx.save();ctx.beginPath();ctx.arc(lx,ly,r,0,7);ctx.clip();ctx.translate(lx,ly);ctx.scale(k,k);ctx.translate(-sx,-sy);scene(ctx);marker(ctx,snap,C,k);ctx.restore();
+  ctx.strokeStyle=C('--line');ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(lx,ly,r,0,7);ctx.stroke();
+  ctx.font='600 12px -apple-system,system-ui,sans-serif';const w=ctx.measureText(snap.name).width+14,by=ly+r+4;
+  ctx.fillStyle=C('--teal');ctx.beginPath();ctx.roundRect(lx-w/2,by,w,20,10);ctx.fill();ctx.fillStyle=C('--card');ctx.textAlign='center';ctx.fillText(snap.name,lx,by+14);ctx.textAlign='left'}
+ ctx.restore();
+ $('#prompt').textContent=tool==='measure'?(drag?'Measure: lift on the second point':'Measure: drag from a point to a point'):(drag?'Line: lift on the end point':'Line: drag from a point to a point')}
+// ---- input
+function stagePt(e){const r=cv.getBoundingClientRect(),k=r.width/W;return[(e.clientX-r.left)/k,(e.clientY-r.top)/k]}
+function where(p){const sn=snapAt(...p);return{sn,w:sn?sn.w:toW(...p)}}
+function describe(w,sn){const s=sheetAt(w);return `${sn?sn.name:'no snap'}, reads ${s?s.id+' at '+s.scale:'the canvas'}`}
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);const p=stagePt(e),{sn,w}=where(p);tip=p;snap=sn;drag={tool,a:w,sa:sn,b:null};draw()});
+cv.addEventListener('pointermove',e=>{const p=stagePt(e);if(e.pointerType!=='mouse'&&!drag)return;const{sn,w}=where(p);tip=p;snap=sn;if(drag){drag.b=w;drag.sb=sn}draw()});
+cv.addEventListener('pointerleave',()=>{if(!drag){tip=snap=null;draw()}});
+function up(){if(!drag)return;const m=drag;drag=null;
+ if(m.b&&Math.hypot(m.b[0]-m.a[0],m.b[1]-m.a[1])*V.s>4){
+  if(m.tool==='line'){canvasInk.push([m.a,m.b]);$('#state').textContent=`Line drawn, ${ftin(Math.hypot(m.b[0]-m.a[0],m.b[1]-m.a[1]))}. Start: ${describe(m.a,m.sa)}. End: ${describe(m.b,m.sb)}. Its ends now catch as End.`}
+  else{measures.push(m);if(measures.length>4)measures.shift();$('#state').textContent=`Measured ${ftin(Math.hypot(m.b[0]-m.a[0],m.b[1]-m.a[1]))}. From: ${describe(m.a,m.sa)}. To: ${describe(m.b,m.sb)}.`}}
+ tip=snap=null;draw()}
+cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+cv.addEventListener('wheel',e=>{e.preventDefault();zoomAt(stagePt(e),Math.exp(-e.deltaY*.0015))},{passive:false});
+function zoomAt(p,f){const w=toW(...p);V.s=Math.max(1,Math.min(80,V.s*f));V.ox=p[0]-w[0]*V.s;V.oy=p[1]-w[1]*V.s;draw()}
+$('#zin').onclick=()=>zoomAt([465,330],1.5);$('#zout').onclick=()=>zoomAt([465,330],1/1.5);$('#zfit').onclick=()=>{fitView();draw()};
+$('#clear').onclick=()=>{measures=[];canvasInk=[];$('#state').textContent='Nothing yet.';draw()};
+// rail
+const ICON={pen:'<path d="M4 20l4-1 11-11-3-3L5 16z"/>',line:'<path d="M5 19L19 5"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/>',measure:'<path d="M3 15l12-12 6 6-12 12z"/><path d="M7 11l2 2M10 8l2 2M13 5l2 2"/>',dim:'<path d="M4 8v10M20 8v10M4 13h16"/><path d="M7 11l-3 2 3 2M17 11l3 2-3 2"/>'};
+function rail(){$('#rail').innerHTML=[['pen','Pen',1],['line','Line'],['measure','Measure'],['dim','Dimension (catches the same as Measure)',1]].map(([k,t,dis])=>`<button class="rb${tool===k?' on':''}" data-k="${k}" title="${t}" aria-label="${t}"${dis?' disabled':''}><svg viewBox="0 0 24 24">${ICON[k]}</svg></button>`).join('');
+ $('#rail').querySelectorAll('.rb:not([disabled])').forEach(b=>b.onclick=()=>{tool=b.dataset.k;rail();draw()})}
+function turns(){const box=$('#turns');box.querySelectorAll('button').forEach(b=>b.remove());
+ for(const a of[0,90,33.5,123.4]){const b=document.createElement('button');b.textContent=a+'°';b.className=A.ang===a?'on':'';b.onclick=()=>{A.ang=a;turns();draw()};box.appendChild(b)}}
+// fit the 951 x 669 stage to the page width
+function fit(){const f=$('#fit'),k=Math.min(1,f.clientWidth/W);$('#stage').style.transform=`scale(${k})`;f.style.height=H*k+'px'}
+addEventListener('resize',fit);
+buildQs();rail();turns();fit();setTheme(theme);
+</script></body></html>

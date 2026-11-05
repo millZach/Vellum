@@ -602,7 +602,7 @@ private struct StatusBar: View {
             PenReadout(editor: editor)
             ScaleReadout(editor: editor)
             // The prompt always shows in full (#12): the status wording is kept short enough to leave it room.
-            // The Speed check's mark (#42) takes only the room the prompt leaves.
+            // The Speed check's mark (#42) is drawn over the room the prompt leaves and takes none.
             PromptAndSpeedCheck(editor: editor)
                 .frame(maxWidth: .infinity, alignment: .leading)
             // The count takes the shortest wording that leaves everything else whole (#33).
@@ -644,38 +644,53 @@ private struct StatusBar: View {
     }
 }
 
-/// The prompt, and while the Speed check is on (#42) a red dot and "Speed check" at the right of the room the prompt
-/// leaves, with no numbers. Its own view, so turning the switch redraws only this. The mark takes only that room: where
-/// it is tight the words go and the dot stays, so the position, the prompt and the count keep the room #43 and #47
-/// fitted them in. The dot holds still; a blinking one would draw frames of its own while the canvas is being timed.
+/// The prompt, and while the Speed check is on (#42) its mark, with no numbers: a red dot and "Speed check" at the right of
+/// the room the prompt leaves when they fit there, or else a small red dot in the gap before the count. The mark is drawn over
+/// the bar and never laid out in it, so the position, the scale bar, the prompt and the count keep exactly the room #43
+/// and #47 fitted them in, with the switch on or off. Its own view, so turning the switch redraws only this. The dot
+/// holds still; a blinking one would draw frames of its own while the canvas is being timed.
 private struct PromptAndSpeedCheck: View {
     let editor: CanvasEditor
     @AppStorage(SpeedCheckSetting.storageKey) private var speedCheck = SpeedCheckSetting.default
+    @State private var promptWidth: CGFloat = 0
+    @State private var roomWidth: CGFloat = 0
+    /// The dot, the gap and the words at the bar's 12 points, measured once.
+    private static let wordsWidth: CGFloat = {
+        let words = ("Speed check" as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 12)]).width
+        return (8 + 5 + words).rounded(.up)
+    }()
+    /// Clear room kept between the prompt and the words.
+    private static let gap: CGFloat = 12
+
+    /// Whether the words fit in the room the prompt leaves.
+    var wordsFit: Bool { roomWidth - promptWidth >= Self.wordsWidth + Self.gap }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ToolPrompt(editor: editor)
-                .fixedSize()
-            if speedCheck {
-                Spacer(minLength: 0)
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 5) {
-                        dot
-                        Text("Speed check").lineLimit(1).foregroundStyle(Chrome.secondaryText)
+        ToolPrompt(editor: editor)
+            .fixedSize()
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { promptWidth = $0 }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { roomWidth = $0 }
+            .overlay(alignment: .trailing) {
+                if speedCheck {
+                    if wordsFit {
+                        HStack(spacing: 5) {
+                            dot(8)
+                            Text("Speed check").lineLimit(1).fixedSize().foregroundStyle(Chrome.secondaryText)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Speed check is on")
+                    } else {
+                        // In the 8-point gap before the count: clear of the prompt, which ends inside its room.
+                        dot(5)
+                            .offset(x: 6.5)
+                            .accessibilityLabel("Speed check is on")
                     }
-                    dot
                 }
-                .padding(.leading, 8)
-                .layoutPriority(1)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Speed check is on")
             }
-        }
     }
 
-    private var dot: some View {
-        Circle().fill(Color.red).frame(width: 8, height: 8)
-    }
+    private func dot(_ side: CGFloat) -> some View { Circle().fill(Color.red).frame(width: side, height: side) }
 }
 
 /// What the tool expects next. Its own view, holding the Draw with finger setting, so turning the switch redraws only

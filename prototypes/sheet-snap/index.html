@@ -135,7 +135,7 @@ function fitView(){V.s=4.6;V.ox=430;V.oy=330}
 const toS=(x,y)=>[V.ox+V.s*x,V.oy+V.s*y], toW=(x,y)=>[(x-V.ox)/V.s,(y-V.oy)/V.s];
 // ---- format a length in feet as ft-in to 1/16"
 function ftin(f){let t=Math.round(f*12*16),ft=Math.floor(t/192);t-=ft*192;let i=Math.floor(t/16),n=t-i*16,d=16;while(n&&n%2===0){n/=2;d/=2}
- return `${ft}'-${i}${n?' '+n+'/'+d:''}"`.replace('-0 ','-')}
+ return `${ft}'-${i}${n?' '+n+'/'+d:''}"`}
 // ---- snapping, in stage points
 const R_POINT=20,R_EDGE_C=8;
 function inkWorld(){const out=[];for(const k of SHEET_INK){if(k.k==='rect'){const[a,b]=[k.a,k.b];out.push({k:'rect',p:[[a[0],a[1]],[b[0],a[1]],[b[0],b[1]],[a[0],b[1]]].map(p=>toWorld(A,...p))})}

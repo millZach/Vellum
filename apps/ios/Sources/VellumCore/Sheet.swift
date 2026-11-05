@@ -212,16 +212,22 @@ public struct Sheet: Hashable, Sendable, Identifiable {
         canvasCorners(of: PaperRect(x: .inches(0), y: .inches(0), width: paper.width, height: paper.height))
     }
 
-    /// Whether a canvas point is on the sheet, within one ink-grid step of its edge (`inkGridStepOnPaper`).
+    /// Whether a canvas point is on the sheet, within `edgeAllowance` of its edge.
     public func contains(_ point: CanvasPoint) -> Bool {
         PaperRect(x: .inches(0), y: .inches(0), width: paper.width, height: paper.height)
-            .contains(paperPoint(at: point), within: inkGridStepOnPaper)
+            .contains(paperPoint(at: point), within: edgeAllowanceOnPaper)
     }
 
-    /// One step of the ink grid in printed inches of this sheet. A mark's points are kept on the grid, so a turn or a scale
-    /// change can leave one that lay exactly on an edge of the sheet or a scale area a fraction of a step past it. It must
-    /// still read as on it (#44): a mark on a scale area's edge would otherwise lose the area's scale, or its NTS.
-    private var inkGridStepOnPaper: Double { 1 / CanvasPoint.gridUnitsPerInch / canvasPerPrinted }
+    /// How far past an edge of the sheet or a scale area, in ink-grid steps on the canvas, a point still reads as on it:
+    /// 64 steps, 1/1024 inch, 64 times finer than the sixteenth the app shows. A mark's points are kept on the grid, so each
+    /// turn or scale change of the sheet rounds a point that lay exactly on an edge again, and a snap to a sheet's edge
+    /// (#57) rounds the point it takes. The roundings add up like a random walk: about 26 steps at worst after 1,000 turns
+    /// and 51 after 5,000 in a simulation, so 64 keeps a mark on an edge in its sheet and scale area through many turns (#49).
+    /// Without it a mark on a scale area's edge would lose the area's scale, or its NTS.
+    public static let edgeAllowance = 64 / CanvasPoint.gridUnitsPerInch
+
+    /// `edgeAllowance` in printed inches of this sheet.
+    private var edgeAllowanceOnPaper: Double { Self.edgeAllowance / canvasPerPrinted }
 
     /// Where a point on the sheet's paper lands on the canvas.
     public func canvasPoint(at paperPoint: PaperPoint) -> CanvasPoint {
@@ -248,7 +254,7 @@ public struct Sheet: Hashable, Sendable, Identifiable {
     public func area(at point: CanvasPoint) -> ScaleArea? {
         guard contains(point), !areas.isEmpty else { return nil }
         let onPaper = paperPoint(at: point)
-        return areas.last { $0.rect.contains(onPaper, within: inkGridStepOnPaper) }
+        return areas.last { $0.rect.contains(onPaper, within: edgeAllowanceOnPaper) }
     }
 
     /// The scale lengths read at a canvas point on this sheet: its scale area's, or the sheet's own.

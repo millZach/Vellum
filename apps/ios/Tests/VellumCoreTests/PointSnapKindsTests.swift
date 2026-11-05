@@ -22,7 +22,8 @@ final class PointSnapKindsTests: XCTestCase {
 
     func testEveryKindHasAName() {
         XCTAssertEqual(PointSnap.Kind.allCases.map(\.title),
-                       ["End", "Corner", "Centre", "Mid", "Intersection", "Perpendicular", "Tangent"])
+                       ["End", "Corner", "Centre", "Mid", "Intersection", "Perpendicular", "Tangent", "Sheet corner",
+                        "Sheet edge"])
     }
 
     func testMidIsTheMiddleOfAStraightRunDownToASixteenth() {
@@ -301,7 +302,8 @@ final class PointSnapKindsTests: XCTestCase {
 
     /// The budget for a snap lookup on a crowded canvas (docs/perf/baselines/canvas-rendering.json): the tip in a thicket of
     /// hand-drawn strokes crossing, zoomed out, with a point to work from. Crossings are looked for only near the tip, and a
-    /// pair that can't touch is never tested; the whole thicket would be millions of pairs.
+    /// pair that can't touch is never tested; the whole thicket would be millions of pairs. Since #57 the canvas holds
+    /// 1,002 made-up sheets: one under the thicket, a letter page in it, and 1,000 far off, which cost nothing.
     func testACrowdedSnapTestsOnlyPairsNearTheTip() {
         var session = InkSession()
         var totalSegments = 0
@@ -317,16 +319,25 @@ final class PointSnapKindsTests: XCTestCase {
             session.draw(stroke, tool: .pen, colour: .sketch, width: .inches(0.25))
         }
         let index = InkIndex(session.ink)
+        let far = (0..<1000).map { i in
+            Sheet(id: SheetID(3 + i), paper: .letter, scale: .notToScale,
+                  origin: p(100_000 + Double(i % 40) * 20, 100_000 + Double(i / 40) * 20))
+        }
+        let sheets = SheetIndex([Sheet(id: SheetID(1), paper: .inches(10, by: 10), scale: .drawn(.ratio(48))),
+                                 Sheet(id: SheetID(2), paper: .letter, scale: .notToScale, origin: p(200, 60))] + far)
         // A hundred points per screen at this zoom, and points to work from; the worst of a sweep across the thicket's edge.
         var worst = InkIndex.Work()
         for i in 0..<10 {
             let tip = p(150 + Double(i) * 17, 40 + Double(i) * 9)
             var work = InkIndex.Work()
-            _ = PointSnap.target(at: tip, pointsPerInch: 0.25, in: index, anchor: p(600, 600), work: &work)
+            _ = PointSnap.target(at: tip, pointsPerInch: 0.25, in: index, sheets: sheets, anchor: p(600, 600), work: &work)
             worst.segmentPairsTested = max(worst.segmentPairsTested, work.segmentPairsTested)
             worst.pointsInspected = max(worst.pointsInspected, work.pointsInspected)
             worst.strokesVisited = max(worst.strokesVisited, work.strokesVisited)
+            worst.sheetsVisited = max(worst.sheetsVisited, work.sheetsVisited)
         }
+        MeasureFrameBaseline.check("point_snap_crowded_sheets_visited_per_lookup", worst.sheetsVisited, area: "canvas-rendering",
+                                   before: sheets.count)
         MeasureFrameBaseline.check("point_snap_crowded_segment_pairs_per_lookup", worst.segmentPairsTested, area: "canvas-rendering",
                                    before: totalSegments * (totalSegments - 1) / 2)
         MeasureFrameBaseline.check("point_snap_crowded_points_per_lookup", worst.pointsInspected, area: "canvas-rendering",

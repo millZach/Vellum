@@ -134,6 +134,12 @@ sheet_captures() {
       capture "sheet-$what" --ui-tab canvases --ui-reset --ui-new-canvas --ui-sheets "$what"
       tail -30 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
     done
+    # Snapping to a placed sheet's outline (#57): the measure tool's loupe held by the 1/4" plan's corner, "Sheet corner",
+    # and by the left edge of the AS NOTED sheet turned to 33.5 degrees, "Sheet edge", each with what it caught in sheets.txt.
+    for what in snap-corner snap-edge; do
+      capture "sheet-$what" --ui-tab canvases --ui-reset --ui-new-canvas --ui-sheets "$what"
+      tail -30 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
+    done
     # The top bar with the long canvas name, Add sheet on one line beside it (#35).
     capture "top-bar-long-name" --ui-tab canvases --ui-reset --ui-fixture
     WAIT=$saved_wait

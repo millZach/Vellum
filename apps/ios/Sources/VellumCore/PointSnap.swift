@@ -4,7 +4,7 @@ import Glibc
 import Darwin
 #endif
 
-/// Finding the point a tap means: since #40 all seven kinds of snap point are always on, and the nearest within
+/// Finding the point a tap means: since #40 every kind of snap point is always on, and the nearest within
 /// `screenRadius` points of the tip on screen wins, or the tip itself when there is none. There are no settings. Holding
 /// still doesn't cycle through the points in reach; when they crowd, zoom in, as Zach picked.
 ///
@@ -34,8 +34,17 @@ import Darwin
 ///   stroke's segment or a circle, and the two points where a line from the anchor just touches a circle. So a measure's or
 ///   dimension's first point has neither, and its second has both. An arc has neither, as on the prototype.
 ///
-/// The nearest wins. Where two kinds fall on one point (within an ink grid step), the rank decides: intersection, centre,
-/// corner, end, mid, perpendicular, tangent. At equal distance the latest stroke wins.
+/// Since #57 a placed sheet's outline catches too, looked up through the `SheetIndex` among the sheets near the tip only:
+/// - **Sheet corner**: each of the paper's four corners, at whatever angle the sheet stands. A point like the ink's.
+/// - **Sheet edge**: the nearest point anywhere along one of its four edges. The middle of an edge is no point of its own.
+/// Lines printed in the PDF, scale areas' edges and other sheets' alignment are not snapped to.
+///
+/// **A point beats an edge** (Zach's pick on #57): an edge is a whole line, so the tip is nearly always nearer to it than to
+/// a point beside it. Every kind above, a sheet corner included, is a point; an edge catches only where no point is within
+/// reach. Among points the nearest wins. Where two kinds fall on one point (within an ink grid step), the rank decides:
+/// intersection, centre, corner, end, sheet corner, mid, perpendicular, tangent. At equal distance the latest stroke wins,
+/// and the topmost sheet over a sheet below it. Among edges the nearest wins, the topmost sheet's on a tie. Where sheets
+/// touch or overlap, what a mark then reads is the topmost sheet's scale, as `Canvas.measure` reads any point.
 public enum PointSnap {
     /// How far from the tip on screen, in points, a point is snapped to.
     public static let screenRadius = 20.0
@@ -70,6 +79,10 @@ public enum PointSnap {
         case intersection
         case perpendicular
         case tangent
+        /// A placed sheet's corner (#57).
+        case sheetCorner
+        /// Anywhere along a placed sheet's edge (#57); only where no point is within reach.
+        case sheetEdge
 
         /// The name the loupe shows.
         public var title: String {
@@ -81,6 +94,8 @@ public enum PointSnap {
             case .intersection: "Intersection"
             case .perpendicular: "Perpendicular"
             case .tangent: "Tangent"
+            case .sheetCorner: "Sheet corner"
+            case .sheetEdge: "Sheet edge"
             }
         }
 
@@ -90,9 +105,11 @@ public enum PointSnap {
             case .centre: 1
             case .corner: 2
             case .end: 3
-            case .mid: 4
-            case .perpendicular: 5
-            case .tangent: 6
+            case .sheetCorner: 4
+            case .mid: 5
+            case .perpendicular: 6
+            case .tangent: 7
+            case .sheetEdge: 8
             }
         }
     }
@@ -101,19 +118,23 @@ public enum PointSnap {
     public struct Target: Hashable, Sendable {
         public let point: CanvasPoint
         public let kind: Kind?
+        /// On a sheet edge, the edge's direction in radians on the canvas, y running down, for the mark along it; nil
+        /// otherwise.
+        public let along: Double?
 
-        public init(point: CanvasPoint, kind: Kind?) {
+        public init(point: CanvasPoint, kind: Kind?, along: Double? = nil) {
             self.point = point
             self.kind = kind
+            self.along = along
         }
     }
 
-    /// The point a tap at `tip` takes, at a zoom of `pointsPerInch`, among the ink in an index. `anchor` is the point being
-    /// worked from, which perpendicular and tangent need.
+    /// The point a tap at `tip` takes, at a zoom of `pointsPerInch`, among the ink in an index and the placed sheets'
+    /// outlines. `anchor` is the point being worked from, which perpendicular and tangent need.
     public static func target(at tip: CanvasPoint, pointsPerInch: Double, in index: InkIndex,
-                              anchor: CanvasPoint? = nil) -> Target {
+                              sheets: SheetIndex = SheetIndex(), anchor: CanvasPoint? = nil) -> Target {
         var work = InkIndex.Work()
-        return target(at: tip, pointsPerInch: pointsPerInch, in: index, anchor: anchor, work: &work)
+        return target(at: tip, pointsPerInch: pointsPerInch, in: index, sheets: sheets, anchor: anchor, work: &work)
     }
 
     /// A true circle, or the part of one an arc covers.
@@ -167,7 +188,8 @@ public enum PointSnap {
     }
 
     /// The same, counting the strokes looked at, the points read and the pairs tested for crossing, for the budget tests.
-    public static func target(at tip: CanvasPoint, pointsPerInch: Double, in index: InkIndex, anchor: CanvasPoint? = nil,
+    public static func target(at tip: CanvasPoint, pointsPerInch: Double, in index: InkIndex,
+                              sheets: SheetIndex = SheetIndex(), anchor: CanvasPoint? = nil,
                               work: inout InkIndex.Work) -> Target {
         let radius = screenRadius / pointsPerInch
         let tx = tip.x.inches, ty = tip.y.inches
@@ -248,11 +270,42 @@ public enum PointSnap {
         // An arc's centre may be far off its own bounds, so the strokes found above don't always include it.
         index.visitArcCentres(in: probe, work: &work) { consider($0.x, $0.y, .centre) }
 
+        // The sheets near the tip, topmost first: their corners are points like the ink's.
+        let outlines = sheets.isEmpty ? [] : sheets.outlines(in: probe, work: &work)
+        for outline in outlines {
+            for i in 0..<4 { consider(outline.xs[i], outline.ys[i], .sheetCorner) }
+        }
+
         intersections(segments, rounds, tx, ty, radius, best?.distance, &work, consider)
 
+        if best == nil, let edge = nearestEdge(of: outlines, tx, ty, radiusSquared) {
+            return Target(point: CanvasPoint(x: .inches(edge.x), y: .inches(edge.y)).onInkGrid, kind: .sheetEdge,
+                          along: edge.along)
+        }
         guard let best else { return Target(point: tip, kind: nil) }
         // On the ink grid, as what is drawn there will be, so a measure reads what a stroke drawn to it would.
         return Target(point: CanvasPoint(x: .inches(best.x), y: .inches(best.y)).onInkGrid, kind: best.kind)
+    }
+
+    /// The nearest point along any of these sheets' edges within reach, the first listed (the topmost) on a tie, with the
+    /// edge's direction.
+    private static func nearestEdge(of outlines: [SheetIndex.Outline], _ tx: Double, _ ty: Double, _ radiusSquared: Double)
+        -> (x: Double, y: Double, along: Double)? {
+        var best: (d: Double, x: Double, y: Double, along: Double)?
+        for outline in outlines {
+            for i in 0..<4 {
+                let (ax, ay) = (outline.xs[i], outline.ys[i]), (bx, by) = (outline.xs[(i + 1) % 4], outline.ys[(i + 1) % 4])
+                let (dx, dy) = (bx - ax, by - ay)
+                let lengthSquared = dx * dx + dy * dy
+                guard lengthSquared > 0 else { continue }
+                let t = min(1, max(0, ((tx - ax) * dx + (ty - ay) * dy) / lengthSquared))
+                let (fx, fy) = (ax + t * dx, ay + t * dy)
+                let d = (fx - tx) * (fx - tx) + (fy - ty) * (fy - ty)
+                guard d <= radiusSquared, d < best?.d ?? .infinity else { continue }
+                best = (d, fx, fy, atan2(dy, dx))
+            }
+        }
+        return best.map { ($0.x, $0.y, $0.along) }
     }
 
     private static func perpendicular(_ sx: Double, _ sy: Double, _ ex: Double, _ ey: Double, _ ax: Double, _ ay: Double,

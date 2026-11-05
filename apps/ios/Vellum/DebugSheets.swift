@@ -222,6 +222,9 @@ struct CaptureSheetsTransport: DropboxTransport {
 ///   to 33.5° and changed to 1" = 1'-0". Each logs its printed dimensions as measured and what its labels do.
 /// - `--ui-sheets scan`: the scan placed at 1/8" = 1'-0" beside the 1/4" plan: in dark mode the plan inverts and the
 ///   scan dims.
+/// - `--ui-sheets snap-corner`, `snap-edge` (#57): the measure tool's Pencil held down by a placed sheet's outline, so the
+///   loupe names what it catches: by the 1/4" plan's top-left corner, "Sheet corner"; and by the middle of the left edge
+///   of the AS NOTED sheet turned to 33.5°, "Sheet edge". Each logs what the tip snapped to and the scale it reads there.
 @MainActor
 enum DebugSheets {
     private static var started = false
@@ -274,6 +277,8 @@ enum DebugSheets {
                 view.viewportJumped()
             case "turn-selected", "turn-90", "turn-angle", "turn-catch", "turn-moved", "turn-scale":
                 await turn(what, view, editor)
+            case "snap-corner", "snap-edge":
+                await snap(what, view, editor)
             default:
                 break
             }
@@ -315,6 +320,64 @@ enum DebugSheets {
         view.viewportJumped()
         try? await Task.sleep(for: .seconds(0.3))
         logTurned(editor)
+    }
+
+    /// Places a sheet (turned to 33.5° for the edge), takes Measure, and holds the Pencil down 10 points off its outline, by
+    /// the top-left corner or the middle of the left edge, so the loupe shows what it catches (#57).
+    private static func snap(_ what: String, _ view: InkCanvasUIView, _ editor: CanvasEditor) async {
+        let edge = what == "snap-edge"
+        let main = Sheet.Scale.drawn(.architectural(inchesPerFoot: 0.5))
+        let found: Sheet?
+        if edge {
+            found = await place(view, editor, file: 0, page: 1, scale: main)
+        } else {
+            found = await place(view, editor, file: 1, page: 0)
+        }
+        guard let placed = found else { return }
+        var sheet = placed
+        if edge {
+            editor.zoom(to: placed.bounds)
+            view.viewportJumped()
+            try? await Task.sleep(for: .seconds(0.4))
+            editor.tool = .lasso
+            view.debugTap(at: placed.centre)
+            twist(view, to: 33.5, editor)
+            view.finishSheetDrag(keep: true)
+            try? await Task.sleep(for: .seconds(0.3))
+            sheet = editor.sheets.last ?? placed
+        }
+        editor.tool = .measure
+        // Room round it, the outline clear of the rail and the bars.
+        let reach = sheet.centre.distance(to: sheet.origin)
+        editor.zoom(to: CanvasRect(origin: sheet.centre.offsetBy(dx: reach * -1.2, dy: reach * -1.2),
+                                   size: CanvasSize(width: reach * 2.4, height: reach * 2.4)))
+        view.viewportJumped()
+        try? await Task.sleep(for: .seconds(0.6))
+        let corners = sheet.corners.map { editor.viewport.screenPoint(for: $0) }
+        // The outline's point, and the way into the paper from it.
+        let (at, inward): (ScreenPoint, (Double, Double)) = {
+            if !edge {
+                let (dx, dy) = (corners[2].x - corners[0].x, corners[2].y - corners[0].y)
+                let length = max(hypot(dx, dy), 1)
+                return (corners[0], (dx / length, dy / length))
+            }
+            let middle = ScreenPoint(x: (corners[3].x + corners[0].x) / 2, y: (corners[3].y + corners[0].y) / 2)
+            let (dx, dy) = (corners[1].x - corners[0].x, corners[1].y - corners[0].y)
+            let length = max(hypot(dx, dy), 1)
+            return (middle, (dx / length, dy / length))
+        }()
+        let from = CGPoint(x: at.x + inward.0 * 40, y: at.y + inward.1 * 40)
+        let to = CGPoint(x: at.x + inward.0 * 10, y: at.y + inward.1 * 10)
+        guard view.beginInput(at: from) else { return }
+        for i in 1...12 {
+            let t = CGFloat(i) / 12
+            try? await Task.sleep(for: .milliseconds(12))
+            view.moveInput(samples: [CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)], predicted: [])
+        }
+        try? await Task.sleep(for: .milliseconds(150))
+        let target = editor.snapTarget(at: editor.viewport.canvasPoint(for: ScreenPoint(x: Double(to.x), y: Double(to.y))))
+        log("\(what): \(sheet.label) at \(SheetAngle.reading(sheet.angle)), snapped to \(target.kind?.title ?? "nothing"), "
+              + "on the sheet \(sheet.contains(target.point)), reads \(sheet.scale(at: target.point))")
     }
 
     /// Fingers going clockwise on screen turn the sheet clockwise, so a counter-clockwise angle is the fingers going back.

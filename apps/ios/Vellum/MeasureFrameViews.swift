@@ -115,7 +115,7 @@ final class Loupe {
         // The snap marker where the point will be taken, magnified with the canvas.
         let s = viewport.screenPoint(for: target.point)
         let local = CGPoint(x: m * (s.x - tip.x) + r, y: m * (s.y - tip.y) + r)
-        marker.path = target.kind.map { SnapMarker.path($0, at: local, size: 7) }
+        marker.path = target.kind.map { SnapMarker.path($0, at: local, size: 7, along: target.along) }
         // Its name, at the foot of the circle (#40).
         if let kind = target.kind {
             // Set only when it changes: new text is drawn again, and the tip moves every frame.
@@ -142,13 +142,15 @@ final class Loupe {
     }
 }
 
-/// The mark for each kind of snap point, as the prototype draws them: a square on an end or a corner, a circle on a centre, a
-/// triangle on a mid, a cross on an intersection, a right angle on a perpendicular, and a circle under a line on a tangent.
+/// The mark for each kind of snap point, as the prototypes draw them: a square on an end, a corner or a sheet's corner, a
+/// circle on a centre, a triangle on a mid, a cross on an intersection, a right angle on a perpendicular, a circle under a
+/// line on a tangent, and on a sheet's edge a short line along the edge with a tick across it (#57). `along` is the edge's
+/// direction on the canvas, which is the screen's, y down.
 enum SnapMarker {
-    static func path(_ kind: PointSnap.Kind, at p: CGPoint, size s: CGFloat) -> CGPath {
+    static func path(_ kind: PointSnap.Kind, at p: CGPoint, size s: CGFloat, along: Double? = nil) -> CGPath {
         let path = CGMutablePath()
         switch kind {
-        case .end, .corner:
+        case .end, .corner, .sheetCorner:
             path.addRect(CGRect(x: p.x - s, y: p.y - s, width: 2 * s, height: 2 * s))
         case .centre:
             path.addEllipse(in: CGRect(x: p.x - s, y: p.y - s, width: 2 * s, height: 2 * s))
@@ -173,6 +175,13 @@ enum SnapMarker {
             path.addEllipse(in: CGRect(x: p.x - s, y: p.y - s, width: 2 * s, height: 2 * s))
             path.move(to: CGPoint(x: p.x - s - 2, y: p.y - s))
             path.addLine(to: CGPoint(x: p.x + s + 2, y: p.y - s))
+        case .sheetEdge:
+            let (ux, uy) = (CGFloat(cos(along ?? 0)), CGFloat(sin(along ?? 0)))
+            let reach = s * 2.4
+            path.move(to: CGPoint(x: p.x - ux * reach, y: p.y - uy * reach))
+            path.addLine(to: CGPoint(x: p.x + ux * reach, y: p.y + uy * reach))
+            path.move(to: CGPoint(x: p.x - uy * s, y: p.y + ux * s))
+            path.addLine(to: CGPoint(x: p.x + uy * s, y: p.y - ux * s))
         }
         return path
     }

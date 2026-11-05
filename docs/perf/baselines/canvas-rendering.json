@@ -201,6 +201,16 @@
       "note": "A snap lookup with 300 circles all through the tip (#40): pairs tested for crossing, stopped by the cap of 32 circles and arcs. Before: every pair of the 300."
     },
     {
+      "metric": "point_snap_crowded_sheets_visited_per_lookup",
+      "kind": "count",
+      "value": 2,
+      "before": 1002,
+      "unit": "sheets",
+      "tolerance": 0,
+      "measured": "feat/sheet-snap 2026-11-04, the fixture's own count (deterministic; checked by CI VellumCore tests)",
+      "note": "The crowded snap lookups above with 1,002 made-up sheets on the canvas (#57): one 10 x 10 at 1:48 under the thicket, a letter page at NTS in it, and 1,000 letter pages far off. Sheets whose outline's box a lookup compared, found through SheetIndex's cells round the tip; only those two are near, so the far ones cost nothing. Before: every sheet on the canvas on every lookup."
+    },
+    {
       "metric": "point_snap_points_inspected_per_tap",
       "kind": "count",
       "value": 9485,

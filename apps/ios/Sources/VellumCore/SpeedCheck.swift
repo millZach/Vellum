@@ -95,23 +95,28 @@ public struct MainThreadFrame: Equatable, Sendable {
     public var gapMs: Double
     /// How long the main thread was awake in that gap, in milliseconds.
     public var busyMs: Double
+    /// How much of that it really ran on a core, in milliseconds, when the clock was read: awake time well above it is
+    /// the thread waiting for a core, not work.
+    public var cpuMs: Double?
     /// The named parts, in the order the ledger keeps them; parts that did not run are left out.
     public var parts: [Part]
 
-    public init(gapMs: Double, busyMs: Double, parts: [Part]) {
+    public init(gapMs: Double, busyMs: Double, cpuMs: Double? = nil, parts: [Part]) {
         self.gapMs = gapMs
         self.busyMs = busyMs
+        self.cpuMs = cpuMs
         self.parts = parts.filter { $0.count > 0 }
     }
 
     /// Busy time no part accounts for: SwiftUI, UIKit and the system.
     public var otherMs: Double { max(0, busyMs - parts.reduce(0) { $0 + $1.ms }) }
 
-    /// `gap 92.4 ms, main 61.2 ms: sheet tiles landed 3 in 12.5 ms, commit 1 in 30.1 ms, other 18.6 ms`.
+    /// `gap 92.4 ms, main 61.2 ms (cpu 20.3 ms): sheet tiles landed 3 in 12.5 ms, commit 1 in 30.1 ms, other 18.6 ms`.
     public var text: String {
         var pieces = parts.map { "\($0.name) \($0.count) in \(SpeedCheckText.ms($0.ms)) ms" }
         pieces.append("other \(SpeedCheckText.ms(otherMs)) ms")
-        return "gap \(SpeedCheckText.ms(gapMs)) ms, main \(SpeedCheckText.ms(busyMs)) ms: " + pieces.joined(separator: ", ")
+        let cpu = cpuMs.map { " (cpu \(SpeedCheckText.ms($0)) ms)" } ?? ""
+        return "gap \(SpeedCheckText.ms(gapMs)) ms, main \(SpeedCheckText.ms(busyMs)) ms\(cpu): " + pieces.joined(separator: ", ")
     }
 }
 

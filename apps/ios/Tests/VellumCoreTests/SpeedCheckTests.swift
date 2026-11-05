@@ -101,6 +101,11 @@ final class SpeedCheckTests: XCTestCase {
         XCTAssertEqual(frame.text, "gap 92.4 ms, main 61.2 ms: sheet tiles landed 3 in 12.5 ms, commit 1 in 30.1 ms, other 18.6 ms")
     }
 
+    func testTheMainThreadsCPUTimeFollowsItsAwakeTime() {
+        let frame = MainThreadFrame(gapMs: 65.07, busyMs: 55.18, cpuMs: 3.04, parts: [.init(name: "sheet plan", count: 2, ms: 0.2)])
+        XCTAssertEqual(frame.text, "gap 65.1 ms, main 55.2 ms (cpu 3.0 ms): sheet plan 2 in 0.2 ms, other 55.0 ms")
+    }
+
     func testOtherIsNeverBelowNothing() {
         let frame = MainThreadFrame(gapMs: 16.7, busyMs: 1, parts: [.init(name: "commit", count: 1, ms: 1.2)])
         XCTAssertEqual(frame.otherMs, 0)

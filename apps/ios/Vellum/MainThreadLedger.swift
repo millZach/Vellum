@@ -1,3 +1,4 @@
+import Darwin
 import QuartzCore
 import VellumCore
 
@@ -49,6 +50,8 @@ enum MainThreadLedger {
     /// Time spent by parts called from inside the part running now, one entry per part under way.
     private static var nested: [Double] = []
     private static var busy = 0.0
+    /// The main thread's CPU time when the frame began, in nanoseconds.
+    private static var cpuAtStart: UInt64 = 0
     private static var wokeAt: Double?
     private static var commitAt: Double?
 
@@ -59,6 +62,7 @@ enum MainThreadLedger {
         reset()
         nested.removeAll(keepingCapacity: true)
         wokeAt = CACurrentMediaTime()
+        cpuAtStart = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
         // Core Animation commits from a before-waiting observer at order 2,000,000; just before it, and last of all.
         let woke = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue, true, CFIndex.min) { _, _ in
             MainActor.assumeIsolated { MainThreadLedger.woke() }
@@ -107,11 +111,15 @@ enum MainThreadLedger {
     static func closeFrame(gapMs: Double, keep: Bool) -> MainThreadFrame? {
         guard isOn else { return nil }
         let now = CACurrentMediaTime()
+        // The thread's own CPU time, once a frame: wall-clock awake time well above it is time spent off a core.
+        let cpu = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+        let cpuMs = Double(cpu &- cpuAtStart) / 1_000_000
+        cpuAtStart = cpu
         if let wokeAt { busy += now - wokeAt }
         wokeAt = now
         defer { reset() }
         guard keep else { return nil }
-        return MainThreadFrame(gapMs: gapMs, busyMs: busy * 1000, parts: Part.allCases.map {
+        return MainThreadFrame(gapMs: gapMs, busyMs: busy * 1000, cpuMs: cpuMs, parts: Part.allCases.map {
             MainThreadFrame.Part(name: $0.name, count: counts[$0.rawValue], ms: times[$0.rawValue] * 1000)
         })
     }

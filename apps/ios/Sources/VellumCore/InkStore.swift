@@ -73,8 +73,9 @@ public final class InkStore {
     /// written byte for byte as version 2 wrote it. Version 4 (#11) adds sheets: their event, and the snapshot's sheets
     /// after its frames; a canvas that never had a sheet is written byte for byte as version 3 wrote it. Version 5 (#44)
     /// adds a sheet's turn, move or scale change: its event and undo step, and the angle of a sheet that stands turned;
-    /// a canvas saved before it reads with its sheets at 0°, and takes these new events on its old log.
-    static let version: UInt16 = 5
+    /// a canvas saved before it reads with its sheets at 0°, and takes these new events on its old log. Version 6 (#40)
+    /// adds a shape corrected through its tag: its event and undo step, which a canvas saved before it takes on its old log.
+    static let version: UInt16 = 6
     static let snapshotMagic: [UInt8] = Array("VINK".utf8)
     static let logMagic: [UInt8] = Array("VLOG".utf8)
     /// The log's header: magic (4), version (2), reserved (2), generation (8).

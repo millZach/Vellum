@@ -3,7 +3,7 @@ import VellumCore
 
 /// The magnifier above the Pencil or finger while a measure or dimension point is being found (#8, "snap with a
 /// loupe"), as the prototype draws it: a circle 120 points across, 104 points above the tip (beside it near the top
-/// of the screen), showing the canvas under the tip three times larger, with cross hairs at the tip and the snap
+/// of the screen or clear of the chrome), showing the canvas under the tip three times larger, with cross hairs at the tip and the snap
 /// marker where the point will be taken.
 ///
 /// It never draws the canvas a second time. Its ink is the tile images the renderer has already drawn for the view
@@ -23,6 +23,8 @@ final class Loupe {
     private var tileLayers: [CALayer] = []
     private let crossHairs = CAShapeLayer()
     private let marker = CAShapeLayer()
+    private let name = Pill()
+    private var nameIsDark = false
 
     init() {
         let side = Self.radius * 2
@@ -52,19 +54,19 @@ final class Loupe {
         crossHairs.opacity = 0.7
         crossHairs.path = AnnotationOverlay.crossHairs(at: CGPoint(x: Self.radius, y: Self.radius))
         marker.lineWidth = 2
+        name.layer.isHidden = true
+        clip.addSublayer(name.layer)
         layer.addSublayer(clip)
     }
 
-    /// Shows the loupe for a tip at a screen point, what it snaps to, over the tiles drawn for `viewport`.
-    func show(tip: CGPoint, target: PointSnap.Target, viewport: Viewport, renderer: InkTileRenderer, in bounds: CGRect,
+    /// Shows the loupe for a tip at a screen point, what it snaps to, over the tiles drawn for `viewport`: above the tip, or
+    /// aside rather than sliding under the chrome (#40).
+    func show(tip: CGPoint, target: PointSnap.Target, viewport: Viewport, renderer: InkTileRenderer, placement: ExactPlacement,
               dark: Bool) {
         let r = Self.radius, m = Self.magnification
-        var centre = CGPoint(x: tip.x, y: tip.y - Self.lift)
-        if centre.y - r < 4 {
-            centre = CGPoint(x: tip.x + (tip.x < bounds.midX ? 110 : -110), y: tip.y)
-        }
-        centre.x = min(max(centre.x, r + 4), bounds.width - r - 4)
-        centre.y = min(max(centre.y, r + 4), bounds.height - r - 4)
+        let placed = placement.loupeCentre(tip: ScreenPoint(x: Double(tip.x), y: Double(tip.y)), radius: Double(r),
+                                           lift: Double(Self.lift))
+        let centre = CGPoint(x: placed.x, y: placed.y)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -113,8 +115,21 @@ final class Loupe {
         // The snap marker where the point will be taken, magnified with the canvas.
         let s = viewport.screenPoint(for: target.point)
         let local = CGPoint(x: m * (s.x - tip.x) + r, y: m * (s.y - tip.y) + r)
-        marker.path = target.kind == nil ? nil
-            : CGPath(rect: CGRect(x: local.x - 7, y: local.y - 7, width: 14, height: 14), transform: nil)
+        marker.path = target.kind.map { SnapMarker.path($0, at: local, size: 7) }
+        // Its name, at the foot of the circle (#40).
+        if let kind = target.kind {
+            // Set only when it changes: new text is drawn again, and the tip moves every frame.
+            if name.text != kind.title || nameIsDark != dark {
+                nameIsDark = dark
+                name.set(kind.title, size: 11, colour: Palette.snapText(dark: dark), fill: Palette.snap(dark: dark),
+                         weight: .semibold, radius: 6)
+                // High enough that the circle's edge clears the longest name, Perpendicular.
+                name.layer.position = CGPoint(x: r, y: r + 30)
+            }
+            name.layer.isHidden = false
+        } else {
+            name.layer.isHidden = true
+        }
     }
 
     func hide() {
@@ -124,6 +139,42 @@ final class Loupe {
         layer.isHidden = true
         for tile in tileLayers { tile.contents = nil }
         CATransaction.commit()
+    }
+}
+
+/// The mark for each kind of snap point, as the prototype draws them: a square on an end or a corner, a circle on a centre, a
+/// triangle on a mid, a cross on an intersection, a right angle on a perpendicular, and a circle under a line on a tangent.
+enum SnapMarker {
+    static func path(_ kind: PointSnap.Kind, at p: CGPoint, size s: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        switch kind {
+        case .end, .corner:
+            path.addRect(CGRect(x: p.x - s, y: p.y - s, width: 2 * s, height: 2 * s))
+        case .centre:
+            path.addEllipse(in: CGRect(x: p.x - s, y: p.y - s, width: 2 * s, height: 2 * s))
+        case .mid:
+            path.move(to: CGPoint(x: p.x, y: p.y - s - 1))
+            path.addLine(to: CGPoint(x: p.x + s + 1, y: p.y + s))
+            path.addLine(to: CGPoint(x: p.x - s - 1, y: p.y + s))
+            path.closeSubpath()
+        case .intersection:
+            path.move(to: CGPoint(x: p.x - s, y: p.y - s))
+            path.addLine(to: CGPoint(x: p.x + s, y: p.y + s))
+            path.move(to: CGPoint(x: p.x + s, y: p.y - s))
+            path.addLine(to: CGPoint(x: p.x - s, y: p.y + s))
+        case .perpendicular:
+            path.move(to: CGPoint(x: p.x - s, y: p.y - s))
+            path.addLine(to: CGPoint(x: p.x - s, y: p.y + s))
+            path.addLine(to: CGPoint(x: p.x + s, y: p.y + s))
+            path.move(to: CGPoint(x: p.x - s, y: p.y))
+            path.addLine(to: p)
+            path.addLine(to: CGPoint(x: p.x, y: p.y + s))
+        case .tangent:
+            path.addEllipse(in: CGRect(x: p.x - s, y: p.y - s, width: 2 * s, height: 2 * s))
+            path.move(to: CGPoint(x: p.x - s - 2, y: p.y - s))
+            path.addLine(to: CGPoint(x: p.x + s + 2, y: p.y - s))
+        }
+        return path
     }
 }
 

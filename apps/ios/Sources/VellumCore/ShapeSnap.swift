@@ -4,20 +4,32 @@ import Glibc
 import Darwin
 #endif
 
-/// A stroke snapped to a shape (#7): a straight line, a rectangle, or an ellipse (a circle when it is nearly round).
-/// The shape becomes the stroke's points, so a snapped stroke is saved and drawn like any other.
+/// A stroke snapped to a shape (#7): a straight line, a rectangle, or an ellipse (a circle when it is nearly round); and
+/// since #40, what the line and shape tool draws besides: a polyline, an arc or a regular polygon. The shape becomes the
+/// stroke's points, so a snapped stroke is saved and drawn like any other, and Vellum stores no separate geometry.
 public enum SnappedShape: Hashable, Sendable {
     case line(CanvasPoint, CanvasPoint)
     /// Centred on `centre`, `width` along the direction `angle` (radians) and `height` across it.
     case rectangle(centre: CanvasPoint, width: Length, height: Length, angle: Double)
     /// Centred on `centre`, with radius `radiusX` along the direction `angle` (radians) and `radiusY` across it.
     case ellipse(centre: CanvasPoint, radiusX: Length, radiusY: Length, angle: Double)
+    /// Straight segments through these points, in order; closed when the last point is the first.
+    case polyline([CanvasPoint])
+    /// Part of a circle, from the direction `start` turning by `sweep`, both in degrees read counter-clockwise from east;
+    /// a negative sweep runs clockwise.
+    case arc(centre: CanvasPoint, radius: Length, start: Double, sweep: Double)
+    /// A regular polygon: `sides` equal sides, its corners `radius` from the centre, the first in the direction `rotation`,
+    /// in degrees read counter-clockwise from east.
+    case polygon(centre: CanvasPoint, sides: Int, radius: Length, rotation: Double)
 
     /// How many segments an ellipse is drawn with: smooth on the Duo's screen at any size it fits on.
     public static let ellipseSegments = 72
+    /// How many segments an arc is drawn with. `PointSnap` knows an arc by it.
+    public static let arcSegments = 48
 
     /// The stroke's points: a line's two ends; a rectangle's four corners and back to the first; an ellipse's
-    /// `ellipseSegments` segments, closed.
+    /// `ellipseSegments` segments, closed; a polyline's points; an arc's `arcSegments` segments; a polygon's corners and
+    /// back to the first.
     public var points: [CanvasPoint] {
         switch self {
         case .line(let a, let b):
@@ -36,15 +48,29 @@ public enum SnappedShape: Hashable, Sendable {
                 let x = rx.inches * cos(t), y = ry.inches * sin(t)
                 return CanvasPoint(x: .inches(centre.x.inches + x * c - y * s), y: .inches(centre.y.inches + x * s + y * c))
             }
+        case .polyline(let points):
+            return points
+        case .arc(let centre, let radius, let start, let sweep):
+            return (0...Self.arcSegments).map { i in
+                AngleCatch.point(from: centre, length: radius, angle: start + sweep * Double(i) / Double(Self.arcSegments))
+            }
+        case .polygon(let centre, let sides, let radius, let rotation):
+            return (0...sides).map { i in
+                AngleCatch.point(from: centre, length: radius, angle: rotation + 360 * Double(i % sides) / Double(sides))
+            }
         }
     }
 
-    /// What the shape is called, for VoiceOver and the status bar: "straight line", "rectangle", "circle", "ellipse".
+    /// What the shape is called, for VoiceOver and the status bar: "straight line", "rectangle", "circle", "ellipse",
+    /// "polyline", "arc", "polygon".
     public var name: String {
         switch self {
         case .line: "straight line"
         case .rectangle: "rectangle"
         case .ellipse(_, let rx, let ry, _): rx == ry ? "circle" : "ellipse"
+        case .polyline: "polyline"
+        case .arc: "arc"
+        case .polygon: "polygon"
         }
     }
 }

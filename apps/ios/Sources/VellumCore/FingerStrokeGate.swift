@@ -113,6 +113,13 @@ public struct FingerStrokeGate: Equatable, Sendable {
         }
     }
 
+    /// The Pencil touched down while the finger was on the glass with a shape tool (#40). Returns whether what the finger
+    /// did stands: only if it is clearly one finger and it moved. A finger resting, however long, only hands over to the Pencil.
+    public mutating func takenOverByPencil(moved: Bool) -> Bool {
+        let confirmed = interrupted()
+        return confirmed && moved
+    }
+
     /// The system interrupted the finger (a gesture took it, or a call came in). Returns whether to keep the stroke:
     /// a confirmed one is ink and is kept; a pending one is most likely the start of a pan and is dropped.
     public mutating func interrupted() -> Bool {

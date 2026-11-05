@@ -239,6 +239,31 @@ final class DebugBenchmark: NSObject {
                     view.moveInput(samples: [b.strokePoint], predicted: [])
                 }
             }, tearDown: { b in b.editor.tool = .pen }),
+            // #40: the line tool's second point being found over the ink: each frame snaps the tip through the index with
+            // a point to work from, catches the angle, and places the loupe, the preview and the guide. Lifted on the last
+            // frame, which commits the line.
+            Scenario(name: "shape", frames: 240, setUp: { b in
+                b.editor.zoomToEverything()
+                b.editor.tool = .lineAndShape
+                b.editor.lineShape = .line
+                guard let view = b.view else { return }
+                _ = view.beginInput(at: CGPoint(x: 180, y: view.bounds.midY))
+                view.endInput(samples: [CGPoint(x: 180, y: view.bounds.midY)], keep: true)
+                b.strokePoint = CGPoint(x: 220, y: view.bounds.midY)
+                _ = view.beginInput(at: b.strokePoint)
+            }, step: { b, i in
+                guard let view = b.view else { return }
+                b.strokePoint.x += 2
+                b.strokePoint.y = view.bounds.midY + 120 * sin(b.strokePoint.x / 50)
+                if i == 239 {
+                    view.endInput(samples: [b.strokePoint], keep: true)
+                } else {
+                    view.moveInput(samples: [b.strokePoint], predicted: [])
+                }
+            }, tearDown: { b in
+                b.editor.lineShape = .drawIt
+                b.editor.tool = .pen
+            }),
             // #11: a 36 x 24 sheet at 1/4" = 1'-0" placed in the middle of the canvas (its tiles drawn from the PDF off
             // the main thread), panned across back and forth, as the pan above...
             Scenario(name: "sheet_pan", frames: 240, setUp: { b in

@@ -166,7 +166,8 @@ final class MeasureFrameTests: XCTestCase {
                                                         angle: 0).points])
         XCTAssertNil(PointSnap.target(at: p(60, 0), pointsPerInch: 1, in: ink).kind, "a wobble's middle is no corner")
         XCTAssertEqual(PointSnap.target(at: p(1, 1), pointsPerInch: 0.5, in: ink).point, p(0, 0))
-        let middleOfBox = PointSnap.target(at: p(0, 100), pointsPerInch: 1.5, in: ink)
+        // Close enough in that its sides' mids (#40) are out of reach too.
+        let middleOfBox = PointSnap.target(at: p(0, 100), pointsPerInch: 3, in: ink)
         XCTAssertNil(middleOfBox.kind, "a rectangle's middle is not a centre")
     }
 

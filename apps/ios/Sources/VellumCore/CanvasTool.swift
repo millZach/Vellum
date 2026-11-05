@@ -57,7 +57,8 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .lineAndShape:
             Descriptor(title: "Line and shape", systemImage: "line.diagonal", group: .ink, comingIn: nil,
                        inkTool: .pen, prompt: "Draw a line, box or circle",
-                       help: "Draw a line, a rectangle or a circle; it straightens when you lift or hold still")
+                       help: "Draw a line, a rectangle or a circle; it straightens when you lift or hold still. "
+                           + "Tap it again to pick a shape and the line weight")
         case .lasso:
             Descriptor(title: "Lasso", systemImage: "lasso", group: .selectionAndText, comingIn: nil, inkTool: nil,
                        prompt: "Loop ink, or tap a sheet",
@@ -71,7 +72,8 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
             Descriptor(title: "Measure", systemImage: "ruler", group: .lengthsAndRegions, comingIn: nil, inkTool: nil,
                        prompt: "Measure: tap first point",
                        help: "Tap two points to read the length between them in the canvas units. A tap snaps to "
-                           + "ink ends, corners and circle centres, shown in a magnifier while you touch")
+                           + "the nearest end, corner, centre, mid, intersection, perpendicular or tangent, named in a "
+                           + "magnifier while you touch")
         case .dimension:
             Descriptor(title: "Dimension", systemImage: "arrow.left.and.right", group: .lengthsAndRegions,
                        comingIn: nil, inkTool: nil, prompt: "Dimension: tap first point",
@@ -106,6 +108,8 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         case turningSheet(Double)
         /// A selected sheet's twist has caught on this quarter turn (#44).
         case caughtSheet(Double)
+        /// A shape part way through being drawn, with what it waits for (`ShapeDraft.prompt`, #40).
+        case drawing(String)
     }
 
     /// The status bar's prompt part way through a measure, dimension or window.
@@ -118,6 +122,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .placeSheet: Self.placeSheetPrompt
         case .turningSheet(let angle): "Turning: \(SheetAngle.reading(angle))"
         case .caughtSheet(let angle): "Caught at \(SheetAngle.reading(angle))"
+        case .drawing(let prompt): prompt
         }
     }
 
@@ -156,8 +161,10 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     public static let sheetSelectedPrompt = "Twist or drag the sheet"
 
     /// The status bar's prompt, given whether the lasso has a selection: with one, it says to drag it; and, for a
-    /// measure, dimension or window part way through, what it waits for next (#8).
-    public func prompt(fingerDraws: Bool, hasSelection: Bool, hasSheet: Bool = false, step: Step = .start) -> String {
+    /// measure, dimension or window part way through, what it waits for next (#8); and for the line and shape tool, what the
+    /// shape picked expects (#40).
+    public func prompt(fingerDraws: Bool, hasSelection: Bool, hasSheet: Bool = false, shape: LineShape = .default,
+                       step: Step = .start) -> String {
         if step == .placeSheet { return Self.placeSheetPrompt }
         if self == .lasso, hasSheet {
             switch step {
@@ -167,6 +174,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         }
         if self == .lasso, hasSelection { return Self.selectionPrompt }
         if let next = Self.prompt(for: step) { return next }
+        if self == .lineAndShape { return shape.prompt }
         return prompt(fingerDraws: fingerDraws)
     }
 

@@ -149,9 +149,9 @@ final class SheetSnapTests: XCTestCase {
     }
 
     /// A hundredth of a printed inch outside a sheet or an area reads outside, and a hundredth inside reads inside: the
-    /// allowance for a mark on an edge is far smaller, on a sheet at 1:48 and on one at full size or NTS.
+    /// allowance for a mark on an edge, 1/1024 printed inch, is far smaller, at 1:48, full size, 1:1200 and NTS.
     func testAPointAHundredthOfAnInchOutsideReadsOutside() {
-        for scale in [fortyEight, .drawn(.ratio(1)), .notToScale] {
+        for scale in [fortyEight, .drawn(.ratio(1)), .drawn(.ratio(1200)), .notToScale] {
             for angle in angles {
                 let s = sheet(scale, angle: angle)
                 XCTAssertFalse(s.contains(on(s, -0.01, 2)), "\(scale) \(angle)")
@@ -280,46 +280,106 @@ final class SheetSnapTests: XCTestCase {
         }
     }
 
+    // MARK: What comes along (#57, #49)
+
+    /// Whether a dimension and a stroke come along when the sheet turns, moves or changes scale, as the app picks them.
+    private func comeAlong(_ s: Sheet, _ dimension: CanvasDimension, _ stroke: InkStroke) -> (dimension: Bool, stroke: Bool) {
+        var ink = InkIndex()
+        ink.insert(stroke)
+        let along = s.markups(in: ink, texts: [], dimensions: [dimension])
+        return (along.dimensions == [dimension.id], along.strokes == [stroke.id])
+    }
+
+    private func mark(_ a: CanvasPoint, _ b: CanvasPoint) -> (CanvasDimension, InkStroke) {
+        (CanvasDimension(id: DimensionID(1), start: a, end: b, through: a, orientation: .aligned, colour: .blue,
+                         textHeight: .inches(4)),
+         InkStroke(id: StrokeID(1), tool: .pen, colour: .blue, width: .inches(0.25), points: [a, b]))
+    }
+
+    /// A dimension and a stroke snapped along each of the four edges come along, at 0°, 90°, 33.5° and 123.4°, at 1:48,
+    /// full size, 1:1200 and NTS, though the grid leaves their points a fraction of a step outside the edge. The same a
+    /// hundredth of a printed inch outside stay behind. Before, the clip was against the paper's exact edges, and at 33.5°
+    /// a mark along the top, right or left edge had both ends outside it.
+    func testMarksSnappedAlongEveryEdgeComeAlongAndMarksBesideItStay() {
+        let edges: [(tips: [(Double, Double)], beside: [(Double, Double)])] = [
+            ([(3, 0.4), (5, 0.4)], [(3, -0.01), (5, -0.01)]),
+            ([(9.6, 3), (9.6, 5)], [(10.01, 3), (10.01, 5)]),
+            ([(3, 9.6), (5, 9.6)], [(3, 10.01), (5, 10.01)]),
+            ([(0.4, 2), (0.4, 4)], [(-0.01, 2), (-0.01, 4)]),
+        ]
+        for scale in [fortyEight, .drawn(.ratio(1)), .drawn(.ratio(1200)), .notToScale] {
+            for angle in angles {
+                let s = sheet(scale, angle: angle)
+                for (i, edge) in edges.enumerated() {
+                    let a = snap(on(s, edge.tips[0].0, edge.tips[0].1), on: s)
+                    let b = snap(on(s, edge.tips[1].0, edge.tips[1].1), on: s)
+                    XCTAssertEqual([a.kind, b.kind], [.sheetEdge, .sheetEdge], "\(scale) \(angle) edge \(i)")
+                    let (dimension, stroke) = mark(a.point, b.point)
+                    let along = comeAlong(s, dimension, stroke)
+                    XCTAssertTrue(along.dimension, "dimension \(scale) \(angle) edge \(i)")
+                    XCTAssertTrue(along.stroke, "stroke \(scale) \(angle) edge \(i)")
+                    let (outDimension, outStroke) = mark(on(s, edge.beside[0].0, edge.beside[0].1).onInkGrid,
+                                                         on(s, edge.beside[1].0, edge.beside[1].1).onInkGrid)
+                    let stays = comeAlong(s, outDimension, outStroke)
+                    XCTAssertFalse(stays.dimension, "beside, dimension \(scale) \(angle) edge \(i)")
+                    XCTAssertFalse(stays.stroke, "beside, stroke \(scale) \(angle) edge \(i)")
+                }
+            }
+        }
+    }
+
     // MARK: Many turns and a scale change (#49)
 
-    /// A dimension snapped to the sheet's corner and edge, printed 2" along the area's edge, through 1,000 turns of the
-    /// sheet to angles in tenths of a degree, each rounding its points to the ink grid again, then a scale change to 1:50,
-    /// then 1,000 more: it reads 4'-0" in the 1:24 area and 2" NTS in an NTS area or on an NTS sheet at every step, and
-    /// its points stay in the area and on the sheet. Before #49, one ink-grid step of allowance lost a point in about half
-    /// of ten-turn runs.
-    func testAMarkOnAnEdgeKeepsItsSheetAndScaleThroughManyTurnsAndARescale() {
-        let cases: [(sheet: Sheet, rescale: Sheet.Scale, expected: String)] = [
-            (sheet(area: twentyFour), .drawn(.ratio(50)), "4'-0\""),
-            (sheet(area: .notToScale), .drawn(.ratio(50)), "2\" NTS"),
+    /// A dimension and a stroke snapped to the sheet's corner and along its left edge, printed 2" along the area's edge,
+    /// through 1,000 turns of the sheet to angles in tenths of a degree, then a scale change, then 1,000 more. At every turn
+    /// they come along only if `markups` picks them, as in the app, and each turn rounds their points to the ink grid again.
+    /// At every step they read 4'-0" in the 1:24 area and 2" NTS in an NTS area or on an NTS sheet, and their points stay on
+    /// the sheet and in the area. The scale changes are 1:48 to 1:50 and to 1:1200, full size to 1:1200, and 1:1200 to full
+    /// size, each with seeds 2 and 57. Before, with the allowance kept on the canvas, seed 2's 1,000 turns at 1:48 and the
+    /// change to 1:1200 left both ends hundreds of canvas steps out, reading 200'-0".
+    func testAMarkOnAnEdgeKeepsItsSheetAndScaleThroughManyTurnsAndAnyRescale() {
+        let pairs: [(Double, Double)] = [(48, 50), (48, 1200), (1, 1200), (1200, 1)]
+        var cases: [(sheet: Sheet, rescale: Sheet.Scale, expected: String)] = [
             (sheet(.notToScale, area: nil), .notToScale, "2\" NTS"),
         ]
+        for (from, to) in pairs {
+            cases.append((sheet(.drawn(.ratio(from)), area: twentyFour), .drawn(.ratio(to)), "4'-0\""))
+            cases.append((sheet(.drawn(.ratio(from)), area: .notToScale), .drawn(.ratio(to)), "2\" NTS"))
+        }
         for (start, rescale, expected) in cases {
-            var s = start
-            let corner = snap(on(s, 0.2, 0.3), on: s), edge = snap(on(s, 0.4, 2), on: s)
-            XCTAssertEqual([corner.kind, edge.kind], [.sheetCorner, .sheetEdge])
-            var dimension = CanvasDimension(id: DimensionID(1), start: corner.point, end: edge.point,
-                                            through: on(s, -0.5, 1).onInkGrid, orientation: .aligned, colour: .blue,
-                                            textHeight: .inches(4))
-            var seed: UInt64 = 57
-            var failed = false
-            for turn in 1...2000 where !failed {
-                if turn == 1001 {
-                    let (after, motion) = s.rescaled(to: rescale)
-                    s = after
-                    dimension = dimension.moved(by: motion)
+            for firstSeed: UInt64 in [2, 57] {
+                var s = start
+                let corner = snap(on(s, 0.2, 0.3), on: s), edge = snap(on(s, 0.4, 2), on: s)
+                XCTAssertEqual([corner.kind, edge.kind], [.sheetCorner, .sheetEdge])
+                var (dimension, stroke) = mark(corner.point, edge.point)
+                var seed = firstSeed
+                var failed = false
+                func change(to after: (sheet: Sheet, motion: SheetMotion), _ step: String) {
+                    let along = comeAlong(s, dimension, stroke)
+                    guard along.dimension, along.stroke else {
+                        XCTFail("\(start.scale) seed \(firstSeed) \(step) at \(s.angle)°: left behind")
+                        failed = true
+                        return
+                    }
+                    s = after.sheet
+                    dimension = dimension.moved(by: after.motion)
+                    stroke = stroke.moved(by: after.motion)
+                    let canvas = Canvas(sheets: [s])
+                    let ends = [dimension.start, dimension.end] + stroke.points
+                    let onIt = ends.allSatisfy { s.contains($0) }
+                    let inArea = s.areas.isEmpty || ends.allSatisfy { s.area(at: $0)?.name == "Detail" }
+                    let reads = canvas.format(canvas.measure(dimension))
+                    if !onIt || !inArea || reads != expected {
+                        XCTFail("\(start.scale) seed \(firstSeed) \(step) at \(s.angle)°: on \(onIt), in area \(inArea), "
+                                + "reads \(reads)")
+                        failed = true
+                    }
                 }
-                seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-                let (turned, motion) = s.turned(to: Double((seed >> 33) % 3600) / 10)
-                s = turned
-                dimension = dimension.moved(by: motion)
-                let canvas = Canvas(sheets: [s])
-                let onIt = s.contains(dimension.start) && s.contains(dimension.end)
-                let inArea = s.areas.isEmpty
-                    || (s.area(at: dimension.start)?.name == "Detail" && s.area(at: dimension.end)?.name == "Detail")
-                let reads = canvas.format(canvas.measure(dimension))
-                if !onIt || !inArea || reads != expected {
-                    XCTFail("\(start.scale) turn \(turn) at \(s.angle)°: on \(onIt), in area \(inArea), reads \(reads)")
-                    failed = true
+                for turn in 1...2000 where !failed {
+                    if turn == 1001 { change(to: s.rescaled(to: rescale), "rescale to \(rescale)") }
+                    guard !failed else { break }
+                    seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                    change(to: s.turned(to: Double((seed >> 33) % 3600) / 10), "turn \(turn)")
                 }
             }
         }

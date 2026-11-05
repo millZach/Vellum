@@ -337,32 +337,35 @@ public struct InkIndex: Sendable {
     /// Calls `body` once for every stroke whose bounds touch `box`.
     private func visit(_ box: Box, _ work: inout Work, _ body: (Entry) -> Void) {
         for (level, cells) in levels {
-            let size = Self.cellSize(level)
-            // A stroke reaches at most one cell past its own, so look one cell further up and left.
-            let lowX = (box.minX / size).rounded(.down) - 1, highX = (box.maxX / size).rounded(.down)
-            let lowY = (box.minY / size).rounded(.down) - 1, highY = (box.maxY / size).rounded(.down)
-            let span = (highX - lowX + 1) * (highY - lowY + 1)
-            if span.isFinite, span <= Double(cells.count), abs(lowX) < 1e15, abs(highX) < 1e15, abs(lowY) < 1e15,
-               abs(highY) < 1e15 {
-                for x in Int(lowX)...Int(highX) {
-                    for y in Int(lowY)...Int(highY) {
-                        guard let members = cells[Cell(x: x, y: y)] else { continue }
-                        work.strokesVisited += members.count
-                        for id in members {
-                            if let entry = entries[id], entry.box.intersects(box) { body(entry) }
-                        }
-                    }
+            Self.visitCells(cells, size: Self.cellSize(level), near: box) { members in
+                work.strokesVisited += members.count
+                for id in members {
+                    if let entry = entries[id], entry.box.intersects(box) { body(entry) }
                 }
-            } else {
-                // Fewer cells hold ink on this level than the box covers: look at the ones that do.
-                for (cell, members) in cells {
-                    let x = Double(cell.x), y = Double(cell.y)
-                    guard x >= lowX, x <= highX, y >= lowY, y <= highY else { continue }
-                    work.strokesVisited += members.count
-                    for id in members {
-                        if let entry = entries[id], entry.box.intersects(box) { body(entry) }
-                    }
+            }
+        }
+    }
+
+    /// Calls `body` with the members of each cell of one level, of cells `size` across, that can hold something touching
+    /// `box`: something reaches at most one cell past its own, so it looks one cell further up and left. It walks the cells
+    /// the box covers, or the cells that hold anything when those are fewer, as a very zoomed-out box covers more cells than
+    /// hold anything. Shared by the strokes here and the sheets of `SheetIndex`.
+    static func visitCells<Member>(_ cells: [Cell: [Member]], size: Double, near box: Box, _ body: ([Member]) -> Void) {
+        let lowX = (box.minX / size).rounded(.down) - 1, highX = (box.maxX / size).rounded(.down)
+        let lowY = (box.minY / size).rounded(.down) - 1, highY = (box.maxY / size).rounded(.down)
+        let span = (highX - lowX + 1) * (highY - lowY + 1)
+        if span.isFinite, span <= Double(cells.count), abs(lowX) < 1e15, abs(highX) < 1e15, abs(lowY) < 1e15,
+           abs(highY) < 1e15 {
+            for x in Int(lowX)...Int(highX) {
+                for y in Int(lowY)...Int(highY) {
+                    if let members = cells[Cell(x: x, y: y)] { body(members) }
                 }
+            }
+        } else {
+            for (cell, members) in cells {
+                let x = Double(cell.x), y = Double(cell.y)
+                guard x >= lowX, x <= highX, y >= lowY, y <= highY else { continue }
+                body(members)
             }
         }
     }

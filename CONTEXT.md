@@ -160,7 +160,7 @@ _Avoid_: snap (a snap straightens a stroke), osnap, grip
 One of the four corners of a placed sheet's paper, at whatever angle the sheet stands, taken as a snap point like an ink corner. The loupe names it "Sheet corner".
 
 **Sheet edge**:
-Anywhere along one of a placed sheet's four edges, taken by a tap within 20 screen points of it when no snap point is in reach: a point beats an edge, since the tip is nearly always nearer a whole line than a point beside it. The nearest edge wins, the topmost sheet's on a tie. The middle of an edge is not a point of its own. The loupe names it "Sheet edge". A mark on an edge reads the sheet's scale, or its scale area's where one runs along it, through any number of turns: a point within 1/1024 inch of a sheet's or scale area's edge counts as on it.
+Anywhere along one of a placed sheet's four edges, taken by a tap within 20 screen points of it when no snap point is in reach: a point beats an edge, since the tip is nearly always nearer a whole line than a point beside it. The nearest edge wins, the topmost sheet's on a tie. The middle of an edge is not a point of its own. The loupe names it "Sheet edge". A mark on an edge reads the sheet's scale, or its scale area's where one runs along it, and comes along when the sheet turns, moves or changes scale, through any number of turns and any scale change: a point within 1/1024 printed inch of a sheet's or scale area's edge counts as on it.
 _Avoid_: border, page edge
 
 **Loupe**:

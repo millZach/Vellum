@@ -44,29 +44,9 @@ public struct SheetIndex: Sendable {
     func outlines(in box: InkIndex.Box, work: inout InkIndex.Work) -> [Outline] {
         var found: [Int] = []
         for (level, cells) in levels {
-            let size = InkIndex.cellSize(level)
-            // A sheet reaches at most one cell past its own, so look one cell further up and left.
-            let lowX = (box.minX / size).rounded(.down) - 1, highX = (box.maxX / size).rounded(.down)
-            let lowY = (box.minY / size).rounded(.down) - 1, highY = (box.maxY / size).rounded(.down)
-            func look(_ members: [Int]) {
+            InkIndex.visitCells(cells, size: InkIndex.cellSize(level), near: box) { members in
                 work.sheetsVisited += members.count
                 for i in members where all[i].box.intersects(box) { found.append(i) }
-            }
-            let span = (highX - lowX + 1) * (highY - lowY + 1)
-            if span.isFinite, span <= Double(cells.count), abs(lowX) < 1e15, abs(highX) < 1e15, abs(lowY) < 1e15,
-               abs(highY) < 1e15 {
-                for x in Int(lowX)...Int(highX) {
-                    for y in Int(lowY)...Int(highY) {
-                        if let members = cells[InkIndex.Cell(x: x, y: y)] { look(members) }
-                    }
-                }
-            } else {
-                // Fewer cells hold sheets on this level than the box covers: look at the ones that do.
-                for (cell, members) in cells {
-                    let x = Double(cell.x), y = Double(cell.y)
-                    guard x >= lowX, x <= highX, y >= lowY, y <= highY else { continue }
-                    look(members)
-                }
             }
         }
         found.sort { all[$0].order > all[$1].order }

@@ -215,19 +215,24 @@ public struct Sheet: Hashable, Sendable, Identifiable {
     /// Whether a canvas point is on the sheet, within `edgeAllowance` of its edge.
     public func contains(_ point: CanvasPoint) -> Bool {
         PaperRect(x: .inches(0), y: .inches(0), width: paper.width, height: paper.height)
-            .contains(paperPoint(at: point), within: edgeAllowanceOnPaper)
+            .contains(paperPoint(at: point), within: Self.edgeAllowance)
     }
 
-    /// How far past an edge of the sheet or a scale area, in ink-grid steps on the canvas, a point still reads as on it:
-    /// 64 steps, 1/1024 inch, 64 times finer than the sixteenth the app shows. A mark's points are kept on the grid, so each
-    /// turn or scale change of the sheet rounds a point that lay exactly on an edge again, and a snap to a sheet's edge
-    /// (#57) rounds the point it takes. The roundings add up like a random walk: about 26 steps at worst after 1,000 turns
-    /// and 51 after 5,000 in a simulation, so 64 keeps a mark on an edge in its sheet and scale area through many turns (#49).
-    /// Without it a mark on a scale area's edge would lose the area's scale, or its NTS.
+    /// How far past an edge of the sheet or a scale area, in printed inches of the sheet's paper, a point still reads as on
+    /// it, and a mark still comes along with the sheet (#49): 1/1024 printed inch, 64 ink-grid steps of paper.
+    ///
+    /// A mark's points are kept on the canvas's ink grid, so each turn or scale change of the sheet rounds a point that lay
+    /// exactly on an edge again, and a snap to a sheet's edge (#57) rounds the point it takes. Each rounding moves a point at
+    /// most half a step on the canvas, which is half a step divided by the scale on the paper, so the drift is largest on a
+    /// sheet at full size or NTS. A scale change scales the canvas and the drift with it, so on the paper the drift gathered
+    /// stays what it was: an allowance on the paper holds whatever scale the drift was gathered at and whatever scale the
+    /// sheet is changed to. One kept on the canvas did not: 1,000 turns at 1:48 and a change to 1:1200 put a mark 334 canvas
+    /// steps out. Replaying the app's rounding over 40 seeds of 1,000 turns, a scale change among 1:1, 1:48, 1:50 and 1:1200,
+    /// and 1,000 more, the worst point was 31 steps of paper out. A hundredth of a printed inch is 655.
     public static let edgeAllowance = 64 / CanvasPoint.gridUnitsPerInch
 
-    /// `edgeAllowance` in printed inches of this sheet.
-    private var edgeAllowanceOnPaper: Double { Self.edgeAllowance / canvasPerPrinted }
+    /// `edgeAllowance` on the canvas: 1/1024 inch at full size, 1.17 inches at 1:1200.
+    var edgeAllowanceOnCanvas: Double { Self.edgeAllowance * canvasPerPrinted }
 
     /// Where a point on the sheet's paper lands on the canvas.
     public func canvasPoint(at paperPoint: PaperPoint) -> CanvasPoint {
@@ -254,7 +259,7 @@ public struct Sheet: Hashable, Sendable, Identifiable {
     public func area(at point: CanvasPoint) -> ScaleArea? {
         guard contains(point), !areas.isEmpty else { return nil }
         let onPaper = paperPoint(at: point)
-        return areas.last { $0.rect.contains(onPaper, within: edgeAllowanceOnPaper) }
+        return areas.last { $0.rect.contains(onPaper, within: Self.edgeAllowance) }
     }
 
     /// The scale lengths read at a canvas point on this sheet: its scale area's, or the sheet's own.

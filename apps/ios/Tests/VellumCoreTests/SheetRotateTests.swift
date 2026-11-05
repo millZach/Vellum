@@ -326,7 +326,7 @@ final class SheetRotateTests: XCTestCase {
         }
     }
 
-    /// The allowance is 64 ink-grid steps (`Sheet.edgeAllowance`, #49): a point clearly outside still reads outside, turned
+    /// The allowance is 1/1024 printed inch (`Sheet.edgeAllowance`, #49): a point clearly outside still reads outside, turned
     /// or not.
     func testAPointClearlyOutsideStillReadsOutside() {
         let sheet = edgeSheet(area: .drawn(.ratio(24)))

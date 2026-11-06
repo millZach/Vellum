@@ -1,0 +1,1175 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway. Never merge to main; kept as the tag prototype/drawing-search.
+  For Vellum #13, milestone 2: what searching the drawing index and opening a drawing looks like on the Duo.
+
+  Three structurally different variants, switched with ?v=A|B|C and the black bar at the bottom (or the arrow keys):
+    A  Search on the Drawings tab. Opening a drawing makes a new canvas named after it, the PDF placed at its scale.
+    B  Search on the Drawings tab. Opening shows a viewer (pages, zoom) with "Place on a canvas" and "Open in a new canvas".
+    C  Search inside a canvas: Add sheet gains a search over the index at its top. The Drawings tab keeps browsing folders.
+  Every variant also shows opening a DWG with no PDF yet: plotting on the laptop, queued while offline, waiting for the
+  laptop while it is off, and how it resolves when the PDF arrives. Flip Duo online/offline and Laptop on/off in the
+  State panel.
+
+  Other switches: ?theme=dark, ?fold=1 (the folded cover screen, 382 x 644 pt; unfolded is 951 x 669 pt), ?state=0 hides
+  the State panel. Chrome follows the picked canvas screen (prototype/canvas-screen A, ADR-0011), the Canvases list as
+  built, the Drawings tab as built, and the Add sheet steps from prototype/place-sheets.
+
+  Every drawing, project, canvas and file name here is made up. Thumbnails are simple SVG sketches.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Vellum: search and open drawings (prototype)</title>
+<link rel="icon" href="data:,">
+<style>
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; height:100%; }
+  body { background:#1b1b1d; overflow:hidden; font:13px/1.35 -apple-system,system-ui,"SF Pro Text","Segoe UI",sans-serif; }
+  button { font:inherit; color:inherit; border:0; background:none; cursor:pointer; padding:0; }
+  button[disabled] { cursor:default; }
+
+  /* ---------- themes (the app's Chrome colours, the iOS grouped list of the Drawings tab) ---------- */
+  .th-light { --ink:#1d1d1f; --mute:#6b6b70; --line:#d9d4c9; --paper:#f3efe6; --panel:rgba(252,250,246,.94); --accent:#2f5d8a; --accent-soft:#e6edf5;
+    --btn:#2f5d8a; --ghostbg:#fff; --modal:#fffdf9; --row:#eee5d6; --rowhover:rgba(0,0,0,.035); --tag:#eee8dc; --tagt:#555;
+    --ok:#2f7a4f; --okbg:#e3f1e8; --plot:#9a5b00; --plotbg:#f7ebd7; --only:#6b3fa8; --onlybg:#efe7f8; --hl:#fde68a;
+    --gbg:#f2f2f7; --gcard:#fff; --sep:#e5e5ea; --sfbg:rgba(118,118,128,.12); --sp:#fff; --sl:#2b2b2e; --grid:rgba(0,0,0,.05); --sketch:#3a3a3a;
+    --railbg:rgba(255,255,255,.88); --railb:#e2e2e6; --railsel:rgba(120,120,128,.14); --shadow:0 2px 10px rgba(0,0,0,.08); color-scheme:light; }
+  .th-dark { --ink:#e8e6e1; --mute:#a9a9ae; --line:#3a3b40; --paper:#1c1d20; --panel:rgba(36,37,41,.94); --accent:#9cc4ec; --accent-soft:#2c3a4a;
+    --btn:#3f74a8; --ghostbg:#2a2b2f; --modal:#26272b; --row:#3a3b40; --rowhover:rgba(255,255,255,.05); --tag:#3a3b40; --tagt:#cfcfd3;
+    --ok:#6fcf97; --okbg:rgba(111,207,151,.14); --plot:#e0a458; --plotbg:rgba(224,164,88,.15); --only:#c4a2f0; --onlybg:rgba(196,162,240,.15); --hl:rgba(253,230,138,.32);
+    --gbg:#000; --gcard:#1c1c1e; --sep:#38383a; --sfbg:rgba(118,118,128,.24); --sp:#26272b; --sl:#d6d6da; --grid:rgba(255,255,255,.045); --sketch:#e6e6e6;
+    --railbg:rgba(44,44,46,.92); --railb:#3a3a3c; --railsel:rgba(255,255,255,.12); --shadow:0 2px 12px rgba(0,0,0,.45); color-scheme:dark; }
+
+  /* ---------- the Duo ---------- */
+  #stage { position:absolute; left:0; top:0; transform-origin:0 0; overflow:hidden; border-radius:18px; color:var(--ink); background:var(--paper);
+           box-shadow:0 0 0 7px #050506, 0 14px 50px rgba(0,0,0,.6); user-select:none; -webkit-user-select:none; }
+  #stage.folded { border-radius:38px; }
+  .content { position:absolute; overflow:hidden; }
+  .bgfill { position:absolute; inset:0; }
+  #stage *, #stage { scrollbar-width:none; } #stage ::-webkit-scrollbar { display:none; }
+  .sys { position:absolute; display:flex; align-items:center; font-weight:600; color:var(--ink); pointer-events:none; }
+  .unfolded .sys { right:0; top:24px; width:84px; flex-direction:column; gap:6px; font-size:15px; }
+  .unfolded .sys .wf { width:40px; height:40px; border-radius:20px; border:3px solid #34c759; display:flex; align-items:center; justify-content:center; }
+  .unfolded .sys .wf.off { border-color:var(--mute); color:var(--mute); }
+  .folded .sys { left:0; right:0; top:0; height:44px; padding:0 30px 0 34px; justify-content:space-between; font-size:15px; }
+  .folded .sys .wf { display:flex; gap:6px; align-items:center; }
+  .folded .sys .wf.off { color:var(--mute); }
+  .gear { position:absolute; right:19px; top:123px; width:46px; height:46px; border-radius:23px; background:var(--railbg); border:1px solid var(--railb); display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow); }
+  .tabrail { position:absolute; right:24px; top:433px; width:48px; border-radius:24px; padding:5px 3px; background:var(--railbg); border:1px solid var(--railb); box-shadow:var(--shadow);
+             display:flex; flex-direction:column; gap:4px; backdrop-filter:blur(10px); }
+  .tabrail button { height:48px; border-radius:21px; display:flex; align-items:center; justify-content:center; color:var(--ink); }
+  .tabrail button.on { background:var(--railsel); color:#2f7fe0; }
+  .th-dark .tabrail button.on { color:#5aa9ff; }
+  .tabbar { position:absolute; left:0; right:0; bottom:0; height:83px; padding:6px 10px 0; display:flex; justify-content:space-around; align-items:flex-start;
+            background:var(--railbg); border-top:1px solid var(--railb); backdrop-filter:blur(10px); }
+  .tabbar button { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:10px; font-weight:500; color:var(--mute); width:76px; }
+  .tabbar button.on { color:#2f7fe0; } .th-dark .tabbar button.on { color:#5aa9ff; }
+
+  /* ---------- shared controls ---------- */
+  .primary { background:var(--btn); color:#fff; border-radius:9px; padding:8px 13px; font-weight:600; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  .primary[disabled] { opacity:.45; }
+  .ghost { border:1px solid var(--line); border-radius:9px; padding:7px 11px; background:var(--ghostbg); display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  .ghost[disabled] { opacity:.45; }
+  .ghost.sel { border-color:var(--accent); color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+  .panel { background:var(--panel); border:1px solid var(--line); box-shadow:var(--shadow); backdrop-filter:blur(8px); }
+  .sf { display:flex; align-items:center; gap:7px; background:var(--sfbg); border-radius:10px; height:38px; padding:0 8px 0 10px; color:var(--mute); flex:none; }
+  .sf input { flex:1; min-width:0; border:0; outline:0; background:transparent; font:inherit; font-size:15px; color:var(--ink); padding:0; }
+  .sf input::placeholder { color:var(--mute); }
+  .sf button { color:var(--mute); width:22px; height:22px; border-radius:11px; display:flex; align-items:center; justify-content:center; }
+  .iline { font-size:12px; color:var(--mute); margin:6px 2px 10px; display:flex; align-items:center; gap:5px; flex:none; flex-wrap:wrap; }
+  .iline .offl { color:var(--plot); font-weight:600; display:inline-flex; align-items:center; gap:4px; }
+  .thumb { flex:none; border-radius:5px; border:1px solid var(--line); overflow:hidden; background:var(--sp); display:flex; color:var(--sl); }
+  .thumb svg { width:100%; height:100%; display:block; }
+  .mk { display:inline-flex; align-items:center; gap:4px; font-size:11px; padding:2px 7px; border-radius:7px; white-space:nowrap; font-weight:600; line-height:1.35; }
+  .mk.plot { background:var(--plotbg); color:var(--plot); } .mk.only { background:var(--onlybg); color:var(--only); }
+  .mk.ok { background:var(--okbg); color:var(--ok); } .mk.off { background:var(--tag); color:var(--mute); } .mk.cv { background:var(--accent-soft); color:var(--accent); }
+  .tag { font-size:11px; padding:2px 6px; border-radius:6px; background:var(--tag); color:var(--tagt); white-space:nowrap; }
+  mark { background:var(--hl); color:inherit; border-radius:3px; padding:0 1px; }
+  .dl { height:4px; border-radius:2px; background:var(--row); overflow:hidden; margin-top:5px; width:160px; max-width:100%; }
+  .dl i { display:block; height:100%; width:0; background:var(--accent); animation:fill .9s linear forwards; }
+  @keyframes fill { to { width:100%; } }
+  .spin { animation:spin 1.1s linear infinite; transform-origin:50% 50%; } @keyframes spin { to { transform:rotate(360deg); } }
+  .note { color:var(--mute); font-size:12px; }
+  .legend { color:var(--mute); font-size:12px; margin:12px 4px 0; line-height:1.7; }
+  .backbtn { display:inline-flex; align-items:center; color:var(--accent); font-weight:600; font-size:14px; margin:0 0 6px -4px; padding:2px 4px; }
+
+  /* ---------- Drawings tab (grouped list, as built) ---------- */
+  .grouped { position:absolute; inset:0; background:var(--gbg); }
+  .dscreen { position:absolute; inset:0; display:flex; flex-direction:column; padding:14px 20px 0; }
+  .folded .dscreen { padding:6px 14px 0; }
+  .dscreen h1, .bleft h1 { font-size:26px; margin:4px 0 10px; font-weight:700; }
+  .dlist { flex:1; overflow:auto; padding-bottom:16px; }
+  .gcard { background:var(--gcard); border-radius:12px; overflow:hidden; }
+  .ghead { font-size:13px; color:var(--mute); margin:4px 20px 6px; }
+  .res { display:flex; align-items:center; gap:12px; width:100%; text-align:left; padding:8px 14px 8px 12px; position:relative; }
+  .res + .res::before { content:""; position:absolute; left:var(--sepx,108px); right:0; top:0; border-top:1px solid var(--sep); }
+  .res:hover { background:var(--rowhover); }
+  .res.sel { background:var(--accent-soft); }
+  .rmain { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .rt { font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rm { font-size:12.5px; color:var(--mute); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rtags { display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex:none; }
+  .rchev { flex:none; color:var(--mute); display:flex; }
+  .browse { display:flex; align-items:center; gap:10px; width:100%; padding:12px 14px; background:var(--gcard); border-radius:12px; margin-top:12px; font-size:15px; text-align:left; }
+  .browse .fi { color:#2f7fe0; display:flex; } .browse .grow { flex:1; }
+  .frow { display:flex; align-items:center; gap:14px; width:100%; padding:12px 16px; text-align:left; font-size:16px; position:relative; }
+  .frow + .frow::before { content:""; position:absolute; left:58px; right:0; top:0; border-top:1px solid var(--sep); }
+  .frow .fi { color:#2f7fe0; display:flex; } .frow .grow { flex:1; min-width:0; } .frow .rm { font-size:12px; }
+  .crumbs { font-size:13px; color:var(--mute); margin:0 4px 8px; }
+  .crumbs button { color:var(--accent); font-weight:600; }
+  .empty { padding:28px 20px; text-align:center; color:var(--mute); }
+
+  /* B: list and viewer side by side */
+  .bsplit { position:absolute; inset:0; display:flex; }
+  .bleft { width:372px; flex:none; display:flex; flex-direction:column; padding:14px 0 0 16px; }
+  .bleft .sf, .bleft .iline { margin-right:4px; }
+  .bleft .dlist { padding-right:4px; }
+  .bright { flex:1; min-width:0; padding:14px 8px 14px 12px; display:flex; }
+  .viewer { flex:1; min-width:0; display:flex; flex-direction:column; background:var(--gcard); border-radius:14px; border:1px solid var(--sep); overflow:hidden; }
+  .viewer.full { position:absolute; inset:8px 8px 8px 8px; }
+  .folded .viewer.full { inset:0; border-radius:0; border:0; }
+  .vhead { padding:12px 14px 8px; }
+  .vtitle { font-size:17px; font-weight:700; display:flex; align-items:baseline; gap:8px; }
+  .vtitle span { font-weight:600; }
+  .vmeta { color:var(--mute); font-size:12.5px; margin-top:3px; display:flex; flex-wrap:wrap; gap:4px 10px; }
+  .vmeta b { color:var(--ink); font-weight:600; }
+  .vtools { display:flex; align-items:center; gap:6px; padding:6px 10px; border-top:1px solid var(--sep); border-bottom:1px solid var(--sep); font-size:12.5px; }
+  .vtools .grow { flex:1; }
+  .vtools .ib { width:30px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; border:1px solid var(--line); background:var(--ghostbg); }
+  .vtools .ib[disabled] { opacity:.4; }
+  .vtools .zl { min-width:42px; text-align:center; font-variant-numeric:tabular-nums; }
+  .vstrip { display:flex; gap:8px; padding:8px 10px 0; }
+  .vstrip button { width:92px; border:1px solid var(--line); border-radius:8px; padding:4px; display:flex; flex-direction:column; gap:3px; font-size:11px; text-align:left; background:var(--ghostbg); }
+  .vstrip button.sel { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+  .vstrip .thumb { width:100%; aspect-ratio:3/2; }
+  .vpage { flex:1; min-height:0; overflow:auto; background:var(--paper); position:relative; cursor:grab; }
+  .vpage.z1 { cursor:default; }
+  .vzoom { margin:14px auto; color:var(--sl); box-shadow:0 1px 6px rgba(0,0,0,.18); background:var(--sp); }
+  .vzoom svg { display:block; width:100%; height:auto; }
+  .vwait { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .vwait .ghostart { position:absolute; inset:18px; opacity:.22; color:var(--sl); display:flex; align-items:center; justify-content:center; }
+  .vwait .ghostart svg { max-width:100%; max-height:100%; }
+  .vacts { display:flex; align-items:center; gap:8px; padding:10px 12px; border-top:1px solid var(--sep); }
+  .vacts .note { flex:1; min-width:0; }
+  .folded .vacts { flex-wrap:wrap; } .folded .vacts .note { flex-basis:100%; }
+  .vempty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--mute); gap:8px; padding:30px; text-align:center; }
+
+  /* the plot card (no PDF yet) */
+  .plotcard { position:relative; width:min(380px,100%); background:var(--modal); border:1px solid var(--line); border-radius:14px; padding:14px 16px; box-shadow:var(--shadow); }
+  .plotcard h3 { margin:0 0 4px; font-size:15px; display:flex; align-items:center; gap:8px; }
+  .plotcard p { margin:4px 0; font-size:12.5px; color:var(--mute); }
+  .steps { margin:8px 0 2px; padding:0; list-style:none; font-size:12.5px; }
+  .steps li { display:flex; align-items:center; gap:7px; margin:3px 0; color:var(--mute); }
+  .steps li.done { color:var(--ok); } .steps li.now { color:var(--ink); font-weight:600; }
+  .steps .dot { width:14px; height:14px; display:flex; align-items:center; justify-content:center; flex:none; }
+  .pbar { height:4px; border-radius:2px; background:var(--row); overflow:hidden; margin-top:8px; }
+  .pbar i { display:block; height:100%; background:var(--plot); transition:width .25s linear; }
+
+  /* ---------- Canvases list (as built) ---------- */
+  .clist { position:absolute; inset:0; background:var(--paper); }
+  .clcol { position:absolute; left:24px; top:14px; width:328px; bottom:14px; display:flex; flex-direction:column; }
+  .clhead { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .clhead h1 { font-size:26px; margin:0; font-weight:700; }
+  .crow { display:block; width:100%; text-align:left; padding:8px 10px; border-radius:10px; }
+  .crow b { font-size:15px; font-weight:600; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .crow span { color:var(--mute); font-size:12.5px; }
+  .crow.sel { background:var(--accent-soft); }
+  .cprev { position:absolute; left:370px; right:9px; top:14px; bottom:59px; border:1px solid var(--line); border-radius:14px; overflow:hidden; background:var(--paper); }
+  .cfoot { position:absolute; left:370px; right:9px; bottom:12px; height:36px; display:flex; align-items:center; gap:8px; }
+  .cfoot b { flex:1; font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .folded .clcol { left:14px; right:14px; width:auto; top:6px; bottom:0; }
+  .placeholder { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; background:var(--gbg); color:var(--mute); }
+  .placeholder h1 { color:var(--ink); margin:0; font-size:26px; }
+
+  /* ---------- canvas screen (drafting rail, ADR-0011) ---------- */
+  .cscreen { position:absolute; inset:0; background:var(--paper); }
+  svg.cv { position:absolute; inset:0; display:block; }
+  .lrail { position:absolute; left:8px; top:8px; bottom:8px; width:54px; border-radius:14px; display:flex; flex-direction:column; align-items:center; padding:6px 0; gap:2px; }
+  .lrail .tb { width:42px; height:38px; border-radius:9px; display:flex; align-items:center; justify-content:center; color:var(--ink); }
+  .lrail .tb.on { background:var(--accent-soft); color:var(--accent); }
+  .lrail hr { width:32px; border:0; border-top:1px solid var(--line); margin:4px 0; }
+  .chip { width:22px; height:22px; border-radius:11px; border:2px solid var(--ghostbg); box-shadow:0 0 0 1px var(--line); }
+  .chip.sel { box-shadow:0 0 0 2px var(--ink); }
+  .tbar { position:absolute; left:70px; top:8px; height:40px; border-radius:12px; display:flex; align-items:center; gap:12px; padding:0 12px; white-space:nowrap; }
+  .tbar b { font-size:14.5px; max-width:300px; overflow:hidden; text-overflow:ellipsis; }
+  .tbar .units { display:inline-flex; align-items:center; gap:2px; }
+  .tbar button { display:flex; align-items:center; }
+  .tact { position:absolute; right:8px; top:8px; display:flex; gap:8px; }
+  .tact .ghost, .tact .primary { height:40px; padding:0 13px; border-radius:11px; }
+  .chipcol { position:absolute; right:8px; top:56px; display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+  .pchip { box-shadow:var(--shadow); height:36px; padding:0 12px; border-radius:11px; display:inline-flex; align-items:center; gap:6px; font-weight:600; font-size:12.5px; background:var(--plotbg); color:var(--plot); border:1px solid transparent; }
+  .pchip.ready { background:var(--btn); color:#fff; }
+  .sbar { position:absolute; left:70px; right:8px; bottom:8px; height:34px; border-radius:11px; display:flex; align-items:center; gap:14px; padding:0 12px; font-size:12px; color:var(--mute); white-space:nowrap; }
+  .sbar .pr { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
+  .sbar .sv { color:var(--ok); } .sbar .sv.off { color:var(--plot); }
+  .sbar .sb { display:inline-flex; align-items:center; gap:6px; }
+  .sbar .sb i { display:inline-block; height:6px; border:1.5px solid currentColor; border-top:0; }
+  .pill { position:absolute; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:10px; padding:6px 6px 6px 12px; border-radius:12px; font-size:13px; white-space:nowrap; max-width:calc(100% - 140px); }
+  .pill > span { overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:7px; }
+  .pill.plot { border-color:var(--plot); }
+  .pill .ghost, .pill .primary { padding:5px 11px; }
+  .folded .tbar { left:8px; right:8px; gap:8px; padding:0 6px 0 4px; }
+  .folded .tbar b { flex:1; max-width:none; }
+  .folded .sbar { left:8px; }
+  .folded .pill { left:8px; right:8px; transform:none; max-width:none; white-space:normal; }
+  .folded .pill > span { display:block; }
+
+  /* ---------- modals, toasts ---------- */
+  .scrim { position:absolute; inset:0; background:rgba(20,20,20,.32); display:flex; align-items:center; justify-content:center; padding:12px; z-index:5; }
+  .modal { width:600px; max-width:100%; max-height:100%; overflow:auto; background:var(--modal); border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,.3); padding:14px 16px; display:flex; flex-direction:column; }
+  .modal.tall { height:620px; }
+  .modal h2 { font-size:17px; margin:0 0 8px; }
+  .modal p { margin:8px 0; }
+  .modal .row { display:flex; gap:8px; align-items:center; margin:10px 0 0; flex-wrap:wrap; }
+  .modal .row.end { justify-content:flex-end; }
+  .modal .row .note { flex:1; min-width:150px; }
+  .folded .scrim { align-items:flex-end; padding:0; }
+  .folded .modal { width:100%; border-radius:16px 16px 0 0; max-height:94%; }
+  .folded .modal.tall { height:94%; }
+  .crumb { color:var(--mute); font-size:12px; margin:0 0 6px; }
+  .mlist { flex:1; min-height:0; overflow:auto; margin:4px -6px 0; }
+  .mlist .sec { font-size:11.5px; font-weight:700; color:var(--mute); text-transform:uppercase; letter-spacing:.03em; padding:10px 6px 4px; }
+  .mrow { display:flex; width:100%; text-align:left; padding:7px 6px; border-bottom:1px solid var(--row); gap:10px; align-items:center; }
+  .mrow:hover { background:var(--rowhover); }
+  .mrow .nm { flex:1; min-width:0; } .mrow .nm .rm { font-size:11.5px; }
+  .mrow .fi { flex:none; color:var(--accent); display:flex; }
+  .mrow .tg { display:flex; flex-direction:column; align-items:flex-end; gap:3px; flex:none; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+  .chips .ghost { padding:6px 9px; font-size:12.5px; }
+  .ccols { display:grid; grid-template-columns:250px 1fr; gap:16px; align-items:start; }
+  .folded .ccols { grid-template-columns:1fr; gap:6px; }
+  .cprevbox { border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--sp); color:var(--sl); position:relative; }
+  .cprevbox svg { display:block; width:100%; height:auto; }
+  .cprevbox.fade svg { opacity:.25; }
+  .cprevbox .cap { position:absolute; left:6px; bottom:5px; font-size:10.5px; color:var(--mute); background:var(--modal); padding:1px 5px; border-radius:5px; }
+  .pgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:8px 0; }
+  .pcard { display:flex; flex-direction:column; gap:4px; text-align:left; border:1px solid var(--line); border-radius:11px; padding:6px; background:var(--ghostbg); }
+  .pcard:hover { border-color:var(--accent); }
+  .pcard .thumb { width:100%; aspect-ratio:3/2; }
+  .toast { position:absolute; left:50%; transform:translateX(-50%); padding:8px 13px; border-radius:10px; background:rgba(29,29,31,.9); color:#fff; font-size:12.5px; max-width:80%; text-align:center; z-index:6; pointer-events:none; }
+  .banner { position:absolute; left:50%; top:12px; transform:translateX(-50%); z-index:6; display:flex; align-items:center; gap:10px; padding:6px 6px 6px 12px; border-radius:12px; font-size:13px; white-space:nowrap; }
+
+  /* ---------- prototype chrome, not part of the design ---------- */
+  #bar { position:fixed; left:50%; bottom:8px; transform:translateX(-50%); display:flex; align-items:center; gap:6px; background:#000; color:#fff; border-radius:22px;
+         padding:5px 6px; font:12.5px system-ui,sans-serif; z-index:50; white-space:nowrap; box-shadow:0 4px 16px rgba(0,0,0,.5); max-width:calc(100vw - 12px); outline:1px solid #333; }
+  #bar button { color:#fff; background:#2c2c2e; border-radius:16px; height:30px; padding:0 11px; font-size:12.5px; display:inline-flex; align-items:center; gap:5px; }
+  #bar .arrow { width:32px; padding:0; justify-content:center; font-size:14px; }
+  #bar .lbl { padding:0 6px; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  #bar .lbl b { color:#9cc4ec; }
+  #bar .sep { width:1px; height:20px; background:#3a3a3c; margin:0 2px; }
+  #bar button.on { background:#3f74a8; }
+  #panel { position:fixed; left:10px; top:10px; width:268px; background:rgba(12,12,13,.94); color:#e8e6e1; border:1px solid #3a3a3c; border-radius:12px; z-index:40;
+           font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; box-shadow:0 6px 24px rgba(0,0,0,.5); max-height:calc(100vh - 70px); overflow:auto; }
+  #panel .ph { display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid #2c2c2e; font-family:system-ui,sans-serif; }
+  #panel .ph small { color:#8e8e93; flex:1; }
+  #panel .ph button { color:#aaa; font-size:16px; width:24px; }
+  #panel .pb { padding:8px 10px; }
+  #panel .k { color:#8e8e93; display:inline-block; width:66px; vertical-align:top; }
+  #panel .v { display:inline-block; width:178px; word-break:break-word; }
+  #panel .ln { margin:3px 0; }
+  #panel .ctl { display:flex; gap:4px; margin:6px 0; align-items:center; }
+  #panel .ctl .k { width:62px; }
+  #panel .ctl button { background:#2c2c2e; color:#ddd; border-radius:7px; padding:4px 9px; font:12px system-ui,sans-serif; }
+  #panel .ctl button.on { background:#3f74a8; color:#fff; }
+  #panel .try { margin-top:8px; padding-top:8px; border-top:1px solid #2c2c2e; color:#c7c7cc; font-family:system-ui,sans-serif; font-size:12px; }
+  #panel .sp { color:#e0a458; } #panel .okc { color:#6fcf97; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="panel"><div class="ph"><b>State</b><small>prototype controls, not the design</small><button id="pclose" aria-label="Hide the state panel">×</button></div><div class="pb" id="pbody"></div></div>
+<div id="bar">
+  <button class="arrow" id="prev" aria-label="Previous variant">◀</button><span class="lbl" id="vlabel"></span><button class="arrow" id="next" aria-label="Next variant">▶</button>
+  <span class="sep"></span><button id="themeT"></button><button id="foldT"></button><button id="stateT">State</button>
+</div>
+<script>
+"use strict";
+// ================= made-up drawing index =================
+const VARIANTS = {
+  A:'Search on Drawings · opening makes a new canvas',
+  B:'Search on Drawings · opening shows a viewer',
+  C:'Search inside Add sheet on a canvas',
+};
+const PROJ = { SA:'Made-up School Addition', PU:'Made-up Plant Upgrade' };
+const PAPER = { D:[36, 24], B:[17, 11], A1:[33.1, 23.4] };
+const SCALE = { q:['1/4" = 1\'-0"', 48], e:['1/8" = 1\'-0"', 96], t:['3/16" = 1\'-0"', 64], th:['3/8" = 1\'-0"', 32], h:['1/2" = 1\'-0"', 24],
+  s20:['1" = 20\'-0"', 240], n:['NTS', 0], an:['AS NOTED', null], m20:['1:20', 20], m50:['1:50', 50] };
+const PICK = [['1/8" = 1\'-0"', 96], ['3/16" = 1\'-0"', 64], ['1/4" = 1\'-0"', 48], ['3/8" = 1\'-0"', 32], ['1/2" = 1\'-0"', 24],
+  ['3/4" = 1\'-0"', 16], ['1" = 1\'-0"', 12], ['1-1/2" = 1\'-0"', 8], ['3" = 1\'-0"', 4]];
+const MONTHS = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
+// number, title, rev, scale, date, project, sketch, files (both | dwg = no PDF yet | pdf = PDF only), paper, pages, MB, folder
+const ROWS = [
+  ['M-101', 'First floor HVAC plan', 'C', 'q', '2026-09-14', 'SA', 'hvac', 'both', 'D', 1, 1.4, 'Drawings / Mechanical'],
+  ['M-102', 'Second floor HVAC plan', 'C', 'q', '2026-09-14', 'SA', 'hvac', 'both', 'D', 1, 1.3, 'Drawings / Mechanical'],
+  ['M-201', 'Mechanical room enlarged plan', 'B', 'h', '2026-08-30', 'SA', 'mroom', 'both', 'D', 1, 0.9, 'Drawings / Mechanical'],
+  ['M-501', 'Mechanical details', 'B', 'an', '2026-08-30', 'SA', 'details', 'both', 'D', 1, 1.1, 'Drawings / Mechanical'],
+  ['M-601', 'Mechanical schedules', 'A', 'n', '2026-08-02', 'SA', 'schedule', 'both', 'D', 1, 0.6, 'Drawings / Mechanical'],
+  ['P-101', 'First floor plumbing plan', 'B', 'q', '2026-10-21', 'SA', 'plumb', 'dwg', 'D', 1, 1.2, 'Drawings / Plumbing'],
+  ['E-101', 'First floor lighting plan', 'A', 'e', '2026-07-19', 'SA', 'light', 'both', 'D', 1, 1.0, 'Drawings / Electrical'],
+  ['A-101', 'First floor plan (architect)', 'D', 'e', '2026-06-30', 'SA', 'arch', 'pdf', 'D', 1, 2.2, 'Backgrounds'],
+  ['E-201', 'Boiler room power plan', 'A', 'q', '2026-10-28', 'PU', 'power', 'dwg', 'D', 1, 0.9, 'Drawings / Electrical'],
+  ['E-202', 'MCC-4 one-line diagram', '1', 'n', '2026-09-03', 'PU', 'oneline', 'both', 'B', 1, 0.4, 'Drawings / Electrical'],
+  ['E-301', 'Boiler room grounding plan', '0', 'q', '2026-10-30', 'PU', 'ground', 'dwg', 'D', 1, 0.8, 'Drawings / Electrical'],
+  ['I-101', 'Instrument location plan', '2', 't', '2026-09-22', 'PU', 'inst', 'both', 'D', 1, 1.2, 'Drawings / Instrumentation'],
+  ['I-301', 'Loop diagram FT-101', '0', 'n', '2026-09-25', 'PU', 'loop', 'both', 'B', 1, 0.3, 'Drawings / Instrumentation'],
+  ['I-302', 'Loop diagram PT-102', '0', 'n', '2026-09-25', 'PU', 'loop', 'both', 'B', 1, 0.3, 'Drawings / Instrumentation'],
+  ['I-303', 'Loop diagram TT-103', '1', 'n', '2026-10-02', 'PU', 'loop', 'both', 'B', 1, 0.3, 'Drawings / Instrumentation'],
+  ['P-001', 'Feedwater P&ID', '3', 'n', '2026-08-12', 'PU', 'pid', 'both', 'D', 1, 0.8, 'Drawings / Process'],
+  ['M-401', 'Boiler house piping plan', 'B', 'th', '2026-09-09', 'PU', 'piping', 'both', 'D', 1, 1.5, 'Drawings / Mechanical'],
+  ['C-101', 'Site plan', '0', 's20', '2026-05-14', 'PU', 'site', 'both', 'D', 1, 1.8, 'Drawings / Civil'],
+  ['V-12', 'Pump skid GA (vendor)', '2', 'm20', '2026-07-07', 'PU', 'ga', 'pdf', 'A1', 3, 3.1, 'Vendor / Pump skid'],
+  ['V-14', 'Deaerator GA (vendor)', '1', 'm50', '2026-06-18', 'PU', 'ga2', 'pdf', 'A1', 1, 1.9, 'Vendor / Deaerator'],
+];
+function makeDrawings() {
+  return ROWS.map(r => {
+    const [num, title, rev, sk, date, pk, kind, files, paper, pages, mb, folder] = r;
+    const [y, m, dd] = date.split('-').map(Number);
+    return { num, title, rev, scaleText:SCALE[sk][0], k:SCALE[sk][1], date:`${MONTHS[m - 1]} ${dd}, ${y}`, proj:PROJ[pk], kind, files,
+      pw:PAPER[paper][0], ph:PAPER[paper][1], pages:pages === 3 ? ['General arrangement', 'Sections', 'Parts list'] : [title], mb, folder, justPlotted:false };
+  });
+}
+
+// ================= little helpers =================
+const f = n => Math.round(n * 10) / 10;
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const D = num => S.drawings.find(d => d.num === num);
+const C = id => S.canvases.find(c => c.id === id);
+function scaleLabel(k) { if (k === 0) return 'NTS'; const p = PICK.find(s => s[1] === k) || Object.values(SCALE).find(s => s[1] === k); return p ? p[0] : '1:' + k; }
+function fmtLen(inches) { let ft = Math.floor(inches / 12), i = Math.round(inches - ft * 12); if (i === 12) { ft++; i = 0; } return `${ft}'-${i}"`; }
+function covers(d, k) { const kk = k || 1; return `${fmtLen(d.pw * kk)} × ${fmtLen(d.ph * kk)}`; }
+function niceLen(x) { const L = [1, 2, 6, 12, 24, 60, 120, 240, 600, 1200, 2400, 6000, 12000, 24000]; return L.find(v => v >= x) || L[L.length - 1]; }
+function rng(seed) { let h = 2166136261; for (const ch of seed) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); h ^= h >>> 16; return (h >>> 0) / 4294967296; }; }
+function fileLine(d) {
+  if (d.files === 'dwg') return `${d.num}.dwg · no PDF yet`;
+  if (d.files === 'pdf') return `${d.num} ${d.title.replace(' (vendor)', '')}.pdf · no DWG`;
+  return d.justPlotted ? `${d.num}.dwg + ${d.num}.pdf, plotted by the laptop into Dropbox / Vellum` : `${d.num}.dwg + ${d.num}.pdf`;
+}
+
+// ================= icons =================
+const ICON = {
+  search:'<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>', x:'<path d="M7 7l10 10 M17 7L7 17"/>',
+  xc:'<circle cx="12" cy="12" r="9" fill="currentColor" stroke="none" opacity=".45"/><path d="M9 9l6 6 M15 9l-6 6" stroke="var(--gcard)"/>',
+  chev:'<path d="M9 6l6 6-6 6"/>', back:'<path d="M15 6l-6 6 6 6"/>', plus:'<path d="M12 5v14 M5 12h14"/>', minus:'<path d="M5 12h14"/>',
+  folder:'<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" fill="currentColor" stroke="none"/>',
+  pdf:'<path d="M7 3h7l5 5v13H7z M14 3v5h5"/>', dwg:'<path d="M7 3h7l5 5v13H7z M14 3v5h5 M9.5 13l2 4 2-4 2 4"/>',
+  laptop:'<path d="M5 6h14v9H5z M3 18h18"/>', clock:'<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+  wifi:'<path d="M3.5 9.5a12 12 0 0117 0 M6.5 12.5a8 8 0 0111 0 M9.5 15.5a4 4 0 015 0"/><circle cx="12" cy="18.5" r="1" fill="currentColor"/>',
+  wifioff:'<path d="M3.5 9.5a12 12 0 0117 0 M6.5 12.5a8 8 0 0111 0 M9.5 15.5a4 4 0 015 0 M4 4l16 16"/><circle cx="12" cy="18.5" r="1" fill="currentColor"/>',
+  cloudoff:'<path d="M7 18h10a4 4 0 00.8-7.9A6 6 0 006.3 9 4.5 4.5 0 007 18z M4 4l16 16"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3 M12 18.5v3 M2.5 12h3 M18.5 12h3 M5.3 5.3l2.1 2.1 M16.6 16.6l2.1 2.1 M5.3 18.7l2.1-2.1 M16.6 7.4l2.1-2.1"/>',
+  canvases:'<circle cx="12" cy="12" r="9"/><path d="M8.5 15.5l.8-2.8 6-6 2 2-6 6z M13.8 8.2l2 2"/>',
+  drawings:'<path d="M13 21H6V3h8l4 4v5 M14 3v4h4 M9 8h3 M9 11h5"/><circle cx="16" cy="16.5" r="3"/><path d="M18.2 18.7L21 21.5"/>',
+  jobs:'<path d="M21 3L3 10.5l7.5 3L13.5 21z M10.5 13.5L21 3"/>', meetings:'<path d="M4 10v4 M7.5 7v10 M11 4v16 M14.5 8v8 M18 6v12 M21 10v4"/>',
+  pen:'<path d="M12 3l4 9-4 9-4-9z M12 12v9 M10 8h4"/>', hl:'<path d="M5 19h14 M8 15l7-9 3 2-7 9H8z"/>', eraser:'<path d="M4 15l8-8 6 6-5 5H8z M10 9l6 6"/>',
+  line:'<path d="M5 19L19 5"/>', lasso:'<path d="M12 4c5 0 8 2.5 8 5.5S16.5 15 12 15s-8-2.4-8-5.5S7 4 12 4z M8 14c-1 2-1 4 1 5"/>',
+  text:'<path d="M4 4h16v16H4z M8 9h8 M12 9v7"/>', measure:'<path d="M3 16l13-13 5 5-13 13z M7 12l2 2 M10 9l2 2 M13 6l2 2"/>',
+  dim:'<path d="M4 12h16 M7 9l-3 3 3 3 M17 9l3 3-3 3 M4 6v12 M20 6v12"/>', frame:'<path d="M4 6h16v12H4z M4 10h16"/>', window:'<path d="M4 6h16v12H4z" stroke-dasharray="3 2.5"/>',
+  undo:'<path d="M9 14L4 9l5-5 M4 9h10a6 6 0 010 12h-3"/>', redo:'<path d="M15 14l5-5-5-5 M20 9H10a6 6 0 000 12h3"/>',
+  contrast:'<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 010 17z" fill="currentColor"/>', updown:'<path d="M8 9l4-4 4 4 M8 15l4 4 4-4"/>',
+  rec:'<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3" fill="currentColor"/>', send:'<path d="M21 3L3 10.5l7.5 3L13.5 21z M10.5 13.5L21 3"/>',
+  extents:'<path d="M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5"/>', expand:'<path d="M14 4h6v6 M10 20H4v-6 M20 4l-7 7 M4 20l7-7"/>',
+  collapse:'<path d="M20 10h-6V4 M4 14h6v6 M14 10l7-7 M10 14l-7 7"/>', check:'<path d="M5 12l4 4 10-10"/>', sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2 M12 20v2 M4 12H2 M22 12h-2 M5 5l1.5 1.5 M17.5 17.5L19 19 M5 19l1.5-1.5 M17.5 6.5L19 5"/>',
+  moon:'<path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/>', spinner:'<path d="M12 3a9 9 0 019 9" />', hourglass:'<path d="M7 3h10 M7 21h10 M8 3c0 5 8 5 8 9s-8 4-8 9 M16 3c0 5-8 5-8 9s8 4 8 9"/>',
+  canvasplus:'<path d="M4 5h16v14H4z M12 9v6 M9 12h6"/>', fit:'<path d="M4 9V4h5 M20 9V4h-5 M4 15v5h5 M20 15v5h-5 M9 9h6v6H9z"/>',
+};
+const svg = (n, s = 20, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
+
+// ================= drawing sketches (thumbnails, viewer pages, sheets) =================
+const ARTS = new Map();
+function artInner(d, page = 0) {
+  const key = d.num + ':' + page; if (ARTS.has(key)) return ARTS.get(key);
+  const W = Math.round(d.pw * 10), H = Math.round(d.ph * 10), r = rng(key), o = [];
+  const L = (a, b, c, e, w = .8, x = '') => o.push(`<line x1="${f(a)}" y1="${f(b)}" x2="${f(c)}" y2="${f(e)}" stroke-width="${w}" ${x}/>`);
+  const R = (x, y, w, h, sw = .8, ex = '') => o.push(`<rect x="${f(x)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" stroke-width="${sw}" ${ex}/>`);
+  const Ci = (x, y, rr, sw = .8, ex = '') => o.push(`<circle cx="${f(x)}" cy="${f(y)}" r="${f(rr)}" stroke-width="${sw}" ${ex}/>`);
+  const T = (x, y, t, s, ex = '') => o.push(`<text x="${f(x)}" y="${f(y)}" font-size="${f(s)}" style="fill:currentColor;stroke:none" font-family="system-ui,sans-serif" ${ex}>${esc(t)}</text>`);
+  const P = (dd, sw = .8, ex = '') => o.push(`<path d="${dd}" stroke-width="${sw}" ${ex}/>`);
+  const bubble = (x, y, t, rr = 4.5) => { Ci(x, y, rr, .6); L(x - rr, y, x + rr, y, .4); T(x, y - 1, t.split(' ')[0], rr * .55, 'text-anchor="middle"'); T(x, y + rr * .65, t.split(' ')[1] || '', rr * .55, 'text-anchor="middle"'); };
+  const valve = (x, y, s = 3) => P(`M${f(x - s)} ${f(y - s * .7)} L${f(x + s)} ${f(y + s * .7)} L${f(x + s)} ${f(y - s * .7)} L${f(x - s)} ${f(y + s * .7)} Z`, .6);
+  const tbW = Math.min(84, W * .27), tbH = Math.max(18, H * .13);
+  R(4, 4, W - 8, H - 8, 1.1); R(W - 4 - tbW, H - 4 - tbH, tbW, tbH, .8); L(W - 4 - tbW, H - 4 - tbH * .42, W - 4, H - 4 - tbH * .42, .5);
+  L(W - 4 - tbW * .32, H - 4 - tbH * .42, W - 4 - tbW * .32, H - 4, .5);
+  T(W - 4 - tbW * .29, H - 4 - tbH * .1, d.num, tbH * .26, 'font-weight="700"'); T(W - 4 - tbW + 3, H - 4 - tbH * .58, d.title.slice(0, 30), tbH * .15);
+  T(W - 4 - tbW + 3, H - 4 - tbH * .1, d.pages.length > 1 ? d.pages[page] : 'SCALE: ' + d.scaleText, tbH * .14);
+  const ax = 14, ay = 14, aw = W - 28 - (W > 200 ? 0 : 0), ah = H - 28 - tbH;
+  const kind = d.kind;
+  if (['hvac', 'plumb', 'light', 'power', 'ground', 'arch', 'inst', 'mroom', 'piping'].includes(kind)) {
+    const ow = aw * .9, oh = ah, cy = ay + oh * (.45 + r() * .1);
+    R(ax, ay, ow, oh, 1.7);
+    L(ax, cy - 6, ax + ow, cy - 6, 1.1); L(ax, cy + 6, ax + ow, cy + 6, 1.1);
+    const nv = 3 + (r() * 3 | 0), xs = [];
+    for (let i = 0; i < nv; i++) { const x = ax + ow * (i + 1) / (nv + 1) + (r() - .5) * ow * .05; xs.push(x); L(x, ay, x, cy - 6, 1.1); }
+    for (let i = 0; i < nv; i++) { const x = ax + ow * (i + 1) / (nv + 1) + (r() - .5) * ow * .08; L(x, cy + 6, x, ay + oh, 1.1); }
+    const rooms = [ax, ...xs, ax + ow];
+    if (kind === 'hvac') {
+      R(ax + ow * .06, cy - 3, ow * .84, 6, .8);
+      for (let i = 0; i < 7; i++) { const x = ax + ow * (.1 + .12 * i), up = i % 2 ? 1 : -1, end = cy + up * (16 + r() * 14);
+        L(x - 1.8, cy + up * 3, x - 1.8, end, .7); L(x + 1.8, cy + up * 3, x + 1.8, end, .7); R(x - 4, end - (up > 0 ? 0 : 8), 8, 8, .6); L(x - 4, end - (up > 0 ? 0 : 8), x + 4, end + (up > 0 ? 8 : 0), .4); L(x + 4, end - (up > 0 ? 0 : 8), x - 4, end + (up > 0 ? 8 : 0), .4); }
+    } else if (kind === 'light') {
+      for (let i = 0; i < rooms.length - 1; i++) for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) R(rooms[i] + (rooms[i + 1] - rooms[i]) * (.25 + .4 * a) - 4, ay + (cy - ay) * (.3 + .4 * b) - 1.5, 8, 3, .6);
+      for (let i = 0; i < 6; i++) R(ax + ow * (.1 + .14 * i) - 4, cy + oh * .25, 8, 3, .6);
+    } else if (kind === 'plumb') {
+      P(`M${f(ax + 8)} ${f(cy + 2)} H${f(ax + ow - 8)}`, .7, 'stroke-dasharray="4 2"');
+      for (let i = 0; i < 6; i++) { const x = ax + ow * (.12 + .14 * i); L(x, cy + 2, x, cy - 18 - r() * 10, .6, 'stroke-dasharray="4 2"'); R(x - 4, cy - 30 - r() * 6, 8, 6, .6, 'rx="2"'); }
+      for (let i = 0; i < 3; i++) Ci(ax + ow * (.2 + .3 * i), ay + oh * .8, 3, .6);
+    } else if (kind === 'power') {
+      R(ax + 6, ay + 6, 18, 7, .8, 'style="fill:currentColor;fill-opacity:.35"');
+      for (let i = 0; i < 12; i++) { const x = ax + 10 + r() * (ow - 20), y = r() < .5 ? ay + 3 : ay + oh - 3; Ci(x, y, 2.2, .6); L(x - 2.2, y, x + 2.2, y, .5); if (i < 5) P(`M${f(x)} ${f(y)} Q${f((x + ax + 15) / 2)} ${f(cy)} ${f(ax + 15)} ${f(ay + 13)}`, .45, 'stroke-dasharray="3 1.5"'); }
+      for (let i = 0; i < 2; i++) R(ax + ow * (.55 + .2 * i), cy + 12, 22, 16, .9);
+    } else if (kind === 'ground') {
+      R(ax + 5, ay + 5, ow - 10, oh - 10, 1, 'stroke-dasharray="5 2.5"');
+      for (const [x, y] of [[ax + 5, ay + 5], [ax + ow - 5, ay + 5], [ax + 5, ay + oh - 5], [ax + ow - 5, ay + oh - 5]]) { Ci(x, y, 3, .7); L(x - 3, y, x + 3, y, .6); L(x, y - 3, x, y + 3, .6); }
+      for (let i = 0; i < 3; i++) { const x = ax + ow * (.25 + .25 * i); R(x - 9, cy + 14, 18, 12, .8); L(x, cy + 26, x, ay + oh - 5, .6, 'stroke-dasharray="5 2.5"'); }
+    } else if (kind === 'arch') {
+      for (let i = 0; i < rooms.length - 1; i++) { const x = (rooms[i] + rooms[i + 1]) / 2; Ci(x, ay + (cy - ay) / 2, 5, .6); T(x, ay + (cy - ay) / 2 + 1.7, String(101 + i), 4.4, 'text-anchor="middle"'); P(`M${f(rooms[i] + 3)} ${f(cy - 6)} a8 8 0 0 1 8 -8`, .5); }
+      for (let i = 0; i < 4; i++) P(`M${f(ax + ow * (.15 + .2 * i))} ${f(cy + 6)} a8 8 0 0 0 8 8`, .5);
+    } else if (kind === 'inst') {
+      for (let i = 0; i < 3; i++) { const x = ax + ow * (.18 + .3 * i); R(x - 14, cy + 14, 28, 18, .9, 'rx="3"'); }
+      const tags = ['FT 101', 'PT 102', 'TT 103', 'LT 104', 'FV 101', 'PSV 105'];
+      for (let i = 0; i < tags.length; i++) { const x = ax + ow * (.12 + .15 * i), y = i % 2 ? ay + oh * .2 : ay + oh * .82; bubble(x, y, tags[i], 5); L(x, y + (i % 2 ? 5 : -5), x + 6, cy + (i % 2 ? -6 : 14), .4, 'stroke-dasharray="2 1.5"'); }
+    } else if (kind === 'mroom' || kind === 'piping') {
+      const big = kind === 'mroom';
+      for (let i = 0; i < 2; i++) R(ax + ow * (.12 + .32 * i), ay + oh * .1, ow * .2, oh * .3, 1, 'rx="4"');
+      for (let i = 0; i < 3; i++) Ci(ax + ow * (.18 + .25 * i), ay + oh * .78, big ? 6 : 4, .8);
+      P(`M${f(ax + ow * .22)} ${f(ay + oh * .4)} V${f(cy)} H${f(ax + ow * .86)} V${f(ay + oh * .78)}`, big ? 1.2 : 2);
+      P(`M${f(ax + ow * .54)} ${f(ay + oh * .4)} V${f(cy + 3)}`, big ? 1.2 : 2);
+      for (let i = 0; i < 4; i++) valve(ax + ow * (.32 + .14 * i), cy, 3);
+    }
+  } else if (kind === 'details') {
+    const cols = 3, rows = 2, cw = aw / cols, ch = ah / rows;
+    for (let i = 0; i < 6; i++) { const cx = ax + cw * (i % cols) + cw / 2, cyy = ay + ch * (i / cols | 0) + ch * .42, s = Math.min(cw, ch) * .28, t = (i + (r() * 4 | 0)) % 4;
+      if (t === 0) { Ci(cx, cyy, s, 1); Ci(cx, cyy, s * .7, .6); L(cx - s * 1.3, cyy, cx + s * 1.3, cyy, .4, 'stroke-dasharray="3 1.5"'); }
+      if (t === 1) P(`M${f(cx - s)} ${f(cyy - s)} h${f(2 * s)} v${f(s * .3)} h${f(-s * .8)} v${f(s * 1.4)} h${f(s * .8)} v${f(s * .3)} h${f(-2 * s)} v${f(-s * .3)} h${f(s * .8)} v${f(-s * 1.4)} h${f(-s * .8)} z`, .9);
+      if (t === 2) { R(cx - s, cyy - s * .7, 2 * s, s * 1.4, 1); for (let j = 0; j < 6; j++) L(cx - s + j * s * .35, cyy + s * .7, cx - s + j * s * .35 + s * .5, cyy - s * .7, .35); }
+      if (t === 3) P(`M${f(cx - s)} ${f(cyy + s)} V${f(cyy - s * .2)} H${f(cx)} V${f(cyy - s)} H${f(cx + s)} V${f(cyy + s)} Z`, 1);
+      Ci(cx - s * .6, cyy + s * 1.6, 4, .6); L(cx - s * .6 + 4, cyy + s * 1.6, cx + s * 1.2, cyy + s * 1.6, .5); T(cx - s * .6, cyy + s * 1.6 + 1.5, String(i + 1), 4, 'text-anchor="middle"'); }
+  } else if (kind === 'schedule' || (kind === 'ga' && page === 2)) {
+    for (let t = 0; t < 2; t++) { const x = ax + 4 + t * aw * .5, w = aw * .45, rowsN = 9 + (r() * 5 | 0), rh = Math.min(7, (ah - 14) / (rowsN + 1));
+      T(x, ay + 6, t ? 'PUMP SCHEDULE' : (kind === 'ga' ? 'PARTS LIST' : 'AIR HANDLER SCHEDULE'), 4.5, 'font-weight="700"');
+      R(x, ay + 9, w, rh, .6, 'style="fill:currentColor;fill-opacity:.12"');
+      for (let i = 0; i <= rowsN; i++) L(x, ay + 9 + rh * (i + 1), x + w, ay + 9 + rh * (i + 1), .4);
+      for (let c = 0; c <= 6; c++) L(x + w * c / 6, ay + 9, x + w * c / 6, ay + 9 + rh * (rowsN + 1), .4);
+      for (let i = 1; i <= rowsN; i++) for (let c = 0; c < 6; c++) L(x + w * c / 6 + 2, ay + 9 + rh * i + rh * .55, x + w * c / 6 + 2 + w / 6 * (.3 + r() * .5), ay + 9 + rh * i + rh * .55, .5); }
+  } else if (kind === 'oneline') {
+    const mx = ax + aw * .42; Ci(mx, ay + 8, 5, .8); Ci(mx, ay + 15, 5, .8); L(mx, ay + 20, mx, ay + 30, .9); R(mx - 3, ay + 30, 6, 6, .8); L(mx, ay + 36, mx, ay + 42, .9);
+    L(ax + 10, ay + 42, ax + aw * .85, ay + 42, 2.2);
+    for (let i = 0; i < 7; i++) { const x = ax + 16 + i * (aw * .8 - 12) / 6; L(x, ay + 42, x, ay + 52, .8); R(x - 2.5, ay + 52, 5, 5, .7); L(x, ay + 57, x, ay + ah - 12, .8); Ci(x, ay + ah - 7, 5, .8); T(x, ay + ah - 5.3, 'M', 5, 'text-anchor="middle"'); }
+  } else if (kind === 'loop') {
+    R(ax + 2, ay + 2, aw * .3, ah - 4, .6, 'stroke-dasharray="4 2"'); R(ax + aw * .62, ay + 2, aw * .36, ah - 4, .6, 'stroke-dasharray="4 2"');
+    T(ax + 5, ay + 8, 'FIELD', 4); T(ax + aw * .62 + 3, ay + 8, 'CONTROL ROOM', 4);
+    const tag = d.title.split(' ').pop().replace('-', ' ');
+    bubble(ax + aw * .12, ay + ah * .45, tag, 8);
+    R(ax + aw * .22, ay + ah * .3, 10, ah * .3, .8); R(ax + aw * .68, ay + ah * .18, 12, ah * .55, .8); R(ax + aw * .84, ay + ah * .3, 18, ah * .3, .9);
+    T(ax + aw * .84 + 3, ay + ah * .47, 'AI', 5);
+    for (let i = 0; i < 4; i++) { const y = ay + ah * (.34 + .07 * i); L(ax + aw * .12 + 8, ay + ah * .45, ax + aw * .22, y, .5); L(ax + aw * .22 + 10, y, ax + aw * .68, ay + ah * (.22 + .1 * i), .6); L(ax + aw * .68 + 12, ay + ah * (.22 + .1 * i), ax + aw * .84, ay + ah * (.34 + .07 * i), .6); }
+    for (let i = 0; i < 9; i++) L(ax + aw * .68, ay + ah * .18 + i * ah * .55 / 9, ax + aw * .68 + 12, ay + ah * .18 + i * ah * .55 / 9, .3);
+  } else if (kind === 'pid') {
+    R(ax + aw * .06, ay + ah * .15, aw * .1, ah * .55, 1, 'rx="10"'); T(ax + aw * .07, ay + ah * .78, 'D-101', 5);
+    const y1 = ay + ah * .5, y2 = ay + ah * .28;
+    P(`M${f(ax + aw * .16)} ${f(y1)} H${f(ax + aw * .85)}`, 1.1); P(`M${f(ax + aw * .16)} ${f(y2)} H${f(ax + aw * .6)} V${f(y1)}`, 1.1);
+    for (const x of [.28, .48]) { Ci(ax + aw * x, y1 + 14, 6, .9); P(`M${f(ax + aw * x)} ${f(y1)} V${f(y1 + 8)}`, .9); }
+    for (const x of [.22, .38, .55, .7]) valve(ax + aw * x, y1, 3.2);
+    valve(ax + aw * .66, y2 + (y1 - y2), 3); L(ax + aw * .66, y1 - 3, ax + aw * .66, y1 - 9, .6); P(`M${f(ax + aw * .66 - 4)} ${f(y1 - 9)} a4 4 0 0 1 8 0 z`, .6);
+    bubble(ax + aw * .72, y1 - 22, 'FT 101', 5); bubble(ax + aw * .5, y2 - 14, 'PT 102', 5); bubble(ax + aw * .3, y2 - 14, 'TT 103', 5);
+    P(`M${f(ax + aw * .85)} ${f(y1)} l-4 -2.5 v5 z`, .7, 'style="fill:currentColor"');
+  } else if (kind === 'ga' || kind === 'ga2') {
+    if (kind === 'ga' && page === 0) {
+      R(ax + aw * .08, ay + ah * .22, aw * .78, ah * .5, 1.2); Ci(ax + aw * .3, ay + ah * .47, ah * .14, 1); R(ax + aw * .45, ay + ah * .36, aw * .28, ah * .22, 1);
+      for (let i = 1; i < 6; i++) L(ax + aw * .45 + i * aw * .28 / 6, ay + ah * .36, ax + aw * .45 + i * aw * .28 / 6, ay + ah * .58, .4);
+      R(ax + aw * .38, ay + ah * .43, aw * .07, ah * .08, .7); L(ax + aw * .3, ay + ah * .33, ax + aw * .3, ay + ah * .12, 2); L(ax + aw * .14, ay + ah * .47, ax + aw * .02, ay + ah * .47, 2);
+      L(ax + aw * .08, ay + ah * .82, ax + aw * .86, ay + ah * .82, .4); L(ax + aw * .08, ay + ah * .79, ax + aw * .08, ay + ah * .85, .4); L(ax + aw * .86, ay + ah * .79, ax + aw * .86, ay + ah * .85, .4); T(ax + aw * .44, ay + ah * .8, '3200', 4.5);
+    } else if (kind === 'ga') {
+      R(ax + aw * .08, ay + ah * .66, aw * .78, ah * .08, 1.2); R(ax + aw * .2, ay + ah * .38, aw * .16, ah * .28, 1, 'rx="4"'); R(ax + aw * .45, ay + ah * .44, aw * .28, ah * .22, 1);
+      L(ax + aw * .28, ay + ah * .38, ax + aw * .28, ay + ah * .1, 2); P(`M${f(ax + aw * .28)} ${f(ay + ah * .1)} H${f(ax + aw * .6)}`, 2); valve(ax + aw * .45, ay + ah * .1, 3.5);
+      T(ax + aw * .08, ay + ah * .9, 'SECTION A-A', 6, 'font-weight="700"'); T(ax + aw * .5, ay + ah * .9, 'SECTION B-B', 6, 'font-weight="700"');
+    } else {
+      R(ax + aw * .1, ay + ah * .12, aw * .72, ah * .2, 1.1, `rx="${f(ah * .1)}"`); R(ax + aw * .06, ay + ah * .45, aw * .82, ah * .3, 1.1, `rx="${f(ah * .15)}"`);
+      for (const x of [.2, .7]) { P(`M${f(ax + aw * x - 8)} ${f(ay + ah * .75)} l4 8 h8 l4 -8`, .8); L(ax + aw * x, ay + ah * .32, ax + aw * x, ay + ah * .45, 1.4); }
+      for (const x of [.3, .45, .6]) R(ax + aw * x - 3, ay + ah * .07, 6, ah * .05, .7);
+      L(ax + aw * .06, ay + ah * .9, ax + aw * .88, ay + ah * .9, .4); T(ax + aw * .44, ay + ah * .885, '9600', 4.5);
+    }
+  } else if (kind === 'site') {
+    P(`M${f(ax + aw * .05)} ${f(ay + ah * .1)} L${f(ax + aw * .62)} ${f(ay + ah * .04)} L${f(ax + aw * .88)} ${f(ay + ah * .3)} L${f(ax + aw * .8)} ${f(ay + ah * .95)} L${f(ax + aw * .1)} ${f(ay + ah * .88)} Z`, 1.1, 'stroke-dasharray="8 2 2 2"');
+    P(`M${f(ax)} ${f(ay + ah * .62)} C${f(ax + aw * .3)} ${f(ay + ah * .5)} ${f(ax + aw * .6)} ${f(ay + ah * .8)} ${f(ax + aw * .9)} ${f(ay + ah * .7)}`, 1);
+    P(`M${f(ax)} ${f(ay + ah * .7)} C${f(ax + aw * .3)} ${f(ay + ah * .58)} ${f(ax + aw * .6)} ${f(ay + ah * .88)} ${f(ax + aw * .9)} ${f(ay + ah * .78)}`, 1);
+    R(ax + aw * .3, ay + ah * .18, aw * .26, ah * .26, 1.3); for (let i = 0; i < 8; i++) L(ax + aw * .3 + i * aw * .032, ay + ah * .44, ax + aw * .3 + i * aw * .032 + aw * .03, ay + ah * .18, .35);
+    for (let i = 0; i < 8; i++) R(ax + aw * (.6 + .028 * i), ay + ah * .3, aw * .024, ah * .1, .4);
+    P(`M${f(ax + aw * .93)} ${f(ay + ah * .14)} l4 10 l-4 -3 l-4 3 z M${f(ax + aw * .93)} ${f(ay + ah * .02)} v4`, .7); T(ax + aw * .93 - 2, ay + ah * .08, 'N', 6);
+  }
+  const s = o.join('');
+  ARTS.set(key, s); return s;
+}
+function artSVG(d, page = 0, attrs = '') {
+  const W = Math.round(d.pw * 10), H = Math.round(d.ph * 10);
+  return `<svg viewBox="0 0 ${W} ${H}" ${attrs} fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect width="${W}" height="${H}" style="fill:var(--sp)" stroke="none"/>${artInner(d, page)}</svg>`;
+}
+const thumb = (d, w, h, page = 0) => `<span class="thumb" style="width:${w}px;height:${h}px">${artSVG(d, page, 'preserveAspectRatio="xMidYMid meet"')}</span>`;
+
+// ================= canvases (made up) =================
+function cloud(cx, cy, w, h, n = 14) {
+  const pts = []; for (let i = 0; i <= n; i++) { const a = -i / n * 2 * Math.PI; pts.push([cx + Math.cos(a) * w / 2, cy + Math.sin(a) * h / 2]); }
+  let d = `M${f(pts[0][0])} ${f(pts[0][1])}`;
+  for (let i = 1; i < pts.length; i++) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], rr = Math.hypot(x1 - x0, y1 - y0) * .6; d += ` A${f(rr)} ${f(rr)} 0 0 0 ${f(x1)} ${f(y1)}`; }
+  return { d, bb:[cx - w / 2 - 40, cy - h / 2 - 40, w + 80, h + 80] };
+}
+const xmark = (cx, cy, s) => ({ d:`M${cx - s} ${cy - s} L${cx + s} ${cy + s} M${cx + s} ${cy - s} L${cx - s} ${cy + s}`, bb:[cx - s, cy - s, 2 * s, 2 * s] });
+function scribble(x, y, w, h = w * .12) { let d = `M${x} ${y}`; const n = 14; for (let i = 1; i <= n; i++) d += ` Q${f(x + w * (i - .5) / n)} ${f(y + (i % 2 ? -h : h))} ${f(x + w * i / n)} ${f(y + (i % 3 ? h * .2 : -h * .2))}`; return { d, bb:[x, y - h, w, 2 * h] }; }
+const ink = (c, g) => ({ c, d:g.d, bb:g.bb });
+function makeCanvases() {
+  return [
+    { id:'c1', name:'Boiler room walkdown (made up)', when:'Today 9:12 AM', sheets:[{ num:'I-101', k:64, x:0, y:0, page:0 }],
+      ink:[ink('red', cloud(1520, 470, 420, 260)), ink('green', xmark(760, 1000, 70)), ink('blue', scribble(1700, 1080, 420))] },
+    { id:'c2', name:'M-102 Second floor HVAC plan', from:'M-102', when:'Nov 4', sheets:[{ num:'M-102', k:48, x:0, y:0, page:0 }],
+      ink:[ink('red', cloud(600, 380, 320, 200)), ink('blue', scribble(980, 820, 320))] },
+    { id:'c3', name:'Pump skid notes (made up)', when:'Nov 2', sheets:[],
+      ink:[ink('sketch', { d:'M0 0 H400 V200 H0 Z M60 100 a50 50 0 1 0 100 0 a50 50 0 1 0 -100 0 M160 100 H240 M240 60 H360 V140 H240 Z', bb:[0, 0, 400, 200] }), ink('red', cloud(300, 100, 180, 140))] },
+    { id:'c4', name:'Site visit notes (made up)', when:'Oct 29', sheets:[],
+      ink:[ink('sketch', scribble(0, 0, 500)), ink('sketch', scribble(0, 90, 420)), ink('blue', scribble(0, 180, 380)), ink('green', xmark(560, 90, 40))] },
+  ];
+}
+const INKC = { red:'#d6342c', green:'#1f9d55', blue:'#2563eb', sketch:'var(--sketch)' };
+function canvasProject(c) { const s = c && c.sheets.find(x => D(x.num)); return s ? D(s.num).proj : null; }
+
+// ================= state =================
+const P = new URLSearchParams(location.search);
+const pv = P.get('v') || P.get('variant');
+const S = {
+  v: VARIANTS[pv] ? pv : 'A', theme: P.get('theme') === 'dark' ? 'dark' : 'light', fold: P.get('fold') === '1', panel: P.get('state') !== '0',
+  online: true, laptop: true, laptopOffAt: 0,
+};
+function resetUI() {
+  Object.assign(S, { drawings:makeDrawings(), canvases:makeCanvases(), plots:{}, onDuo:new Set(['M-101', 'I-101', 'M-102', 'I-301', 'M-501', 'E-202']),
+    tab:'drawings', q:'', sel:null, openCanvas:null, listSel:'c1', modal:null, placing:null, viewer:{ page:0, zoom:1, full:false },
+    toastMsg:null, banner:null, pending:[], folder:[], downloading:null, resetScroll:[], wantFocus:null, nextId:5 });
+  if (S.v === 'B') S.sel = 'M-101';
+  if (S.v === 'C') { S.tab = 'canvases'; S.openCanvas = 'c1'; }
+}
+resetUI();
+const PLOT_MS = 7000;
+
+// ================= search =================
+function hay(d) { return [d.num, d.title, 'rev ' + d.rev, d.scaleText, d.proj, d.folder, d.date, d.files === 'dwg' ? 'no pdf dwg' : '', d.files === 'pdf' ? 'pdf only vendor' : ''].join(' ').toLowerCase(); }
+const toks = q => q.toLowerCase().split(/\s+/).filter(Boolean);
+function score(d, t) { let s = 0; for (const x of t) { if (d.num.toLowerCase().startsWith(x)) s += 4; else if (d.num.toLowerCase().includes(x)) s += 2; if (d.title.toLowerCase().split(/\W+/).some(w => w.startsWith(x))) s += 2; } return s; }
+function search(q, firstProj) {
+  const t = toks(q);
+  return S.drawings.filter(d => t.every(x => hay(d).includes(x))).sort((a, b) =>
+    (firstProj ? (b.proj === firstProj) - (a.proj === firstProj) : 0) || score(b, t) - score(a, t) || a.proj.localeCompare(b.proj) || a.num.localeCompare(b.num, undefined, { numeric:true }));
+}
+function hl(text, q) {
+  const t = toks(q); if (!t.length) return esc(text);
+  const low = text.toLowerCase(), marks = new Array(text.length).fill(false);
+  for (const x of t) { let i = low.indexOf(x); while (i >= 0) { for (let j = i; j < i + x.length; j++) marks[j] = true; i = low.indexOf(x, i + 1); } }
+  let out = '', on = false;
+  for (let i = 0; i < text.length; i++) { if (marks[i] !== on) { out += marks[i] ? '<mark>' : '</mark>'; on = marks[i]; } out += esc(text[i]); }
+  return out + (on ? '</mark>' : '');
+}
+
+// ================= plotting a DWG with no PDF =================
+function requestPlot(num) {
+  const p = S.plots[num]; if (p && p.state !== 'done') return;
+  S.plots[num] = { state: !S.online ? 'queued' : S.laptop ? 'plotting' : 'waiting', sent: S.online, t0: Date.now() };
+}
+const pending = num => { const p = S.plots[num]; return p && p.state !== 'done' ? p : null; };
+function reconcile() {
+  for (const [num, p] of Object.entries(S.plots)) {
+    if (p.state === 'queued' && S.online) { p.sent = true; p.state = S.laptop ? 'plotting' : 'waiting'; p.t0 = Date.now(); }
+    else if (p.state === 'waiting' && S.laptop) { p.state = 'plotting'; p.t0 = Date.now(); }
+    else if (p.state === 'plotting' && !S.laptop) p.state = 'waiting';
+    else if (p.state === 'downloadwait' && S.online) arrive(num, true);
+  }
+}
+function lastSeen() { const s = (Date.now() - S.laptopOffAt) / 1000; return s < 60 ? 'a moment ago' : `${Math.round(s / 60)} min ago`; }
+function plotPhase(p) { const x = Math.min(1, (Date.now() - p.t0) / PLOT_MS); return { x, step: x < .15 ? 0 : x < .85 ? 1 : 2 }; }
+function plotShort(num) {
+  const p = S.plots[num]; if (!p) return 'No PDF yet · plots on open';
+  if (p.state === 'plotting') { const { step } = plotPhase(p); return ['Asking the laptop…', 'Plotting on the laptop…', 'Downloading the PDF…'][step]; }
+  if (p.state === 'queued') return 'Queued · offline'; if (p.state === 'waiting') return 'Waiting for the laptop';
+  if (p.state === 'downloadwait') return 'Plotted · downloads when online'; return 'Plotted';
+}
+function plotCard(num) {
+  const p = S.plots[num], d = D(num); if (!p) return '';
+  if (p.state === 'plotting') {
+    const { x, step } = plotPhase(p), li = (i, t) => `<li class="${i < step ? 'done' : i === step ? 'now' : ''}"><span class="dot">${i < step ? svg('check', 13) : i === step ? svg('spinner', 13, 'spin') : '·'}</span>${t}</li>`;
+    return `<h3>${svg('spinner', 18, 'spin')} Plotting on the laptop</h3><p>${d.num} has no PDF yet, so AutoCAD on the laptop is plotting it, the way it prints. Usually under a minute.</p>
+      <ul class="steps">${li(0, 'Asked the laptop, through Dropbox')}${li(1, 'AutoCAD plots ' + d.num + '.dwg to PDF')}${li(2, `Download the PDF (${d.mb} MB)`)}</ul><div class="pbar"><i style="width:${Math.round(x * 100)}%"></i></div>`;
+  }
+  if (p.state === 'queued') return `<h3>${svg('clock', 18)} Queued on this Duo</h3><p>You're offline. The request to plot ${d.num} goes to the laptop as soon as the Duo is back online.</p><p>You can close this; it stays queued.</p>`;
+  if (p.state === 'waiting') return `<h3>${svg('laptop', 18)} Waiting for the laptop</h3><p>The request is in Dropbox, but the laptop was last seen ${lastSeen()}. ${d.num} plots as soon as it's on.</p><p>You can close this; it carries on by itself.</p>`;
+  if (p.state === 'downloadwait') return `<h3>${svg('cloudoff', 18)} Plotted, not downloaded</h3><p>The laptop plotted ${d.num}, but you're offline. The PDF downloads when you're back online.</p>`;
+  return `<h3>${svg('check', 18)} Plotted</h3>`;
+}
+function arrive(num, quiet) {
+  const p = S.plots[num], d = D(num); if (!p || p.state === 'done') return;
+  p.state = 'done'; d.files = 'both'; d.justPlotted = true; S.onDuo.add(num);
+  let msg = `${num} is plotted. Its PDF is kept in Dropbox / Vellum.`;
+  for (const c of S.canvases) for (const s of c.sheets) if (s.num === num && s.placeholder) { s.placeholder = false; msg = `${num} is plotted and now in place on “${c.name}”.`; }
+  if (S.v === 'B') { if (!(S.tab === 'drawings' && S.sel === num)) S.banner = { num }; else msg = `${num} is plotted. Its PDF is kept in Dropbox / Vellum.`; }
+  if (S.v === 'C') { const pe = S.pending.find(x => x.num === num); if (pe) { pe.ready = true; if (!(S.modal && S.modal.num === num)) msg = `${num} is plotted. Tap “${num} ready” in the top bar to place it.`; } }
+  toast(msg);
+  if (!quiet) render();
+}
+function tick() {
+  let changed = false;
+  for (const [num, p] of Object.entries(S.plots)) if (p.state === 'plotting' && Date.now() - p.t0 >= PLOT_MS) {
+    if (S.online) arrive(num, true); else p.state = 'downloadwait'; changed = true; }
+  if (changed) render(); else live();
+}
+function live() {
+  for (const el of document.querySelectorAll('[data-plotlive]')) {
+    const num = el.dataset.plotlive, st = el.dataset.style;
+    if (st === 'card') el.innerHTML = plotCard(num); else if (st === 'text') el.textContent = plotShort(num); else if (st === 'long') el.innerHTML = plotLong(num); else if (st === 'chip') el.innerHTML = chipInner(num); else el.innerHTML = plotTagInner(num);
+  }
+  panel();
+}
+function chipInner(num) { return `${plotTagInner(num).split('</svg>')[0]}</svg> <b>${num}</b>&nbsp;· ${plotShort(num)}`; }
+function plotLong(num) {
+  const p = pending(num); if (!p) return '';
+  const t = p.state === 'plotting' ? `<b>Plotting ${num} on the laptop</b>, usually under a minute. You can draw meanwhile.`
+    : p.state === 'queued' ? `<b>${num} is queued.</b> You're offline; it goes to the laptop when you're back online.`
+    : p.state === 'waiting' ? `<b>Waiting for the laptop</b> (last seen ${lastSeen()}). ${num} plots when it's on.`
+    : `<b>${num} is plotted.</b> The PDF downloads when you're back online.`;
+  return `${plotTagInner(num).split('</svg>')[0]}</svg> <span>${t}</span>`;
+}
+function plotTagInner(num) { const p = pending(num); const ic = !p ? 'laptop' : p.state === 'plotting' ? 'spinner' : p.state === 'queued' ? 'clock' : p.state === 'waiting' ? 'laptop' : 'cloudoff'; return `${svg(ic, 12, p && p.state === 'plotting' ? 'spin' : '')} ${plotShort(num)}`; }
+
+// ================= opening a drawing =================
+function withPDF(num, fn) {
+  if (S.onDuo.has(num)) { fn(); return true; }
+  if (!S.online) { toast(`${num}'s PDF isn't on this Duo yet. It downloads when you're back online; searching works offline.`); render(); return false; }
+  S.downloading = num; render();
+  setTimeout(() => { S.onDuo.add(num); if (S.downloading === num) S.downloading = null; fn(); render(); }, 900);
+  return true;
+}
+function newCanvas(d, k, placeholder) {
+  const c = { id:'c' + S.nextId++, name:`${d.num} ${d.title}`, from:d.num, when:'Just now', sheets:[{ num:d.num, k, x:0, y:0, page:0, placeholder:!!placeholder }], ink:[] };
+  S.canvases.unshift(c); return c;
+}
+function openCanvas(id) { S.tab = 'canvases'; S.openCanvas = id; S.listSel = id; S.modal = null; }
+function openNewCanvas(num, k, page = 0) {
+  const d = D(num); if (k === undefined) k = d.k;
+  if (k === null) { S.modal = { type:'scale', num, then:'new', page, k:null }; return render(); }
+  if (d.files === 'dwg') { requestPlot(num); const c = newCanvas(d, k, true); openCanvas(c.id); toast(`New canvas “${c.name}”. ${num} has no PDF yet; its outline waits at true size while the laptop plots it.`); return render(); }
+  withPDF(num, () => { const c = newCanvas(d, k); c.sheets[0].page = page; openCanvas(c.id); toast(`New canvas “${c.name}” · ${num} placed at ${scaleLabel(k)}`); });
+}
+function openA(num) {
+  const ex = S.canvases.find(c => c.from === num);
+  if (ex) { S.modal = { type:'again', num, cid:ex.id }; return render(); }
+  openNewCanvas(num);
+}
+function startPlacing(cid, num, k, page = 0) {
+  openCanvas(cid); const c = C(cid), d = D(num), kk = k || 1, w = d.pw * kk, h = d.ph * kk;
+  const others = extents(c);
+  S.placing = { cid, num, k, page, at:null, start:[others[0] + others[2] + Math.max(w, others[2]) * .08 + w / 2, others[1] + h / 2] };
+  render();
+}
+function placeAt(x, y) {
+  const pl = S.placing, d = D(pl.num), kk = pl.k || 1, c = C(pl.cid);
+  c.sheets.push({ num:pl.num, k:pl.k, x:x - d.pw * kk / 2, y:y - d.ph * kk / 2, page:pl.page }); S.placing = null;
+  toast(`${pl.num} placed at ${pl.k === 0 ? 'printed size (NTS)' : scaleLabel(pl.k)}`); render();
+}
+function selectB(num) {
+  S.sel = num; S.viewer.page = 0; S.viewer.zoom = 1; if (S.fold) S.viewer.full = true; S.resetScroll.push('vp');
+  const d = D(num);
+  if (d.files === 'dwg') requestPlot(num);
+  else if (!S.onDuo.has(num) && S.online) { withPDF(num, () => {}); return; }
+  render();
+}
+function pickC(num) {
+  const d = D(num), m = S.modal;
+  m.num = num; m.page = 0; m.k = null; m.change = false;
+  if (d.pages.length > 1 && d.files !== 'dwg') { m.view = 'grid'; return render(); }
+  m.view = 'confirm';
+  if (d.files === 'dwg') requestPlot(num); else if (!S.onDuo.has(num) && S.online) { withPDF(num, () => {}); return; }
+  render();
+}
+
+// ================= rendering: shared pieces =================
+function searchField(key, ph, val) {
+  return `<div class="sf">${svg('search', 17)}<input data-input="${key}" type="text" enterkeyhint="search" autocomplete="off" spellcheck="false" placeholder="${esc(ph)}" value="${esc(val)}">${val ? `<button data-act="clearq" data-k="${key}" aria-label="Clear the search">${svg('xc', 17)}</button>` : ''}</div>`;
+}
+function indexLine(n, q) {
+  const off = S.online ? '' : `<span class="offl">${svg('wifioff', 13)} Offline · searching the copy on this Duo ·</span>`;
+  const count = q ? `${n} of ${S.drawings.length} drawings match “${esc(q)}”` : `${S.drawings.length} drawings in the index`;
+  return `<div class="iline">${off}${count} · updated by the laptop 4 min ago</div>`;
+}
+function markers(d, opts = {}) {
+  let h = '';
+  if (d.files === 'dwg') h += `<span class="mk plot" data-plotlive="${d.num}" title="No PDF yet: the laptop plots it the first time you open it">${plotTagInner(d.num)}</span>`;
+  if (d.files === 'pdf') h += `<span class="mk only" title="A PDF with no DWG behind it: mark it up, but it can't be redlined back to a DWG">${svg('pdf', 12)} PDF only · no DWG</span>`;
+  if (d.justPlotted) h += `<span class="mk ok">${svg('check', 12)} PDF plotted</span>`;
+  if (!S.online && d.files !== 'dwg' && !S.onDuo.has(d.num)) h += `<span class="mk off">${svg('cloudoff', 12)} Not on this Duo</span>`;
+  if (opts.canvas) { const c = S.canvases.find(x => x.from === d.num); if (c) h += `<span class="mk cv">${svg('canvases', 12)} Has a canvas</span>`; }
+  if (S.downloading === d.num) h += `<span class="mk off">Downloading ${d.mb} MB…</span>`;
+  return h;
+}
+const legend = () => `<div class="legend"><span class="mk plot">${svg('laptop', 12)} No PDF yet</span> a DWG nobody has plotted: the laptop plots it the first time you open it. <span class="mk only">${svg('pdf', 12)} PDF only</span> a vendor or outside PDF with no DWG: mark it up, but it can't be redlined back to a DWG.</div>`;
+const noResults = q => `<div class="empty">No drawing matches “${esc(q)}”.<br>Try a number like E-2, a word from the title, or the project.</div>`;
+const metaLine = d => `Rev ${esc(d.rev)} · ${esc(d.scaleText)} · ${d.date}`;
+
+// ---------- A: the Drawings tab, rows, open makes a canvas ----------
+function drawingsA() {
+  const res = search(S.q), fo = S.fold;
+  const row = d => `<button class="res" data-act="openA" data-n="${d.num}" style="--sepx:${fo ? 86 : 112}px">
+      ${fo ? thumb(d, 62, 42) : thumb(d, 84, 56)}
+      <span class="rmain"><span class="rt"><b>${hl(d.num, S.q)}</b> ${hl(d.title, S.q)}</span>
+        <span class="rm">${metaLine(d)}</span><span class="rm">${hl(d.proj, S.q)}${fo ? '' : ' · ' + esc(d.folder)}</span>
+        ${fo ? `<span style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">${markers(d, { canvas:true })}</span>` : ''}</span>
+      ${fo ? '' : `<span class="rtags">${markers(d, { canvas:true })}</span>`}<span class="rchev">${svg('chev', 16)}</span></button>`;
+  return `<div class="grouped"><div class="dscreen"><h1>Drawings</h1>${searchField('q', 'Search drawings: number, title or project', S.q)}
+    ${indexLine(res.length, S.q)}
+    <div class="dlist" data-scroll="a">${res.length ? `<div class="ghead">Tap a drawing to open it as a new canvas, its PDF placed at its scale</div><div class="gcard">${res.map(row).join('')}</div>` : noResults(S.q)}
+      ${legend()}
+      <button class="browse" data-act="toast" data-msg="Browsing Dropbox folders stays as it is today, under the search."><span class="fi">${svg('folder', 22)}</span><span class="grow">Browse Dropbox folders</span>${svg('chev', 16)}</button></div></div></div>`;
+}
+
+// ---------- B: list beside a viewer ----------
+function drawingsB() {
+  const res = search(S.q), d = S.sel && D(S.sel);
+  const list = () => {
+    const fo = S.fold;
+    const row = x => `<button class="res ${x.num === S.sel && !fo ? 'sel' : ''}" data-act="selB" data-n="${x.num}" style="--sepx:${fo ? 86 : 80}px">
+        ${fo ? thumb(x, 62, 42) : thumb(x, 56, 38)}
+        <span class="rmain"><span class="rt" style="font-size:14px"><b>${hl(x.num, S.q)}</b> ${hl(x.title, S.q)}</span><span class="rm">${metaLine(x)}</span><span class="rm">${hl(x.proj, S.q)}</span>
+        <span style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">${markers(x)}</span></span>${fo ? `<span class="rchev">${svg('chev', 16)}</span>` : ''}</button>`;
+    return `<h1>Drawings</h1>${searchField('q', 'Number, title or project', S.q)}${indexLine(res.length, S.q)}
+      <div class="dlist" data-scroll="b">${res.length ? `<div class="gcard">${res.map(row).join('')}</div>` : noResults(S.q)}${legend()}
+      <button class="browse" data-act="toast" data-msg="Browsing Dropbox folders stays as it is today, under the search."><span class="fi">${svg('folder', 22)}</span><span class="grow">Browse Dropbox folders</span>${svg('chev', 16)}</button></div>`;
+  };
+  if (S.fold) return `<div class="grouped">${S.viewer.full && d ? viewerB(d, true) : `<div class="dscreen">${list()}</div>`}</div>`;
+  if (S.viewer.full && d) return `<div class="grouped">${viewerB(d, true)}</div>`;
+  return `<div class="grouped"><div class="bsplit"><div class="bleft">${list()}</div><div class="bright">${d ? viewerB(d, false) : `<div class="viewer"><div class="vempty">${svg('drawings', 34)}<b>Pick a drawing to see it here</b>Pages, zoom, then place it on a canvas or open it in a new one.</div></div>`}</div></div></div>`;
+}
+function viewerB(d, full) {
+  const v = S.viewer, p = pending(d.num), noPdf = d.files === 'dwg', dl = S.downloading === d.num, missing = !noPdf && !S.onDuo.has(d.num) && !dl;
+  const ready = !noPdf && !missing && !dl, multi = d.pages.length > 1;
+  let page;
+  if (noPdf) page = `<div class="vwait"><div class="ghostart">${artSVG(d, 0, 'width="100%"')}</div><div class="plotcard" data-plotlive="${d.num}" data-style="card">${plotCard(d.num)}</div></div>`;
+  else if (dl) page = `<div class="vwait"><div class="ghostart">${artSVG(d, 0, 'width="100%"')}</div><div class="plotcard"><h3>Downloading ${d.num}</h3><p>${d.mb} MB from Dropbox. Opened once, it stays on this Duo for offline.</p><div class="dl"><i></i></div></div></div>`;
+  else if (missing) page = `<div class="vwait"><div class="ghostart">${artSVG(d, 0, 'width="100%"')}</div><div class="plotcard"><h3>${svg('cloudoff', 18)} Not on this Duo yet</h3><p>You're offline and ${d.num}'s PDF hasn't been opened on this Duo. The picture behind is the index's thumbnail. It downloads when you're back online.</p></div></div>`;
+  else page = `<div class="vzoom" style="width:${v.zoom * (full ? 72 : 92)}%">${artSVG(d, v.page, 'preserveAspectRatio="xMidYMid meet"')}</div>`;
+  const zl = v.zoom === 1 ? 'Fit' : Math.round(v.zoom * 100) + '%';
+  const why = noPdf ? (p ? 'Place and open come on once the laptop has plotted it.' : '') : d.files === 'pdf' ? 'PDF only: mark it up; a redline can\'t go back to a DWG.' : `Opens at ${esc(d.scaleText)}${d.k ? `, covering ${covers(d, d.k)}` : d.k === 0 ? ' at printed size' : '; you pick the scale'}.`;
+  return `<div class="viewer ${full ? 'full' : ''}">
+    <div class="vhead">${full ? `<button class="backbtn" data-act="vback">${svg('back', 18)} Drawings</button>` : ''}
+      <div class="vtitle">${esc(d.num)} <span>${esc(d.title)}</span></div>
+      <div class="vmeta"><span>Rev <b>${esc(d.rev)}</b></span><span>Scale <b>${esc(d.scaleText)}</b></span><span>${d.date}</span><span>${esc(d.proj)}</span></div>
+      <div class="vmeta"><span>${esc(fileLine(d))}</span>${markers(d)}</div></div>
+    <div class="vtools">${multi ? `<button class="ib" data-act="vpg" data-d="-1" ${v.page === 0 ? 'disabled' : ''} aria-label="Previous page">${svg('back', 15)}</button><span>Page ${v.page + 1} of ${d.pages.length}</span><button class="ib" data-act="vpg" data-d="1" ${v.page === d.pages.length - 1 ? 'disabled' : ''} aria-label="Next page">${svg('chev', 15)}</button>` : '<span>1 page</span>'}
+      <span class="grow"></span><button class="ib" data-act="vz" data-d="-1" ${!ready || v.zoom === 1 ? 'disabled' : ''} aria-label="Zoom out">${svg('minus', 15)}</button><span class="zl">${zl}</span>
+      <button class="ib" data-act="vz" data-d="1" ${!ready || v.zoom >= 6 ? 'disabled' : ''} aria-label="Zoom in">${svg('plus', 15)}</button><button class="ib" data-act="vz" data-d="0" ${!ready ? 'disabled' : ''} aria-label="Fit the page">${svg('fit', 15)}</button>
+      ${S.fold ? '' : `<button class="ib" data-act="vfull" aria-label="${full ? 'Back to the list' : 'Full screen'}">${svg(full ? 'collapse' : 'expand', 15)}</button>`}</div>
+    ${multi && ready ? `<div class="vstrip">${d.pages.map((n, i) => `<button class="${i === v.page ? 'sel' : ''}" data-act="vpn" data-p="${i}">${thumb(d, 82, 55, i)}<span>p${i + 1} ${esc(n)}</span></button>`).join('')}</div>` : ''}
+    <div class="vpage ${v.zoom === 1 ? 'z1' : ''}" data-scroll="vp" data-pan="1">${page}</div>
+    <div class="vacts"><span class="note">${why}</span><button class="ghost" data-act="placeB" ${ready ? '' : 'disabled'}>${svg('canvasplus', 16)} Place on a canvas…</button><button class="primary" data-act="openNewB" ${ready ? '' : 'disabled'}>Open in a new canvas</button></div></div>`;
+}
+
+// ---------- C: Drawings tab browses folders ----------
+function folderItems(path) {
+  if (!path.length) return { folders:['Archive', 'Plant Drawings', 'Projects', 'Standards', 'Vellum'], files:[] };
+  if (path[0] !== 'Projects') return { folders:[], files:[] };
+  if (path.length === 1) return { folders:Object.values(PROJ), files:[] };
+  const inProj = S.drawings.filter(d => d.proj === path[1]), sub = path.slice(2).join(' / ');
+  const folders = new Set(), files = [];
+  for (const d of inProj) { const parts = d.folder.split(' / '); const here = parts.slice(0, path.length - 2).join(' / ');
+    if (here !== sub) continue; if (parts.length > path.length - 2) folders.add(parts[path.length - 2]); else files.push(d); }
+  return { folders:[...folders].sort(), files };
+}
+function fileRows(files, act) {
+  const out = [];
+  for (const d of files) {
+    if (d.files !== 'pdf') out.push({ d, ext:'dwg', name:`${d.num}.dwg` });
+    if (d.files !== 'dwg') out.push({ d, ext:'pdf', name:d.files === 'pdf' ? `${d.num} ${d.title.replace(' (vendor)', '')}.pdf` : `${d.num}.pdf` });
+  }
+  return out;
+}
+function drawingsC() {
+  const it = folderItems(S.folder), path = S.folder;
+  const crumbs = path.length ? `<div class="crumbs"><button data-act="fup" data-i="0">Dropbox</button>${path.map((p, i) => ` › ${i === path.length - 1 ? `<b>${esc(p)}</b>` : `<button data-act="fup" data-i="${i + 1}">${esc(p)}</button>`}`).join('')}</div>` : '';
+  const rows = it.folders.map(n => `<button class="frow" data-act="fin" data-n="${esc(n)}"><span class="fi">${svg('folder', 26)}</span><span class="grow">${esc(n)}</span>${svg('chev', 16)}</button>`).join('')
+    + fileRows(it.files).map(x => `<button class="frow" data-act="toast" data-msg="In this variant a drawing is found and placed from Add sheet on a canvas. The Drawings tab only browses."><span class="fi" style="color:var(--accent)">${svg(x.ext, 24)}</span><span class="grow">${esc(x.name)}<span class="rm" style="display:block">${x.ext === 'dwg' && x.d.files === 'dwg' ? 'No PDF yet' : `Rev ${esc(x.d.rev)} · ${esc(x.d.scaleText)}`}</span></span></button>`).join('');
+  return `<div class="grouped"><div class="dscreen"><h1>Drawings</h1>${crumbs}<div class="dlist" data-scroll="cf">
+    ${path.length ? '' : '<div class="ghead">Your Dropbox</div>'}<div class="gcard">${rows || '<div class="empty">Nothing made up in here.</div>'}</div>
+    <div class="legend">Search for drawings lives in Add sheet, on a canvas. This tab browses Dropbox as it does today.</div></div></div></div>`;
+}
+
+// ---------- Canvases list (as built) ----------
+function canvasList(b) {
+  const sel = C(S.listSel) || S.canvases[0];
+  const meta = c => `${c.when} · ${c.sheets.length ? c.sheets.length + ' sheet' + (c.sheets.length > 1 ? 's' : '') : c.ink.length * 7 + ' strokes'}`;
+  const rows = S.canvases.map(c => `<button class="crow ${!S.fold && c === sel ? 'sel' : ''}" data-act="${S.fold ? 'copen' : 'csel'}" data-id="${c.id}"><b>${esc(c.name)}</b><span>${meta(c)}</span></button>`).join('');
+  const head = `<div class="clhead"><h1>Canvases</h1><button class="primary" data-act="toast" data-msg="New canvas works as it does today.">${svg('plus', 16)} New canvas</button></div>`;
+  if (S.fold) return `<div class="clist"><div class="clcol">${head}<div style="overflow:auto">${rows}</div></div></div>`;
+  const pw = b.w - 370 - 9, ph = b.h - 14 - 59;
+  return `<div class="clist"><div class="clcol">${head}<div style="overflow:auto">${rows}</div></div>
+    <div class="cprev">${canvasSVG(sel, pw, ph, { l:12, t:12, r:pw - 12, b:ph - 12 }, { mini:true })}</div>
+    <div class="cfoot"><b>${esc(sel.name)}</b><button class="primary" data-act="copen" data-id="${sel.id}">Open</button><button class="ghost" data-act="toast" data-msg="Rename works as it does today.">Rename</button><button class="ghost" data-act="toast" data-msg="Delete works as it does today.">Delete…</button></div></div>`;
+}
+
+// ---------- the canvas ----------
+function sheetBox(s) { const d = D(s.num), kk = s.k || 1; return [s.x, s.y, d.pw * kk, d.ph * kk]; }
+function extents(c, extra) {
+  const bbs = [...c.sheets.map(sheetBox), ...c.ink.map(i => i.bb)]; if (extra) bbs.push(extra);
+  if (!bbs.length) return [-480, -320, 960, 640];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y, w, h] of bbs) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
+  return [x0, y0, x1 - x0, y1 - y0];
+}
+let gid = 0;
+function canvasSVG(c, w, h, free, opts = {}) {
+  let extra = null;
+  const pl = !opts.mini && S.placing && S.placing.cid === c.id ? S.placing : null;
+  if (pl) { const d = D(pl.num), kk = pl.k || 1; const at = pl.at || pl.start; extra = [at[0] - d.pw * kk / 2, at[1] - d.ph * kk / 2, d.pw * kk, d.ph * kk]; if (!pl.view) pl.view = extents(c, extra); }
+  const ex = pl ? pl.view : extents(c, extra);
+  const k = Math.min((free.r - free.l) / ex[2], (free.b - free.t) / ex[3]) * (opts.mini ? .92 : .9);
+  const vx = ex[0] + ex[2] / 2 - (free.l + free.r) / 2 / k, vy = ex[1] + ex[3] / 2 - (free.t + free.b) / 2 / k;
+  const g = niceLen(28 / k), id = 'g' + (++gid);
+  let o = `<svg class="cv" ${opts.mini ? '' : 'data-act="canvasclick"'} width="${w}" height="${h}" viewBox="${f(vx)} ${f(vy)} ${f(w / k)} ${f(h / k)}">`;
+  o += `<defs><pattern id="${id}" width="${g}" height="${g}" patternUnits="userSpaceOnUse"><path d="M${g} 0H0V${g}" fill="none" stroke="var(--grid)" stroke-width="${f(1 / k * 10) / 10}"/></pattern></defs>`;
+  o += `<rect x="${f(vx)}" y="${f(vy)}" width="${f(w / k)}" height="${f(h / k)}" fill="url(#${id})"/>`;
+  for (const s of c.sheets) {
+    const d = D(s.num), [x, y, sw, sh] = sheetBox(s);
+    const lbl = `${d.num} · ${s.k === 0 ? 'NTS · printed size' : scaleLabel(s.k)}`;
+    o += `<g transform="translate(${f(x)} ${f(y)})" style="color:var(--sl)">`;
+    if (s.placeholder) {
+      o += `<rect width="${f(sw)}" height="${f(sh)}" style="fill:var(--plotbg)" stroke="var(--plot)" stroke-width="${f(1.5 / k * 10) / 10}" stroke-dasharray="${f(7 / k)} ${f(4 / k)}"/>`;
+      o += `<g opacity=".22">${artSVG(d, 0, `width="${f(sw)}" height="${f(sh)}"`)}</g>`;
+      o += `<text x="${f(sw / 2)}" y="${f(sh / 2 - 6 / k)}" text-anchor="middle" font-size="${f(15 / k)}" font-weight="700" style="fill:var(--ink)" font-family="system-ui,sans-serif">${esc(d.num)} ${esc(d.title)}</text>`;
+      o += `<text x="${f(sw / 2)}" y="${f(sh / 2 + 14 / k)}" text-anchor="middle" font-size="${f(12.5 / k)}" style="fill:var(--plot)" font-weight="600" font-family="system-ui,sans-serif" data-plotlive="${d.num}" data-style="text">${esc(plotShort(d.num))}</text>`;
+      o += `<text x="${f(sw / 2)}" y="${f(sh / 2 + 32 / k)}" text-anchor="middle" font-size="${f(11 / k)}" style="fill:var(--mute)" font-family="system-ui,sans-serif">True-size outline from the DWG's title block. The plot fills it in.</text>`;
+    } else {
+      o += `<rect width="${f(sw)}" height="${f(sh)}" style="fill:var(--sp)" stroke="var(--line)" stroke-width="${f(1 / k * 10) / 10}"/>`;
+      o += artSVG(d, s.page || 0, `width="${f(sw)}" height="${f(sh)}"`);
+    }
+    if (!opts.mini) o += `<text x="0" y="${f(-6 / k)}" font-size="${f(11 / k)}" style="fill:var(--accent)" font-weight="600" font-family="system-ui,sans-serif">${esc(lbl)}${s.placeholder ? ' · no PDF yet' : ''}</text>`;
+    o += '</g>';
+  }
+  for (const i of c.ink) o += `<path d="${i.d}" fill="none" stroke="${INKC[i.c]}" stroke-width="${opts.mini ? 2 : 2.6}" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>`;
+  if (pl) {
+    const d = D(pl.num), kk = pl.k || 1, sw = d.pw * kk, sh = d.ph * kk, at = pl.at || pl.start;
+    o += `<g id="placing" transform="translate(${f(at[0] - sw / 2)} ${f(at[1] - sh / 2)})" style="color:var(--sl);pointer-events:none"><g opacity=".45">${artSVG(d, pl.page, `width="${f(sw)}" height="${f(sh)}"`)}</g>
+      <rect width="${f(sw)}" height="${f(sh)}" fill="none" stroke="var(--accent)" stroke-width="${f(2 / k * 10) / 10}" stroke-dasharray="${f(8 / k)} ${f(5 / k)}"/>
+      <text x="0" y="${f(-6 / k)}" font-size="${f(11 / k)}" style="fill:var(--accent)" font-weight="600" font-family="system-ui,sans-serif">${esc(d.num)} · ${esc(pl.k === 0 ? 'NTS · printed size' : scaleLabel(pl.k))}</text></g>`;
+  }
+  S._k = opts.mini ? S._k : k;
+  return o + '</svg>';
+}
+const TOOLS = [['pen', 'Pen'], ['hl', 'Highlighter'], ['eraser', 'Eraser'], ['line', 'Line and shape'], null, ['lasso', 'Lasso'], ['text', 'Text box'], null, ['measure', 'Measure'], ['dim', 'Dimension'], ['frame', 'Frame'], ['window', 'Window']];
+function canvasScreen(b) {
+  const c = C(S.openCanvas), fo = S.fold;
+  const free = fo ? { l:8, t:56, r:b.w - 8, b:b.h - 50 } : { l:70, t:56, r:b.w - 8, b:b.h - 50 };
+  let h = `<div class="cscreen">${canvasSVG(c, b.w, b.h, free)}`;
+  if (!fo) h += `<div class="lrail panel">${TOOLS.map((t, i) => t ? `<button class="tb ${i === 0 ? 'on' : ''}" title="${t[1]}" aria-label="${t[1]}" data-act="toast" data-msg="The tools work as they do today.">${svg(t[0], 20)}</button>` : '<hr>').join('')}
+      <span style="flex:1"></span><div style="display:flex;flex-direction:column;gap:12px;align-items:center;margin-bottom:8px">${['red', 'green', 'blue', 'sketch'].map((x, i) => `<span class="chip ${i === 0 ? 'sel' : ''}" style="background:${INKC[x]}"></span>`).join('')}</div></div>`;
+  const pend = S.v === 'C' ? S.pending.filter(x => x.cid === c.id) : [];
+  const chips = pend.map(x => x.ready ? `<button class="pchip ready" data-act="chip" data-n="${x.num}">${svg('check', 15)} ${x.num} ready · Place</button>`
+    : `<button class="pchip" data-act="chip" data-n="${x.num}" data-plotlive="${x.num}" data-style="chip">${chipInner(x.num)}</button>`).join('');
+  if (fo) {
+    h += `<div class="tbar panel"><button data-act="cback" aria-label="Canvases">${svg('back', 20)}</button><b>${esc(c.name)}</b>
+      <button class="ghost" data-act="addSheet" style="padding:5px 9px">${svg('plus', 15)} Add sheet</button><button data-act="toast" data-msg="Send works as it does today." aria-label="Send">${svg('send', 19)}</button></div>`;
+  } else {
+    h += `<div class="tbar panel"><b>${esc(c.name)}</b><span class="units">ft-in ${svg('updown', 14)}</span>
+      <button data-act="theme" title="Light or dark" aria-label="Switch light or dark">${svg('contrast', 19)}</button><button aria-label="Undo">${svg('undo', 19)}</button><button aria-label="Redo">${svg('redo', 19)}</button><button aria-label="Settings" data-act="toast" data-msg="Settings">${svg('gear', 19)}</button></div>
+      <div class="tact"><button class="ghost ${S.modal && S.modal.type === 'add' ? 'sel' : ''}" data-act="addSheet">${svg('plus', 16)} Add sheet</button><button class="ghost" data-act="toast" data-msg="Record works as it does today.">${svg('rec', 16)} Record</button><button class="primary" data-act="toast" data-msg="Send works as it does today.">${svg('send', 16)} Send</button></div>`;
+  }
+  const ph = c.sheets.find(s => s.placeholder);
+  const prompt = S.placing ? 'Tap where the sheet goes' : ph ? `${ph.num}: ${plotShort(ph.num)}` : 'Draw with the Pencil';
+  const bar = niceLen(90 / (S._k || 1)), px = Math.round(bar * (S._k || 1));
+  const saved = S.online ? '<span class="sv">Saved · synced to Dropbox</span>' : '<span class="sv off">Saved · offline</span>';
+  h += fo ? `<div class="sbar panel"><span class="pr">${esc(prompt)}</span><span>${c.sheets.length} sheet${c.sheets.length === 1 ? '' : 's'}</span>${saved}</div>`
+    : `<div class="sbar panel"><span>X –  Y –</span><span class="sb"><i style="width:${px}px"></i>${fmtLen(bar)}</span><span class="pr" ${ph && !S.placing ? `data-plotlive="${ph.num}" data-style="text"` : ''}>${esc(prompt)}</span>
+      <span>${c.sheets.length} sheet${c.sheets.length === 1 ? '' : 's'} · 0 frames</span><button aria-label="Zoom to everything">${svg('extents', 17)}</button>${saved}</div>`;
+  if (chips) h += `<div class="chipcol">${chips}</div>`;
+  // pills under the top bar
+  let top = 56;
+  if (S.placing && S.placing.cid === c.id) { h += `<div class="pill panel" style="top:${top}px"><span>Tap where <b>${esc(S.placing.num)}</b> goes</span><button class="ghost" data-act="cancelplace">Cancel</button></div>`; top += 46; }
+  if (ph && S.v === 'A') { const p = pending(ph.num); if (p) h += `<div class="pill panel plot" style="top:${top}px"><span data-plotlive="${ph.num}" data-style="long">${plotLong(ph.num)}</span><button class="ghost" data-act="plotinfo" data-n="${ph.num}">Details</button></div>`; }
+  return h + '</div>';
+}
+
+// ---------- modals ----------
+function scaleChips(sel) { return `<div class="chips">${PICK.map(s => `<button class="ghost ${sel === s[1] ? 'sel' : ''}" data-act="pickscale" data-k="${s[1]}">${s[0]}</button>`).join('')}</div>`; }
+function confirmBody(d, m) {
+  const k = d.k;
+  if (k === 0) return `<p>The title block says <b>NTS</b>. It goes on at its printed size, and lengths on it read as printed inches marked NTS.</p>`;
+  if (k > 0 && !m.change) return `<p>The title block says <b>SCALE: ${esc(d.scaleText)}</b>. On the canvas it will cover ${covers(d, k)}.</p>`;
+  const lead = k > 0 ? `<p>Pick the scale to use instead of ${esc(d.scaleText)}:</p>`
+    : `<p>The title block says <b>AS NOTED</b>. Pick the scale the sheet goes on at. Each detail that says another scale becomes a scale area, where Measure and Dimension read its own scale.</p>`;
+  return lead + scaleChips(m.k);
+}
+function modal() {
+  const m = S.modal; if (!m) return '';
+  const wrap = (inner, cls = '') => `<div class="scrim" data-act="scrim"><div class="modal ${cls}" data-stop="1">${inner}</div></div>`;
+  if (m.type === 'again') {
+    const d = D(m.num), c = C(m.cid);
+    return wrap(`<h2>${esc(d.num)} already has a canvas</h2><p>“${esc(c.name)}”, made ${esc(c.when)}, holds ${esc(d.num)} with your markups on it.</p>
+      <div class="row end"><button class="ghost" data-act="close">Cancel</button><button class="ghost" data-act="againNew">New canvas</button><button class="primary" data-act="againOpen">Open that canvas</button></div>`);
+  }
+  if (m.type === 'scale') {
+    const d = D(m.num), label = m.then === 'place' ? `Place on “${esc(C(m.cid).name)}”` : 'Open in a new canvas';
+    return wrap(`<h2>${esc(d.num)} ${esc(d.title)}</h2><div class="crumb">${esc(d.proj)} · Rev ${esc(d.rev)}</div>${confirmBody(d, { change:true, k:m.k })}
+      <div class="row end"><button class="ghost" data-act="close">Cancel</button><button class="primary" data-act="scaleGo" ${m.k == null ? 'disabled' : ''}>${label}</button></div>`);
+  }
+  if (m.type === 'pick') {
+    const d = D(m.num);
+    const rows = S.canvases.map(c => `<button class="mrow" data-act="pickCanvas" data-cid="${c.id}"><span class="fi">${svg('canvases', 20)}</span><span class="nm"><b>${esc(c.name)}</b><span class="rm" style="display:block;color:var(--mute)">${esc(c.when)} · ${c.sheets.length} sheet${c.sheets.length === 1 ? '' : 's'}${canvasProject(c) ? ' · ' + esc(canvasProject(c)) : ''}</span></span>${svg('chev', 16)}</button>`).join('');
+    return wrap(`<h2>Place ${esc(d.num)} on a canvas</h2><div class="mlist" style="max-height:380px">
+      <button class="mrow" data-act="pickCanvas" data-cid="new"><span class="fi">${svg('plus', 20)}</span><span class="nm"><b>New canvas</b><span class="rm" style="display:block;color:var(--mute)">Named “${esc(d.num)} ${esc(d.title)}”</span></span></button>${rows}</div>
+      <div class="row"><span class="note">On a canvas you pick, the sheet waits as a true-size outline: tap where it goes.</span><button class="ghost" data-act="close">Cancel</button></div>`);
+  }
+  if (m.type === 'plotinfo') return wrap(`<div class="plotcard" style="width:100%;box-shadow:none;border:0;padding:0" data-plotlive="${m.num}" data-style="card">${plotCard(m.num)}</div><div class="row end"><button class="primary" data-act="close">OK</button></div>`, '');
+  if (m.type === 'add') return addModal(m, wrap);
+  return '';
+}
+function addModal(m, wrap) {
+  const c = C(S.openCanvas), proj = canvasProject(c);
+  if (m.view === 'search') {
+    const res = search(m.q, proj), mine = proj ? res.filter(d => d.proj === proj) : [], other = proj ? res.filter(d => d.proj !== proj) : res;
+    const row = d => `<button class="mrow" data-act="pickC" data-n="${d.num}">${thumb(d, 60, 40)}<span class="nm"><b>${hl(d.num, m.q)}</b> ${hl(d.title, m.q)}<span class="rm" style="display:block;color:var(--mute)">Rev ${esc(d.rev)} · ${d.date} · ${hl(d.proj, m.q)}</span></span>
+      <span class="tg"><span class="tag">${esc(d.scaleText)}</span>${markers(d)}</span></button>`;
+    return wrap(`<h2>Add a sheet</h2>${searchField('aq', 'Search drawings: number, title or project', m.q)}${indexLine(res.length, m.q)}
+      <div class="mlist" data-scroll="cm">${mine.length ? `<div class="sec">This canvas's project · ${esc(proj)}</div>${mine.map(row).join('')}` : ''}
+        ${other.length ? `<div class="sec">${mine.length ? 'Other projects' : 'All drawings'}</div>${other.map(row).join('')}` : ''}${res.length ? '' : noResults(m.q)}</div>
+      <div class="row"><button class="ghost" data-act="cfolders">${svg('folder', 16)} Browse Dropbox folders…</button><span class="note">No PDF yet: the laptop plots it when picked. PDF only: no DWG behind it.</span><button class="ghost" data-act="close">Cancel</button></div>`, 'tall');
+  }
+  if (m.view === 'folders') {
+    const it = folderItems(m.folder || []), path = m.folder || [];
+    const rows = it.folders.map(n => `<button class="mrow" data-act="mfin" data-n="${esc(n)}"><span class="fi">${svg('folder', 20)}</span><span class="nm">${esc(n)}</span>${svg('chev', 16)}</button>`).join('')
+      + fileRows(it.files).map(x => `<button class="mrow" data-act="pickC" data-n="${x.d.num}"><span class="fi">${svg(x.ext, 20)}</span><span class="nm">${esc(x.name)}</span><span class="tg">${markers(x.d)}</span></button>`).join('');
+    return wrap(`<button class="backbtn" data-act="cbacksearch">${svg('back', 18)} Search</button><h2>Add a sheet</h2>
+      <div class="crumb"><button data-act="mfup" data-i="0" style="color:var(--accent)">Dropbox</button>${path.map((p, i) => ` › <button data-act="mfup" data-i="${i + 1}" style="color:var(--accent)">${esc(p)}</button>`).join('')}</div>
+      <div class="mlist">${rows || '<div class="empty">Nothing made up in here.</div>'}</div><div class="row end"><button class="ghost" data-act="close">Cancel</button></div>`, 'tall');
+  }
+  const d = D(m.num);
+  if (m.view === 'grid') {
+    return wrap(`<button class="backbtn" data-act="cbacksearch">${svg('back', 18)} Search</button><h2>${esc(d.num)} ${esc(d.title)}</h2><div class="crumb">${d.pages.length} pages · tap one to place it</div>
+      <div class="pgrid">${d.pages.map((n, i) => `<button class="pcard" data-act="pageC" data-p="${i}">${thumb(d, 160, 107, i)}<span style="font-size:12px"><b>${esc(d.num)}</b> <span style="color:var(--mute)">p${i + 1} ${esc(n)}</span><br><span class="tag">${esc(d.scaleText)}</span></span></button>`).join('')}</div>
+      <div class="row end"><button class="ghost" data-act="close">Cancel</button></div>`);
+  }
+  // confirm (the settled step), or waiting for a plot
+  const noPdf = d.files === 'dwg', missing = !noPdf && !S.onDuo.has(d.num), dl = S.downloading === d.num;
+  const back = `<button class="backbtn" data-act="${d.pages.length > 1 ? 'cbackgrid' : 'cbacksearch'}">${svg('back', 18)} ${d.pages.length > 1 ? 'Pages' : 'Search'}</button>`;
+  const head = `${back}<h2>${esc(d.num)} ${esc(d.title)}</h2><div class="crumb">${esc(d.proj)} · Rev ${esc(d.rev)} · ${esc(fileLine(d))}${d.pages.length > 1 ? ` · page ${m.page + 1} of ${d.pages.length}` : ''}</div>`;
+  const prev = `<div class="cprevbox ${noPdf || missing || dl ? 'fade' : ''}">${artSVG(d, m.page, 'preserveAspectRatio="xMidYMid meet"')}${noPdf || missing ? `<span class="cap">Thumbnail from the index</span>` : ''}</div>`;
+  if (noPdf) {
+    return wrap(`${head}<div class="ccols">${prev}<div><div class="plotcard" style="width:100%;box-shadow:none" data-plotlive="${d.num}" data-style="card">${plotCard(d.num)}</div>
+      <p class="note">The DWG's title block says <b>SCALE: ${esc(d.scaleText)}</b>; on the canvas it will cover ${covers(d, d.k)}.</p></div></div>
+      <div class="row"><span class="note">Place sheet comes on when the PDF arrives, or carry on and place it then.</span><button class="ghost" data-act="close">Cancel</button><button class="primary" data-act="laterC">Place when it's plotted</button></div>`);
+  }
+  if (dl || missing) {
+    return wrap(`${head}<div class="ccols">${prev}<div>${dl ? `<p>Downloading ${d.mb} MB from Dropbox…</p><div class="dl"><i></i></div>` : `<p><b>Not on this Duo yet.</b> You're offline and ${esc(d.num)}'s PDF hasn't been opened here before. It downloads when you're back online.</p>`}</div></div>
+      <div class="row end"><button class="ghost" data-act="close">Cancel</button><button class="primary" disabled>Place sheet</button></div>`);
+  }
+  const ready = (m.k != null ? m.k : d.k) != null;
+  return wrap(`${head}<div class="ccols">${prev}<div>${d.justPlotted ? `<p class="mk ok" style="display:inline-flex">${svg('check', 12)} Plotted just now on the laptop</p>` : ''}${confirmBody(d, m)}
+      ${d.files === 'pdf' ? '<p class="note">PDF only, no DWG: you can mark it up, but a redline can\'t go back to a DWG.</p>' : ''}</div></div>
+    <div class="row end"><button class="ghost" data-act="close">Cancel</button>${d.k > 0 && !m.change ? '<button class="ghost" data-act="changeScale">Change scale</button>' : ''}<button class="primary" data-act="placeC" ${ready ? '' : 'disabled'}>Place sheet</button></div>`);
+}
+
+// ================= render =================
+function screen(b) {
+  if (S.tab === 'canvases') return S.openCanvas ? canvasScreen(b) : canvasList(b);
+  if (S.tab === 'drawings') return S.v === 'A' ? drawingsA() : S.v === 'B' ? drawingsB() : drawingsC();
+  const t = S.tab === 'jobs' ? ['Jobs', 'Jobs you send to agents show here.'] : ['Meetings', 'Recorded meetings and their summaries show here.'];
+  return `<div class="placeholder"><h1>${t[0]}</h1><div>${t[1]}</div></div>`;
+}
+const TABS = [['canvases', 'Canvases'], ['drawings', 'Drawings'], ['jobs', 'Jobs'], ['meetings', 'Meetings']];
+function chromeHTML() {
+  const wifi = S.online ? 'wifi' : 'wifioff';
+  if (S.fold) return `<div class="sys"><span>9:41</span><span class="wf ${S.online ? '' : 'off'}">${svg(wifi, 17)}<svg width="25" height="12" viewBox="0 0 25 12"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".5"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="currentColor"/><rect x="22.5" y="4" width="1.6" height="4" rx=".8" fill="currentColor" opacity=".5"/></svg></span></div>
+    <div class="tabbar">${TABS.map(([t, l]) => `<button class="${S.tab === t ? 'on' : ''}" data-act="tab" data-t="${t}">${svg(t, 24)}${l}</button>`).join('')}</div>`;
+  return `<div class="sys"><span>9:41</span><span class="wf ${S.online ? '' : 'off'}">${svg(wifi, 19)}</span></div>
+    ${S.tab === 'drawings' ? `<button class="gear" data-act="toast" data-msg="Settings" aria-label="Settings">${svg('gear', 22)}</button>` : ''}
+    <div class="tabrail">${TABS.map(([t, l]) => `<button class="${S.tab === t ? 'on' : ''}" data-act="tab" data-t="${t}" title="${l}" aria-label="${l}">${svg(t, 24)}</button>`).join('')}</div>`;
+}
+function box() { return S.fold ? { x:0, y:44, w:382, h:517 } : { x:0, y:0, w:867, h:669 }; }
+let toastTimer = null;
+function toast(msg) { S.toastMsg = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => { S.toastMsg = null; const t = document.querySelector('#stage .toast'); if (t) t.remove(); }, 4200); }
+function render() {
+  const st = document.getElementById('stage');
+  const scroll = {}; st.querySelectorAll('[data-scroll]').forEach(el => { scroll[el.dataset.scroll] = [el.scrollTop, el.scrollLeft]; });
+  for (const k of S.resetScroll) delete scroll[k]; S.resetScroll = [];
+  const ae = document.activeElement; let focus = null;
+  if (ae && ae.dataset && ae.dataset.input && st.contains(ae)) focus = [ae.dataset.input, ae.selectionStart];
+  if (S.wantFocus) { focus = [S.wantFocus, 9999]; S.wantFocus = null; }
+  st.className = (S.fold ? 'folded' : 'unfolded') + ' th-' + S.theme;
+  st.style.width = (S.fold ? 382 : 951) + 'px'; st.style.height = (S.fold ? 644 : 669) + 'px';
+  const b = box();
+  const gray = S.tab !== 'canvases';
+  let h = `<div class="bgfill" style="background:var(${gray ? '--gbg' : '--paper'})"></div><div class="content" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px">${screen(b)}</div>${chromeHTML()}`;
+  if (S.banner) h += `<div class="banner panel" style="top:${S.tab === 'canvases' && S.openCanvas ? (S.fold ? 104 : 60) : 12}px">${svg('check', 16)}<span><b>${esc(S.banner.num)}</b> is plotted and ready to view</span><button class="primary" data-act="bannerView" style="padding:5px 11px">View</button><button class="ghost" data-act="bannerX" style="padding:5px 9px">${svg('x', 14)}</button></div>`;
+  h += modal();
+  if (S.toastMsg) h += `<div class="toast" style="bottom:${S.fold ? 140 : 58}px">${esc(S.toastMsg)}</div>`;
+  st.innerHTML = h;
+  st.querySelectorAll('[data-scroll]').forEach(el => { const s = scroll[el.dataset.scroll]; if (s) { el.scrollTop = s[0]; el.scrollLeft = s[1]; } });
+  if (focus) { const el = st.querySelector(`[data-input="${focus[0]}"]`); if (el) { el.focus({ preventScroll:true }); const p = Math.min(focus[1] == null ? 9999 : focus[1], el.value.length); el.setSelectionRange(p, p); } }
+  fit(); panel(); barUI(); url();
+}
+
+// ================= state panel, bar, url =================
+const TRY = {
+  A:'Try: type boiler, open E-201 (no PDF yet) and watch its outline fill in. Then go offline here and open P-101 to see it queue; turn the laptop off to see it wait. M-501 is AS NOTED; M-102 already has a canvas.',
+  B:'Try: pick V-12 (3 pages), zoom, then Place on a canvas…. Pick E-201 to plot it, switch to Canvases while it plots, and the banner calls you back. Laptop off makes it wait.',
+  C:'Try: tap Add sheet, type e-2 or loop. This canvas\'s project comes first. Pick E-201, then Place when it\'s plotted: the top bar keeps a chip until it\'s ready. V-12 has 3 pages.',
+};
+function openText() {
+  if (S.modal) { const m = S.modal; return `dialog: ${m.type}${m.view ? ' · ' + m.view : ''}${m.num ? ' · ' + m.num : ''}`; }
+  if (S.placing) return `placing ${S.placing.num} on “${C(S.placing.cid).name}”`;
+  if (S.tab === 'canvases' && S.openCanvas) { const c = C(S.openCanvas); return `canvas “${c.name}” · ${c.sheets.length} sheet(s)${c.sheets.some(s => s.placeholder) ? ', 1 waiting for its plot' : ''}`; }
+  if (S.tab === 'canvases') return 'Canvases list';
+  if (S.tab === 'drawings' && S.v === 'B' && S.sel) return `viewer ${S.sel} · page ${S.viewer.page + 1} · ${S.viewer.zoom === 1 ? 'fit' : S.viewer.zoom * 100 + '%'}${S.viewer.full ? ' · full screen' : ''}`;
+  if (S.tab === 'drawings' && S.v === 'C') return 'folders: Dropbox' + S.folder.map(x => ' › ' + x).join('');
+  return S.tab + ' tab';
+}
+function panel() {
+  const pnl = document.getElementById('panel'); pnl.style.display = S.panel ? '' : 'none'; if (!S.panel) return;
+  const q = S.modal && S.modal.type === 'add' ? S.modal.q : S.q;
+  const n = q ? search(q).length : S.drawings.length;
+  const sel = S.modal && S.modal.num ? S.modal.num : S.placing ? S.placing.num : S.sel;
+  const sd = sel && D(sel);
+  const plots = Object.entries(S.plots).map(([num, p]) => p.state === 'done' ? `<span class="okc">${num} plotted</span>` : `<span class="sp">${num} ${p.state}${p.state === 'plotting' ? ' ' + Math.max(0, Math.ceil((PLOT_MS - (Date.now() - p.t0)) / 1000)) + ' s left' : ''}</span>`).join(', ') || 'none';
+  const ln = (k, v) => `<div class="ln"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  document.getElementById('pbody').innerHTML =
+    ln('variant', `${S.v} · ${esc(VARIANTS[S.v])}`) + ln('screen', `${S.tab} · ${S.fold ? 'folded' : 'unfolded'} · ${S.theme}`) +
+    ln('query', q ? `“${esc(q)}” → ${n} of ${S.drawings.length}` : `(empty) → all ${S.drawings.length}`) +
+    ln('selected', sd ? `${esc(sd.num)} ${esc(sd.title)} (${sd.files === 'dwg' ? 'DWG, no PDF yet' : sd.files === 'pdf' ? 'PDF only' : 'DWG + PDF'}${S.onDuo.has(sd.num) ? ', on this Duo' : ''})` : 'none') +
+    ln('open', esc(openText())) + ln('plots', plots) +
+    `<div class="ctl"><span class="k">Duo</span><button data-p="online" class="${S.online ? 'on' : ''}">Online</button><button data-p="offline" class="${S.online ? '' : 'on'}">Offline</button></div>
+     <div class="ctl"><span class="k">Laptop</span><button data-p="lon" class="${S.laptop ? 'on' : ''}">On</button><button data-p="loff" class="${S.laptop ? '' : 'on'}">Off</button></div>
+     <div class="ctl"><button data-p="arrive">PDF arrives now</button><button data-p="reset">Reset</button></div>
+     <div class="try">${esc(TRY[S.v])}</div>`;
+}
+function barUI() {
+  document.getElementById('vlabel').innerHTML = `<b>${S.v}</b> — ${esc(VARIANTS[S.v])}`;
+  document.getElementById('themeT').innerHTML = `${svg(S.theme === 'dark' ? 'sun' : 'moon', 15)} ${S.theme === 'dark' ? 'Light' : 'Dark'}`;
+  document.getElementById('foldT').textContent = S.fold ? 'Unfold' : 'Fold';
+  document.getElementById('stateT').classList.toggle('on', S.panel);
+}
+function url() {
+  const u = new URL(location); u.searchParams.delete('variant'); u.searchParams.set('v', S.v);
+  if (S.theme === 'dark') u.searchParams.set('theme', 'dark'); else u.searchParams.delete('theme');
+  if (S.fold) u.searchParams.set('fold', '1'); else u.searchParams.delete('fold');
+  if (!S.panel) u.searchParams.set('state', '0'); else u.searchParams.delete('state');
+  if (u.href !== location.href) history.replaceState(null, '', u);
+}
+function fit() {
+  const st = document.getElementById('stage'), W = S.fold ? 382 : 951, H = S.fold ? 644 : 669;
+  const left = S.panel && innerWidth >= 1100 ? 290 : 0, aw = innerWidth - left - 32, ah = innerHeight - 70;
+  const s = Math.max(.3, Math.min(aw / W, ah / H, 1.6));
+  st.style.transform = `scale(${s})`; st.style.left = `${left + 16 + (aw - W * s) / 2}px`; st.style.top = `${12 + (ah - H * s) / 2}px`;
+}
+
+// ================= input =================
+const stage = document.getElementById('stage');
+stage.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el || !stage.contains(el)) return;
+  const a = el.dataset.act, n = el.dataset.n;
+  if (a === 'scrim') { if (e.target === el) { S.modal = null; render(); } return; }
+  const go = {
+    tab: () => { const t = el.dataset.t; if (t === 'canvases' && S.tab === 'canvases' && S.openCanvas) S.openCanvas = null; else S.tab = t; S.placing = null; S.modal = null; render(); },
+    toast: () => { toast(el.dataset.msg); render(); },
+    theme: () => { S.theme = S.theme === 'dark' ? 'light' : 'dark'; render(); },
+    clearq: () => { if (el.dataset.k === 'aq') S.modal.q = ''; else S.q = ''; S.wantFocus = el.dataset.k; S.resetScroll.push('a', 'b', 'cm'); render(); },
+    close: () => { S.modal = null; render(); },
+    // A
+    openA: () => openA(n),
+    againOpen: () => { openCanvas(S.modal.cid); render(); },
+    againNew: () => { const num = S.modal.num; S.modal = null; openNewCanvas(num); },
+    plotinfo: () => { S.modal = { type:'plotinfo', num:n }; render(); },
+    // B
+    selB: () => selectB(n),
+    vback: () => { S.viewer.full = false; render(); },
+    vfull: () => { S.viewer.full = !S.viewer.full; render(); },
+    vpg: () => { S.viewer.page += +el.dataset.d; render(); },
+    vpn: () => { S.viewer.page = +el.dataset.p; render(); },
+    vz: () => { const Z = [1, 1.5, 2, 3, 4, 6], i = Z.indexOf(S.viewer.zoom), d = +el.dataset.d; S.viewer.zoom = d === 0 ? 1 : Z[Math.max(0, Math.min(Z.length - 1, i + d))]; render(); },
+    openNewB: () => openNewCanvas(S.sel, undefined, S.viewer.page),
+    placeB: () => { S.modal = { type:'pick', num:S.sel }; render(); },
+    pickCanvas: () => { const cid = el.dataset.cid, num = S.modal.num, d = D(num); S.modal = null;
+      if (cid === 'new') return openNewCanvas(num, undefined, S.viewer.page);
+      if (d.k === null) { S.modal = { type:'scale', num, then:'place', cid, k:null }; return render(); }
+      startPlacing(cid, num, d.k, S.viewer.page); },
+    scaleGo: () => { const m = S.modal; S.modal = null; if (m.then === 'place') startPlacing(m.cid, m.num, m.k, S.viewer.page); else openNewCanvas(m.num, m.k, m.page || 0); },
+    bannerView: () => { const num = S.banner.num; S.banner = null; S.tab = 'drawings'; selectB(num); },
+    bannerX: () => { S.banner = null; render(); },
+    // canvases
+    csel: () => { S.listSel = el.dataset.id; render(); },
+    copen: () => { openCanvas(el.dataset.id); render(); },
+    cback: () => { S.openCanvas = null; S.placing = null; render(); },
+    canvasclick: () => { if (!S.placing) return; const p = toCanvas(e); if (p) placeAt(p[0], p[1]); },
+    cancelplace: () => { S.placing = null; render(); },
+    // C
+    addSheet: () => { S.placing = null; S.modal = { type:'add', view:'search', q:'' }; S.wantFocus = 'aq'; render(); },
+    pickC: () => pickC(n),
+    pageC: () => { S.modal.page = +el.dataset.p; S.modal.view = 'confirm'; const d = D(S.modal.num); if (!S.onDuo.has(d.num) && S.online) { withPDF(d.num, () => {}); return; } render(); },
+    cbacksearch: () => { S.modal.view = 'search'; S.wantFocus = 'aq'; render(); },
+    cbackgrid: () => { S.modal.view = 'grid'; render(); },
+    cfolders: () => { S.modal.view = 'folders'; S.modal.folder = []; render(); },
+    mfin: () => { S.modal.folder = [...(S.modal.folder || []), el.dataset.n]; render(); },
+    mfup: () => { S.modal.folder = (S.modal.folder || []).slice(0, +el.dataset.i); render(); },
+    changeScale: () => { S.modal.change = true; render(); },
+    pickscale: () => { S.modal.k = +el.dataset.k; render(); },
+    placeC: () => { const m = S.modal, d = D(m.num); const k = m.k != null ? m.k : d.k; S.modal = null; startPlacing(S.openCanvas, m.num, k, m.page || 0); },
+    laterC: () => { const m = S.modal; if (!S.pending.some(x => x.num === m.num)) S.pending.push({ num:m.num, cid:S.openCanvas, ready:false }); S.modal = null; toast(`${m.num} is waiting for its plot. The chip in the top bar says when it's ready to place.`); render(); },
+    chip: () => { const pe = S.pending.find(x => x.num === n);
+      if (pe.ready) { S.pending = S.pending.filter(x => x !== pe); const d = D(n); startPlacing(pe.cid, n, d.k, 0); }
+      else { S.modal = { type:'add', view:'confirm', num:n, page:0, q:'' }; render(); } },
+    fin: () => { S.folder = [...S.folder, el.dataset.n]; S.resetScroll.push('cf'); render(); },
+    fup: () => { S.folder = S.folder.slice(0, +el.dataset.i); render(); },
+  }[a];
+  if (go) go();
+});
+stage.addEventListener('input', e => {
+  const k = e.target.dataset && e.target.dataset.input; if (!k) return;
+  if (k === 'aq') { S.modal.q = e.target.value; S.resetScroll.push('cm'); } else { S.q = e.target.value; S.resetScroll.push('a', 'b'); }
+  render();
+});
+function toCanvas(e) { const cv = stage.querySelector('svg.cv[data-act]'); if (!cv) return null; const m = cv.getScreenCTM(); if (!m) return null; const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse()); return [p.x, p.y]; }
+stage.addEventListener('pointermove', e => {
+  if (S.placing) { const p = toCanvas(e), g = stage.querySelector('#placing'); if (!p || !g) return; S.placing.at = p; const d = D(S.placing.num), kk = S.placing.k || 1;
+    g.setAttribute('transform', `translate(${f(p[0] - d.pw * kk / 2)} ${f(p[1] - d.ph * kk / 2)})`); }
+  if (pan && e.buttons) { pan.el.scrollLeft = pan.sl - (e.clientX - pan.x); pan.el.scrollTop = pan.st - (e.clientY - pan.y); }
+});
+let pan = null;
+stage.addEventListener('pointerdown', e => { const el = e.target.closest('[data-pan]'); if (el && S.viewer.zoom > 1) pan = { el, x:e.clientX, y:e.clientY, sl:el.scrollLeft, st:el.scrollTop }; });
+addEventListener('pointerup', () => { pan = null; });
+stage.addEventListener('wheel', e => { if (!e.ctrlKey || !e.target.closest('[data-pan]')) return; e.preventDefault(); const Z = [1, 1.5, 2, 3, 4, 6], i = Z.indexOf(S.viewer.zoom); S.viewer.zoom = Z[Math.max(0, Math.min(Z.length - 1, i + (e.deltaY < 0 ? 1 : -1)))]; render(); }, { passive:false });
+
+document.getElementById('panel').addEventListener('click', e => {
+  const b = e.target.closest('[data-p]'); if (!b) return;
+  const p = b.dataset.p;
+  if (p === 'online') S.online = true;
+  if (p === 'offline') S.online = false;
+  if (p === 'lon') S.laptop = true;
+  if (p === 'loff') { if (S.laptop) S.laptopOffAt = Date.now(); S.laptop = false; }
+  if (p === 'arrive') { for (const [num, q] of Object.entries(S.plots)) if (q.state !== 'done') arrive(num, true); }
+  if (p === 'reset') { resetUI(); }
+  reconcile(); render();
+  if (S.online) { // back online: fetch a PDF the open viewer or Add sheet is showing as not on this Duo
+    const num = S.v === 'B' && S.tab === 'drawings' ? S.sel : S.modal && S.modal.type === 'add' && S.modal.view === 'confirm' ? S.modal.num : null;
+    if (num && D(num).files !== 'dwg' && !S.onDuo.has(num) && S.downloading !== num) withPDF(num, () => {});
+  }
+});
+document.getElementById('pclose').onclick = () => { S.panel = false; render(); };
+document.getElementById('stateT').onclick = () => { S.panel = !S.panel; render(); };
+document.getElementById('themeT').onclick = () => { S.theme = S.theme === 'dark' ? 'light' : 'dark'; render(); };
+document.getElementById('foldT').onclick = () => { S.fold = !S.fold; S.placing = null; render(); };
+const KEYS = Object.keys(VARIANTS);
+function setVariant(v) { S.v = v; resetUI(); render(); }
+document.getElementById('prev').onclick = () => setVariant(KEYS[(KEYS.indexOf(S.v) + KEYS.length - 1) % KEYS.length]);
+document.getElementById('next').onclick = () => setVariant(KEYS[(KEYS.indexOf(S.v) + 1) % KEYS.length]);
+addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) { if (e.key === 'Escape' && S.modal) { S.modal = null; render(); } return; }
+  if (e.key === 'ArrowLeft') document.getElementById('prev').click();
+  if (e.key === 'ArrowRight') document.getElementById('next').click();
+  if (e.key === 'Escape') { if (S.modal) S.modal = null; else if (S.placing) S.placing = null; render(); }
+});
+addEventListener('resize', fit);
+setInterval(tick, 250);
+render();
+</script>
+</body>
+</html>

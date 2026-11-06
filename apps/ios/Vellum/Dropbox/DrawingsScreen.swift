@@ -178,7 +178,7 @@ private struct SpeedCheckSection: View {
                     }
                     HStack(spacing: 12) {
                         Button(copied ? "Copied" : "Copy all") {
-                            UIPasteboard.general.string = recorder.copyText(unfolded: Self.unfolded)
+                            UIPasteboard.general.string = recorder.copyText()
                             copied = true
                         }
                         .buttonStyle(.bordered)
@@ -216,12 +216,6 @@ private struct SpeedCheckSection: View {
             .font(.system(size: 12, design: .monospaced))
         }
         .accessibilityElement(children: .combine)
-    }
-
-    /// Whether the Duo is unfolded: its window is wider than the folded cover screen can be.
-    private static var unfolded: Bool {
-        let window = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
-        return (window?.bounds.width ?? 0) >= 700
     }
 }
 

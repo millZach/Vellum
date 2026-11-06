@@ -516,7 +516,9 @@ final class DebugBenchmark: NSObject {
     private func report(_ scenario: Scenario) {
         let budget = 1000.0 / 120
         let sortedWork = work.sorted(), sortedIntervals = intervals.sorted()
-        let long = intervals.filter { $0 > expectedInterval * 1000 * 1.5 }.count
+        // A long gap is judged as the Speed check judges one on the Duo (`FrameTiming.longGapFactor`).
+        let longGap = expectedInterval * 1000 * FrameTiming.longGapFactor
+        let long = intervals.filter { $0 > longGap }.count
         record("scenario=\(scenario.name) frames=\(work.count) strokes=\(editor.ink.strokes.count)"
             + " work_ms median=\(format(percentile(sortedWork, 0.5))) p95=\(format(percentile(sortedWork, 0.95)))"
             + " max=\(format(sortedWork.last ?? 0)) over_8.3ms=\(work.filter { $0 > budget }.count)"
@@ -528,10 +530,10 @@ final class DebugBenchmark: NSObject {
             + " max=\(format(sortedSteps.last ?? 0))")
         // Where a slow frame fell, beside the kept layer's drawings, to tell one from the other.
         let slowWork = work.enumerated().filter { $0.element > budget }.map { "\($0.offset):\(format($0.element))" }
-        let slowGaps = intervals.enumerated().filter { $0.element > expectedInterval * 1000 * 1.5 }
+        let slowGaps = intervals.enumerated().filter { $0.element > longGap }
             .map { "\($0.offset):\(format($0.element))" }
         record("  slow work \(slowWork), long gaps \(slowGaps), kept redraws \(keptRedraws)")
-        reportLedger(gapOver: expectedInterval * 1000 * 1.5)
+        reportLedger(gapOver: longGap)
         // An optimised build's metrics end in _release, so both builds compare with their own baselines.
         #if DEBUG
         let suffix = ""

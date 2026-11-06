@@ -113,13 +113,15 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             guard speedCheck != oldValue, !speedCheck else { return }
             gestureTiming?.cancel()
             gestureTiming = nil
-            fingerDownAt = nil
+            stopDisplayLinkIfIdle()
         }
     }
-    /// With the Speed check on: the pan or pinch being timed, from touch-down to the fingers lifting.
+    /// With the Speed check on: the pan or pinch being timed, from touch-down to the fingers lifting. It starts when the
+    /// first finger touches, with the display link, so the frames before the pan or pinch is recognised are timed too;
+    /// a touch that never becomes one (a tap, a finger stroke) is let go when the fingers lift, or after a second.
     private var gestureTiming: GestureTiming?
-    /// With the Speed check on: when the first finger of the next gesture touched down.
-    private var fingerDownAt: Double?
+    /// How long a timing started at touch-down waits for its pan or pinch before it is let go.
+    private static let gestureTimingWait = 1.0
     private let pan = UIPanGestureRecognizer()
     private let pinch = UIPinchGestureRecognizer()
     /// With Draw with finger on: whether the finger stroke in progress is ink yet.
@@ -588,8 +590,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private func location(_ touch: UITouch) -> CGPoint { touch.preciseLocation(in: self) }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if speedCheck, fingersDown == 0, let finger = touches.first(where: { $0.type == .direct }) {
-            fingerDownAt = finger.timestamp
+        if speedCheck, fingersDown == 0, gestureTiming == nil, let finger = touches.first(where: { $0.type == .direct }) {
+            gestureTiming = GestureTiming(start: finger.timestamp, overSheet: sheetOnScreen)
+            startDisplayLink()
         }
         if fingerDraws {
             var landed = 0, landedAt = 0.0
@@ -635,6 +638,12 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // The last finger lifted before any pan or pinch began: it was no gesture, and its timing goes.
+        if gestureTiming != nil, fingersDown == 0, event?.allTouches?.allSatisfy({
+            $0.type != .direct || $0.phase == .ended || $0.phase == .cancelled
+        }) ?? true {
+            dropGestureTiming()
+        }
         if fingerDraws { fingersLifted(touches) }
         guard let touch = liveTouch, touches.contains(touch) else {
             super.touchesEnded(touches, with: event)
@@ -916,13 +925,20 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     private func stopDisplayLinkIfIdle() {
         guard liveTouch == nil, liveStroke == nil, !erasing, !lassoing, drag == nil, sheetDrag == nil, regionInput == nil,
-              !shapeDrawing.isDown, fingersDown == 0 else { return }
+              !shapeDrawing.isDown, fingersDown == 0, gestureTiming == nil else { return }
         displayLink?.invalidate()
         displayLink = nil
     }
 
     @objc private func frame(_ link: CADisplayLink) {
-        if gestureTiming != nil { gestureTiming?.frame(timestamp: link.timestamp, interval: link.targetTimestamp - link.timestamp) }
+        if let timing = gestureTiming {
+            if fingersDown == 0, link.timestamp - timing.start > Self.gestureTimingWait {
+                // Fingers down this long with no pan or pinch: a press, not a gesture.
+                dropGestureTiming()
+            } else {
+                gestureTiming?.frame(timestamp: link.timestamp, interval: link.targetTimestamp - link.timestamp)
+            }
+        }
         // A finger held still on the eraser is confirmed by time passing, not by a move.
         if holdsEraser { fingerTick(at: link.timestamp) }
         // Holding still at the end of a stroke snaps it: looked at once a frame, never per sample, and recognised
@@ -973,10 +989,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             gestureBegan()
             fingerGesture = beginSheetFingers(pan) ? .sheet : .panning
             // A selected sheet's turn or move by fingers is not a pan of the canvas: it is not timed.
-            if fingerGesture == .sheet, let timing = gestureTiming {
-                timing.cancel()
-                gestureTiming = nil
-            }
+            if fingerGesture == .sheet, gestureTiming != nil { dropGestureTiming() }
         case .changed:
             let t = pan.translation(in: self)
             switch fingerGesture {
@@ -1035,20 +1048,26 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     // MARK: The Speed check (#42)
 
-    /// Starts timing a pan or pinch from its first finger's touch-down, or from now when that was not seen.
+    /// A pan or pinch began with no timing under way (its touch-down was not seen): it is timed from now.
     private func startGestureTiming() {
-        gestureTiming?.cancel()
-        let now = CACurrentMediaTime()
-        let start = fingerDownAt.map { now - $0 < 1 ? $0 : now } ?? now
-        fingerDownAt = nil
-        gestureTiming = GestureTiming(start: start, overSheet: sheetOnScreen)
+        guard gestureTiming == nil else { return }
+        gestureTiming = GestureTiming(start: CACurrentMediaTime(), overSheet: sheetOnScreen)
     }
 
     private func finishGestureTiming(_ timing: GestureTiming) {
         var timing = timing
         gestureTiming = nil
         if !timing.overSheet { timing.overSheet = sheetOnScreen }
-        SpeedCheckRecorder.shared.add(timing.finish(end: CACurrentMediaTime()))
+        // Unfolded or folded as the gesture ends, kept with it: the inner screen is 951 points wide, the cover far less.
+        let unfolded = (window?.bounds.width ?? bounds.width) >= 700
+        SpeedCheckRecorder.shared.add(timing.finish(end: CACurrentMediaTime(), unfolded: unfolded))
+    }
+
+    /// Lets a timing go without a record.
+    private func dropGestureTiming() {
+        gestureTiming?.cancel()
+        gestureTiming = nil
+        stopDisplayLinkIfIdle()
     }
 
     /// Whether a placed sheet shows on screen: looked at when a timed gesture starts and ends, never per frame.

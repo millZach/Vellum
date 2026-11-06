@@ -50,23 +50,44 @@ public enum FrameTiming {
     /// A gap this many frames long or more is a missed frame; less is the display's own jitter.
     public static let longGapFactor = 1.5
 
-    /// Sums up display frames from their timestamps, in seconds, at the display's frame interval, in seconds.
+    /// Sums up display frames from their timestamps, in seconds, all judged at one frame interval, in seconds. Gap i is
+    /// between frame i - 1 and frame i.
     public static func summary(timestamps: [Double], frameInterval: Double) -> FrameSummary {
+        var gaps: [(index: Int, seconds: Double, interval: Double)] = []
+        if timestamps.count > 1 {
+            for i in 1..<timestamps.count { gaps.append((i, timestamps[i] - timestamps[i - 1], frameInterval)) }
+        }
+        return summary(frames: timestamps.count, gaps: gaps)
+    }
+
+    /// Sums up a whole gesture, touch-down to lift (#42): the span from touch-down at `start` to the first frame and the
+    /// span from the last frame to the lift at `end` are gaps like any other, so a stall at either end counts. Each gap is
+    /// judged at the frame interval the display reported for it, since the display link runs anywhere from 80 to 120 Hz:
+    /// the interval frame i reported is the one it expected before frame i + 1. Gap 0 runs from touch-down to frame 0,
+    /// gap i from frame i - 1 to frame i, and the last from the last frame to the lift. `intervals` has one entry per
+    /// timestamp; all times are in seconds.
+    public static func gesture(start: Double, timestamps: [Double], intervals: [Double], end: Double) -> FrameSummary {
+        guard let first = timestamps.first, let last = timestamps.last, intervals.count == timestamps.count else {
+            return summary(frames: timestamps.count, gaps: [])
+        }
+        var gaps: [(index: Int, seconds: Double, interval: Double)] = [(0, first - start, intervals[0])]
+        for i in 1..<timestamps.count { gaps.append((i, timestamps[i] - timestamps[i - 1], intervals[i - 1])) }
+        gaps.append((timestamps.count, end - last, intervals[intervals.count - 1]))
+        return summary(frames: timestamps.count, gaps: gaps)
+    }
+
+    private static func summary(frames: Int, gaps: [(index: Int, seconds: Double, interval: Double)]) -> FrameSummary {
         var missed = 0, worst = 0.0, over50 = 0
         var long: [Int] = []
-        if timestamps.count > 1 {
-            for i in 1..<timestamps.count {
-                let gap = timestamps[i] - timestamps[i - 1]
-                worst = max(worst, gap)
-                if gap * 1000 > 50 { over50 += 1 }
-                if frameInterval > 0, gap > frameInterval * longGapFactor {
-                    long.append(i)
-                    missed += max(1, Int((gap / frameInterval).rounded()) - 1)
-                }
+        for gap in gaps {
+            worst = max(worst, gap.seconds)
+            if gap.seconds * 1000 > 50 { over50 += 1 }
+            if gap.interval > 0, gap.seconds > gap.interval * longGapFactor {
+                long.append(gap.index)
+                missed += max(1, Int((gap.seconds / gap.interval).rounded()) - 1)
             }
         }
-        return FrameSummary(frames: timestamps.count, missed: missed, worstGapMs: worst * 1000, gapsOver50ms: over50,
-                            longGaps: long)
+        return FrameSummary(frames: frames, missed: missed, worstGapMs: worst * 1000, gapsOver50ms: over50, longGaps: long)
     }
 
     /// The display's rate in whole frames a second, from its frame interval in seconds.
@@ -138,11 +159,13 @@ public struct SpeedCheckGesture: Equatable, Sendable, Identifiable {
     /// The display's rate while it ran, in frames a second.
     public var rate: Int
     public var summary: FrameSummary
+    /// Whether the Duo was unfolded when the gesture ended, so each copied line says how its own gesture was timed.
+    public var unfolded: Bool
     /// The frames with the longest gaps, longest first, with what ran on the main thread before each.
     public var worstFrames: [MainThreadFrame]
 
     public init(id: Int, kind: Kind, overSheet: Bool, hour: Int, minute: Int, seconds: Double, rate: Int,
-                summary: FrameSummary, worstFrames: [MainThreadFrame]) {
+                summary: FrameSummary, unfolded: Bool, worstFrames: [MainThreadFrame]) {
         self.id = id
         self.kind = kind
         self.overSheet = overSheet
@@ -151,6 +174,7 @@ public struct SpeedCheckGesture: Equatable, Sendable, Identifiable {
         self.seconds = seconds
         self.rate = rate
         self.summary = summary
+        self.unfolded = unfolded
         self.worstFrames = worstFrames
     }
 
@@ -163,16 +187,13 @@ public struct SpeedCheckGesture: Equatable, Sendable, Identifiable {
     /// "17:58".
     public var timeOfDay: String { SpeedCheckText.twoDigits(hour) + ":" + SpeedCheckText.twoDigits(minute) }
 
-    /// What Settings shows beside the title: "1.9 s · 4 missed".
-    public var lengthAndMissed: String { "\(SpeedCheckText.seconds(seconds)) s · \(summary.missed) missed" }
-
     /// "worst 92.4 ms".
     public var worst: String { "worst \(SpeedCheckText.ms(summary.worstGapMs)) ms" }
 
     /// The line Copy all puts on the pasteboard for this gesture: the build, the Duo's posture and the display's rate
     /// first, then the gesture and its numbers, then what ran on the main thread in its worst frames. A sheet is named
     /// only as a sheet, never by its number, so a pasted line carries nothing of the drawing.
-    public func line(build: String, unfolded: Bool) -> String {
+    public func line(build: String) -> String {
         var line = "Vellum speed check, build \(build), Duo \(unfolded ? "unfolded" : "folded"), \(rate) Hz, \(timeOfDay): "
             + "\(title.lowercased()), \(SpeedCheckText.seconds(seconds)) s, \(summary.frames) frames, "
             + "\(summary.missed) missed, worst gap \(SpeedCheckText.ms(summary.worstGapMs)) ms, "
@@ -181,6 +202,11 @@ public struct SpeedCheckGesture: Equatable, Sendable, Identifiable {
             line += "; worst frames: " + worstFrames.map(\.text).joined(separator: "; ")
         }
         return line
+    }
+
+    /// What Copy all puts on the pasteboard: one line per gesture, in the order given.
+    public static func copyText(_ gestures: [SpeedCheckGesture], build: String) -> String {
+        gestures.map { $0.line(build: build) }.joined(separator: "\n")
     }
 }
 

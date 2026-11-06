@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vellum milestone 2: the drawing index (PROTOTYPE, throwaway)</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--ink:#1d1d1f;--mute:#6e6e73;--accent:#0a7c86;--line:#d9d6cc}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1e;--card:#2c2c2e;--ink:#f2f2f7;--mute:#a1a1a6;--accent:#4fc3cc;--line:#3a3a3c}}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,system-ui,sans-serif}
+main{max-width:900px;margin:0 auto;padding:20px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:24px 0 8px}
+.mute{color:var(--mute)}
+.flow{display:grid;grid-template-columns:1fr 40px 1fr 40px 1fr;align-items:stretch;gap:0;margin:16px 0}
+.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.box b{display:block;margin-bottom:4px}.arrow{display:flex;align-items:center;justify-content:center;color:var(--accent);font-size:22px}
+.q{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 0}
+.q h3{margin:0 0 6px;font-size:15px}.opt{display:flex;gap:8px;margin:4px 0}.opt span:first-child{color:var(--accent);font-weight:600;min-width:18px}
+.rec{font-size:12px;color:var(--accent);border:1px solid var(--accent);border-radius:6px;padding:0 5px;margin-left:6px}
+table{border-collapse:collapse;width:100%;background:var(--card);border-radius:12px;overflow:hidden}
+td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;font-size:13px}
+input{width:100%;box-sizing:border-box;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:15px}
+@media (max-width:640px){.flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg);height:30px}}
+</style></head><body><main>
+<h1>Milestone 2: the drawing index</h1>
+<div class="mute">Throwaway page for #13. Shows how the pieces fit and the four laptop-side choices. Every drawing here is made up. The search screen on the Duo gets its own prototype later.</div>
+
+<div class="flow">
+ <div class="box"><b>Laptop indexer</b>Scans Dropbox for DWGs and PDFs, reads title blocks, makes thumbnails, and plots a DWG to PDF when the Duo asks.</div>
+ <div class="arrow">→</div>
+ <div class="box"><b>Dropbox/Vellum</b>One index file, thumbnails, plotted PDFs, and plot requests from the Duo. Never in the public repo.</div>
+ <div class="arrow">→</div>
+ <div class="box"><b>Duo</b>Keeps a copy of the index and searches it, offline too. Opening a drawing with no PDF asks the laptop to plot it.</div>
+</div>
+
+<h2>Try a search (made-up index)</h2>
+<input id="s" placeholder="Search number, title or project, e.g. M-101 or boiler" autocomplete="off">
+<table id="t"><thead><tr><th>Number</th><th>Title</th><th>Rev</th><th>Scale</th><th>Project</th><th>PDF</th></tr></thead><tbody></tbody></table>
+
+<h2>The four choices</h2>
+<div class="q"><h3>1. Which part of Dropbox to scan</h3>
+<div class="opt"><span>a</span><span>One projects folder you name<span class="rec">recommended</span>: faster first scan, nothing personal indexed.</span></div>
+<div class="opt"><span>b</span><span>A short list of folders you pick, in a settings file on the laptop.</span></div>
+<div class="opt"><span>c</span><span>All of Dropbox: slowest first scan.</span></div></div>
+<div class="q"><h3>2. How the indexer runs</h3>
+<div class="opt"><span>a</span><span>Always on, starts with Windows, watches Dropbox<span class="rec">recommended</span>: a plot request is answered in seconds while the laptop is on.</span></div>
+<div class="opt"><span>b</span><span>A scheduled task every few minutes: simpler, plot requests can wait minutes.</span></div>
+<div class="opt"><span>c</span><span>Only when you run it by hand.</span></div></div>
+<div class="q"><h3>3. Where title block fields come from</h3>
+<div class="opt"><span>a</span><span>DWG title block attributes, falling back to the PDF's text<span class="rec">recommended</span>.</span></div>
+<div class="opt"><span>b</span><span>The PDF's text only: no AutoCAD needed, less exact, only drawings with a PDF.</span></div>
+<div class="opt"><span>c</span><span>File and folder names only, for now.</span></div></div>
+<div class="q"><h3>4. PDFs with no DWG behind them (vendor drawings)</h3>
+<div class="opt"><span>a</span><span>List them too<span class="rec">recommended</span>: searchable and openable, just not redlined back to a DWG.</span></div>
+<div class="opt"><span>b</span><span>DWGs only.</span></div></div>
+</main>
+<script>
+const rows=[["M-101","First floor HVAC plan","C","1/4\" = 1'-0\"","Made-up School Addition","yes"],
+["M-501","Mechanical details","B","AS NOTED","Made-up School Addition","yes"],
+["E-201","Boiler room power plan","A","1/4\" = 1'-0\"","Made-up Plant Upgrade","no, plotted on first open"],
+["I-301","Loop diagram FT-101","0","NTS","Made-up Plant Upgrade","yes"],
+["V-12","Pump skid general arrangement (vendor)","2","1:20","Made-up Plant Upgrade","PDF only, no DWG"]];
+const tb=document.querySelector("#t tbody"),s=document.getElementById("s");
+function draw(){const q=s.value.toLowerCase();tb.innerHTML=rows.filter(r=>r.join(" ").toLowerCase().includes(q)).map(r=>"<tr>"+r.map(c=>"<td>"+c.replace(/</g,"&lt;")+"</td>").join("")+"</tr>").join("")}
+s.addEventListener("input",draw);draw();
+</script></body></html>

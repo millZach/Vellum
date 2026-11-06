@@ -1,0 +1,714 @@
+<!doctype html>
+<!--
+  PROTOTYPE - throwaway. Never merge to main; kept at the tag prototype/symbols.
+  Question (#41): reusable symbols on the canvas. Where the library lives and how a symbol gets into it; how one is
+  placed and sized on a canvas measured in real-world lengths (ADR-0002); whether a placed copy is plain ink or stays
+  linked to the library.
+
+  Three variants on one page, ?v=A|B|C, switched by the bar at the bottom or the arrow keys; ?theme=dark.
+   A  A Symbols tool on the rail with a flyout library kept on this Duo. Drawn at a printed size at the scale under the
+      tap. A placed copy is plain ink. A bubble's tag is typed as it lands, then it is a text box.
+   B  Symbols as a section of the line and shape flyout; the library is Dropbox/Vellum/Symbols, shared with every
+      canvas and the laptop. Sized in real-world lengths. A valve turns onto a line and cuts in at its connection ends,
+      which stay snap points. A placed copy is ink. A bubble numbers itself.
+   C  A Symbols panel; drag a symbol out. Copies stay linked: editing the symbol changes every linked copy; Unlink makes
+      a copy plain ink. A bubble's tag belongs to the copy.
+
+  Chrome follows prototype/drawing-tools and prototype/canvas-screen. The sheet, ink and symbols are made up and drawn
+  here as simple lines. Plain HTML, CSS and JS, no dependencies, nothing saved.
+  Mouse, finger or Pencil uses the tool; the wheel, two fingers or a right-drag pan and zoom.
+-->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vellum: reusable symbols (prototype)</title><link rel="icon" href="data:,">
+<style>
+:root{--ink:#1d1d1f;--mute:#6b6b70;--line:#d9d4c9;--paper:#f3efe6;--grid:#ece8dd;--grid2:#e0dbcf;--panel:#fbf9f5;--card:#fffdf9;--page:#ece8df;--accent:#2f5d8a;--accentBg:#e6edf5;--teal:#0b8a83;--shadow:0 1px 5px rgba(0,0,0,.12);--sheet:#ffffff;--sheetInk:#2a2a2a}
+body.dark{--ink:#e8e6e1;--mute:#a9a9ae;--line:#3a3b40;--paper:#1c1d20;--grid:#26272b;--grid2:#303136;--panel:#242529;--card:#1f2023;--page:#141416;--accent:#9cc4ec;--accentBg:#2c3a4a;--teal:#4fd1c7;--shadow:0 1px 5px rgba(0,0,0,.5);--sheet:#121316;--sheetInk:#cfd0d3}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--page);color:var(--ink);font:15px/1.4 -apple-system,system-ui,"SF Pro Text","Segoe UI",sans-serif}
+button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}
+button:disabled{cursor:not-allowed}
+main{max-width:985px;margin:0 auto;padding:12px 14px 64px}
+body.side main{margin-left:max(14px,calc(50vw - 668px))}
+h1{font-size:19px;margin:0}h1 span{font-weight:400;font-size:14px}
+.top{display:flex;gap:12px;justify-content:space-between;align-items:flex-start}
+.mute{color:var(--mute)}.small{font-size:13px}
+p{margin:4px 0 6px}
+.tog{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:none}
+.tog button{border:0;background:transparent;min-height:32px;padding:0 11px;font-size:13.5px}
+.tog button[aria-pressed=true]{background:var(--accentBg);color:var(--accent);font-weight:600}
+.hb{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.hb .btn{min-height:32px}
+details{font-size:13.5px;margin:0 0 4px}summary{cursor:pointer;color:var(--mute)}
+ol{margin:3px 0 0;padding-left:20px}li{margin:1px 0}
+#fit{position:relative;margin:8px 0;border-radius:12px;overflow:hidden;box-shadow:var(--shadow);width:100%}
+#stage{position:absolute;left:0;top:0;width:951px;height:669px;transform-origin:0 0;background:var(--paper);user-select:none;-webkit-user-select:none;overflow:hidden;font-size:13px}
+#cv{position:absolute;inset:0;width:951px;height:669px;display:block;touch-action:none}
+.panel{position:absolute;background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow)}
+#rail{left:9px;top:8px;width:54px;height:652px;border-radius:14px;display:flex;flex-direction:column;align-items:center;padding:6px 0}
+#tools{flex:1 1 auto;min-height:0;overflow-y:auto;scrollbar-width:none;display:flex;flex-direction:column;align-items:center;gap:2px;width:100%}
+#tools::-webkit-scrollbar{display:none}
+.rb{flex:none;width:42px;height:38px;border:0;background:transparent;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0;position:relative}
+.rb>svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.rb>svg.sym{width:26px;height:26px}
+.rb[disabled]{opacity:.38}
+.rb.on{background:var(--accentBg);color:var(--accent)}
+.rb .new{position:absolute;right:1px;top:1px;width:7px;height:7px;border-radius:50%;background:var(--teal)}
+.rdiv{flex:none;width:32px;height:1px;background:var(--line);margin:4px 0}
+#chips{flex:none;display:flex;flex-direction:column;gap:9px;padding:8px 0 6px;align-items:center}
+.cc{width:26px;height:26px;border-radius:50%;border:2px solid transparent;padding:0;background-clip:padding-box;outline:1px solid var(--line);outline-offset:1px}
+.cc.on{outline:2px solid var(--ink)}
+svg.sym{flex:none;overflow:visible}
+svg.sym path{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+svg.sym text{fill:currentColor;stroke:none;font-family:-apple-system,system-ui,sans-serif;font-weight:600}
+svg.sym .endc{fill:var(--card);stroke:var(--teal);stroke-width:1.5;cursor:pointer}
+svg.sym .endc.on{fill:var(--teal)}
+#bar{left:72px;top:8px;height:40px;border-radius:12px;display:flex;align-items:center;gap:13px;padding:0 12px;font-size:14px}
+#bar b{font-size:14px}#bar .ic{font-size:16px;border:0;background:transparent;padding:2px 4px}
+#right{position:absolute;right:92px;top:8px;display:flex;gap:7px;font-size:13px}
+#right span,#right button{padding:0 11px;height:36px;display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:9px;font-size:13px;box-shadow:var(--shadow)}
+#right button.on{background:var(--accentBg);color:var(--accent);font-weight:600;border-color:var(--accent)}
+#sys{position:absolute;right:2px;top:0;bottom:0;width:70px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+#sys i{font-style:normal;writing-mode:vertical-rl;font-size:11px;color:var(--mute);opacity:.7}
+#strips{position:absolute;left:72px;top:53px;max-width:786px;display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+.strip{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);display:flex;align-items:center;padding:2px;gap:1px;font-size:12.5px}
+.strip label{padding:0 7px;color:var(--mute);font-size:12px;white-space:nowrap}
+.strip label b{color:var(--ink)}
+.strip button{border:0;background:transparent;border-radius:8px;padding:0 8px;height:28px;font-size:12.5px;white-space:nowrap}
+.strip button.on{background:var(--accentBg);color:var(--accent);font-weight:600}
+.strip input{width:64px;height:26px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);font:12.5px ui-monospace,Menlo,Consolas,monospace;padding:0 6px;margin:0 3px}
+#fly{position:absolute;left:66px;display:none;flex-direction:column;padding:3px;gap:1px;border-radius:12px;max-height:612px;overflow-y:auto;z-index:4}
+#fly>button{border:0;background:transparent;border-radius:8px;height:34px;padding:0 10px 0 7px;display:flex;align-items:center;gap:7px;font-size:13px;white-space:nowrap;flex:none}
+#fly>button>svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#fly>button small{margin-left:auto;padding-left:12px;color:var(--mute);font-size:11.5px}
+#fly>button.on{background:var(--accentBg);color:var(--accent);font-weight:600}
+#fly>button:disabled{opacity:.45}
+.fh{padding:6px 8px 1px;font-size:12px;font-weight:600;color:var(--mute);display:flex;justify-content:space-between;align-items:center;gap:10px;flex:none}
+.fcap{padding:0 8px 4px;font-size:11px;color:var(--mute);max-width:220px;line-height:1.3;flex:none}
+.sync::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:#1f9d55;margin-right:5px;vertical-align:1px}
+.grid{display:grid;grid-template-columns:repeat(2,100px);gap:4px;padding:4px;flex:none}
+.tile{border:1.5px solid var(--line);border-radius:10px;background:var(--card);display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 4px;font-size:11.5px;line-height:1.2;text-align:center}
+.tile small{color:var(--mute);font-size:10.5px}
+.tile.on{border-color:var(--accent);background:var(--accentBg);color:var(--accent);font-weight:600}
+.wt{display:flex;gap:2px;padding:5px 5px 3px;border-top:1px solid var(--line);margin-top:3px;flex:none}
+.wt button{flex:1;border:0;background:transparent;border-radius:7px;height:28px;font-size:12px}
+.wt button.on{background:var(--accentBg);color:var(--accent);font-weight:600}
+#cpanel{right:80px;top:52px;bottom:51px;width:240px;border-radius:14px;display:none;flex-direction:column;z-index:3}
+#cpanel .clist{flex:1;overflow-y:auto;padding:2px 0}
+.ct{display:flex;align-items:center;gap:8px;padding:6px 7px;border-radius:10px;margin:2px 6px;border:1.5px solid transparent;touch-action:none;cursor:grab}
+.ct.on{border-color:var(--accent);background:var(--accentBg)}
+.ct .nm{flex:1;font-size:12.5px;line-height:1.25;min-width:0}.ct .nm small{display:block;color:var(--mute);font-size:10.5px}
+.ct button{border:1px solid var(--line);background:var(--card);border-radius:7px;font-size:11.5px;padding:3px 8px}
+.x{border:0;background:transparent;font-size:18px;line-height:1;padding:0 4px;color:var(--mute)}
+#status{left:72px;bottom:9px;width:786px;height:34px;border-radius:12px;display:flex;align-items:center;gap:16px;padding:0 11px;font-size:12.5px;white-space:nowrap;overflow:hidden}
+#coords{font:11px ui-monospace,Menlo,Consolas,monospace;width:178px;flex:none;overflow:hidden}
+#sb{flex:none;display:flex;align-items:center;gap:5px}#sb i{display:block;height:6px;border:1.5px solid var(--ink);border-top:0}
+#prompt{flex:1 1 auto;color:var(--mute);text-align:center;overflow:hidden;text-overflow:ellipsis}
+#count{flex:none;color:var(--mute)}
+.pop{position:absolute;display:none;gap:2px;padding:4px;border-radius:10px;background:#1d1d1f;color:#fff;z-index:6;align-items:center;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,.25)}
+body.dark .pop{background:#3a3b40}
+.pop .cnt{padding:0 8px;font-size:12px;color:#c8c8cc}
+.pop button{border:0;background:transparent;color:#fff;padding:6px 9px;border-radius:7px;font-size:12px}.pop button:hover{background:#3a3a3c}
+.pop button.hi{color:#9cc4ec;font-weight:600}
+#badge{position:absolute;display:none;z-index:6;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:11px;background:var(--accent);color:var(--card);font-size:11.5px;font-weight:600;white-space:nowrap;pointer-events:none}
+#badge svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+#tagpop{z-index:7;border-radius:12px;padding:8px 9px;width:214px;display:none;font-size:12px}
+#tagpop .row{display:flex;gap:5px;margin:5px 0}
+#tagpop .row input{width:0;flex:1}
+#tagpop .row input.l{flex:.7}
+input.f{font:inherit;font-size:14px;border:1.5px solid var(--line);border-radius:8px;padding:5px 7px;background:var(--card);color:var(--ink);width:100%}
+input.f:focus{outline:none;border-color:var(--accent)}
+.primary{background:var(--accent);color:var(--card);border:1px solid var(--accent);border-radius:9px;padding:6px 12px;font-weight:600;font-size:13px}
+.btn{border:1px solid var(--line);background:var(--card);border-radius:9px;padding:6px 11px;font-size:13px}
+.scrim{position:absolute;inset:0;background:rgba(20,20,20,.32);display:none;align-items:center;justify-content:center;z-index:9}
+.modal{width:450px;border-radius:16px;padding:14px 16px;background:var(--card);color:var(--ink);box-shadow:0 12px 40px rgba(0,0,0,.3);font-size:13px}
+.modal h2{font-size:16px;margin:0 0 8px}
+.modal .pv{display:flex;gap:14px;align-items:flex-start}
+.modal .pv>div:first-child{flex:none;width:150px;height:150px;border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:center;background:var(--paper)}
+.modal label{display:block;font-size:12px;color:var(--mute);margin:0 0 6px}
+.modal label input{margin-top:2px}
+.modal .act{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+#ecard{width:520px;border-radius:16px;padding:12px 14px;background:var(--card);color:var(--ink);box-shadow:0 12px 40px rgba(0,0,0,.3)}
+#ecv{display:block;width:490px;height:320px;border:1px solid var(--line);border-radius:10px;background:var(--paper);touch-action:none;margin:8px 0}
+.erow{display:flex;gap:8px;align-items:center}
+#toast{position:absolute;left:50%;bottom:52px;transform:translateX(-50%);padding:7px 12px;border-radius:10px;background:rgba(29,29,31,.9);color:#fff;font-size:12.5px;max-width:720px;text-align:center;pointer-events:none;display:none;z-index:8}
+#textedit{position:absolute;display:none;z-index:7;width:190px}
+#switcher{position:fixed;left:50%;bottom:8px;transform:translateX(-50%);display:flex;gap:8px;align-items:center;background:#000;color:#fff;border-radius:20px;padding:4px 6px;font:12.5px system-ui,sans-serif;z-index:99;white-space:nowrap;max-width:98vw;box-shadow:0 2px 12px rgba(0,0,0,.35)}
+#switcher button{color:#fff;border:0;font-size:13px;min-width:30px;height:28px;border-radius:14px;background:#333;padding:0 10px}
+#switcher .lbl{font-weight:700;overflow:hidden;text-overflow:ellipsis;padding:0 4px}
+#switcher button.on{background:#2f5d8a}
+#statep{position:fixed;right:10px;top:10px;width:340px;max-height:calc(100vh - 64px);overflow:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,.18);padding:9px 12px;font:11.5px/1.5 ui-monospace,Menlo,Consolas,monospace;z-index:50;display:none;overflow-wrap:anywhere}
+body.stateopen #statep{display:block}
+#statep .sh{display:flex;justify-content:space-between;align-items:center;font:600 13px -apple-system,system-ui,sans-serif;margin-bottom:4px}
+#statep ul{margin:0 0 4px;padding-left:16px}
+#statep .k{color:var(--mute)}
+#statep .ink{color:#1f9d55}#statep .lnk{color:var(--accent)}
+body.dark #statep .ink{color:#4cd07d}
+#statep .btn{font:12px -apple-system,system-ui,sans-serif;margin-top:6px}
+</style></head><body>
+<main>
+<div class="top"><div><h1>Vellum: reusable symbols <span class="mute">#41, prototype, nothing is saved</span></h1>
+<p class="small" id="vdesc"></p></div>
+<div class="hb"><div class="tog" id="theme"><button data-t="light">Light</button><button data-t="dark">Dark</button></div><button class="btn" id="reset">Start over</button></div></div>
+<details id="tryd" open><summary>Try these</summary><ol id="tries"></ol></details>
+<div id="fit"><div id="stage">
+  <canvas id="cv" width="951" height="669"></canvas>
+  <div class="panel" id="rail"><div id="tools"></div><div id="chips"></div></div>
+  <div class="panel" id="bar"><span>&#8249;</span><b>Pump house tie-in (made up)</b><span>ft-in</span><button class="ic" data-act="undo" aria-label="Undo">&#8630;</button><button class="ic" data-act="redo" aria-label="Redo">&#8631;</button></div>
+  <div id="right"></div>
+  <div id="sys"><i>Duo's side bar</i></div>
+  <div id="strips"></div>
+  <div class="panel" id="fly"></div>
+  <div class="panel" id="cpanel"></div>
+  <div class="pop" id="selmenu"></div>
+  <div id="badge"></div>
+  <div class="panel" id="tagpop"></div>
+  <input class="f" id="textedit" type="text" placeholder="Type, or write with the Pencil" autocomplete="off">
+  <div class="panel" id="status"><span id="coords"></span><span id="sb"><i></i><span></span></span><span id="prompt"></span><span id="count">Saved on this Duo</span></div>
+  <div id="toast"></div>
+  <div class="scrim" id="modal"></div>
+  <div class="scrim" id="edit"><div id="ecard"><div><b id="etitle"></b><div class="mute small" id="esub"></div></div><canvas id="ecv" width="490" height="320"></canvas>
+    <div class="erow"><div class="tog" id="emode"><button data-act="emode" data-arg="pen">Pen</button><button data-act="emode" data-arg="erase">Erase</button></div><button class="btn" data-act="eundo">Undo</button><span style="flex:1"></span><button class="btn" data-act="ecancel">Cancel</button><button class="primary" data-act="edone" id="edone">Done</button></div></div></div>
+</div></div>
+</main>
+<div id="switcher"><button id="prev" aria-label="Previous variant">&#9664;</button><span class="lbl" id="vlabel"></span><button id="next" aria-label="Next variant">&#9654;</button><button id="stateBtn" aria-pressed="false">State</button></div>
+<aside id="statep"></aside>
+<script>
+"use strict";
+const $=s=>document.querySelector(s),W=951,H=669,cv=$('#cv'),ctx=cv.getContext('2d'),stage=$('#stage');
+const params=new URLSearchParams(location.search);
+const ORDER=['A','B','C'];
+const VARS={
+ A:{name:'Symbols tool on the rail',
+  desc:'A <b>Symbols</b> tool joins the rail after line and shape; tap it again for the library, a flyout kept on this Duo for every canvas. Tap a symbol, then tap the canvas. It is drawn at a <b>printed size</b> (a 3/8" bubble, a 1/4" valve) at the scale under the tap, so it looks the same on the paper of any sheet. Once placed it is <b>plain ink</b>, like a snapped shape: lasso it, edit it, and later changes to the symbol never reach it. A bubble asks for its tag as it lands; after that the tag is a text box.',
+  tries:['The Symbols flyout is open. Pick <b>Gate valve</b> and tap twice on the red bypass. Pick <b>Instrument bubble</b>, tap near the bypass, then type a tag or keep FT 101.',
+   'Place a bubble inside <b>DETAIL 2</b> (1" = 1\'-0"): the same size on the paper, though it measures 4 1/2" there. Off the sheet it uses 1/4" = 1\'-0".',
+   'Pick the <b>Lasso</b> and loop a placed valve: move, resize, duplicate or delete its ink. Erase one of its lines with the eraser.',
+   'Loop the black strainer sketch, tap <b>Save as symbol</b>, name it and set its printed size, then place it from the flyout.',
+   'Pick the <b>Text box</b> tool and tap a bubble\'s tag to change it.']},
+ B:{name:'Symbols in the line and shape flyout',
+  desc:'Symbols are a section of the <b>line and shape flyout</b>, under the shapes. The library is one folder, <b>Dropbox/Vellum/Symbols</b>, shared by every canvas, so symbols added on the laptop show up here too. Each has a size in <b>real-world lengths</b> (a 6" valve body), so it prints smaller on a 1/4" sheet than in a 1" detail. Tap with the Pencil to place it: near a line, a valve turns onto it and cuts the line at its <b>connection ends</b>, which stay snap points. A placed copy is ink; a bubble numbers itself.',
+  tries:['The flyout is open with <b>Gate valve</b> picked. Tap on the red bypass: the valve turns onto the line and cuts it. Tap on a vertical leg too.',
+   'Use the size strip: 6" against 12". Place one inside <b>DETAIL 2</b> (1" = 1\'-0"): the same real size, four times as big on the paper.',
+   'Pick <b>Line</b> in the flyout and start a line on a valve\'s end: the snap reads Connection end.',
+   'Place two <b>Instrument bubbles</b>: FT 101, then FT 102. Change one with the Text box tool.',
+   'Loop the black strainer sketch, <b>Save as symbol</b>, tap its connection ends. Open State and pretend the laptop adds a symbol.']},
+ C:{name:'Linked symbols in a panel',
+  desc:'A <b>Symbols</b> panel opens from the top bar. Drag a symbol out, or tap it then tap the canvas; it comes out the size it was saved at, and a corner resizes it. Placed copies stay <b>linked</b> to the library (Dropbox/Vellum/Symbols, shared by every canvas): <b>edit a symbol and every linked copy follows</b>, here now and on other canvases when they open. Selected, a copy shows a Linked badge; <b>Unlink</b> turns it into plain ink. A bubble\'s tag belongs to the copy, so an edit to the symbol keeps it.',
+  tries:['Drag a <b>Gate valve</b> from the panel onto the red bypass, twice. Tap <b>Instrument bubble</b>, tap the canvas, and set its tag.',
+   'Pick the <b>Lasso</b> and tap a placed valve: the Linked badge shows. Resize it from a corner; it stays linked.',
+   'Tap <b>Edit</b> beside Gate valve, draw a stem and handwheel, tap Done: every linked copy changes.',
+   'Select one copy and <b>Unlink</b> it, then edit the symbol again: the unlinked one stays as it was.',
+   'Loop the black strainer sketch and tap <b>Make symbol</b>: the ink becomes a linked copy.']}};
+let V=ORDER.includes(params.get('v'))?params.get('v'):'A';
+let theme=params.get('theme')==='dark'?'dark':'light';
+let stateOpen=params.get('state')==='1'||(params.get('state')!=='0'&&innerWidth>=1350);
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+let CL={};function readCols(){const cs=getComputedStyle(document.body);for(const k of['--ink','--mute','--paper','--grid','--grid2','--accent','--teal','--sheet','--sheetInk','--panel','--line','--card'])CL[k]=cs.getPropertyValue(k).trim()}
+const INKS=[['Red','#cf3027','#ff6b5e'],['Green','#1f9d55','#4cd07d'],['Blue','#2563eb','#6ea0ff'],['Black','#1d1d1f','#e8e6e1']];
+const inkCol=k=>{const r=INKS.find(i=>i[0]===k)||INKS[3];return theme==='dark'?r[2]:r[1]};
+const PENW={Fine:.8,Medium:1.5,Bold:2.6};
+
+// ---------- lengths ----------
+function ftin(v){const neg=v<0;let s=Math.round(Math.abs(v)*16);const ft=Math.floor(s/192);s-=ft*192;const i=Math.floor(s/16);let n=s-i*16,fr='';
+ if(n){let d=16;while(n%2===0){n/=2;d/=2}fr=n+'/'+d}
+ const r=ft?ft+"'-"+i+(fr?' '+fr:'')+'"':(i?i+(fr?' '+fr:''):(fr||'0'))+'"';return(neg?'-':'')+r}
+function pr(v){let s=Math.round(v*32);const i=Math.floor(s/32);let n=s-i*32,fr='';if(n){let d=32;while(n%2===0){n/=2;d/=2}fr=n+'/'+d}return(i?i+(fr?' '+fr:''):(fr||'0'))+'"'}
+function parseIn(s){s=String(s||'').trim().replace(/"/g,'');if(!s)return null;let ft=0;const k=s.indexOf("'");
+ if(k>=0){ft=parseFloat(s.slice(0,k));if(isNaN(ft))return null;s=s.slice(k+1).replace(/^[\s-]+/,'')}
+ let inch=0;if(s){const m=s.match(/^(\d*\.?\d+)?(?:\s*(\d+)\/(\d+))?$/);if(!m||(m[1]==null&&m[2]==null))return null;inch=(m[1]?parseFloat(m[1]):0)+(m[2]?m[2]/m[3]:0)}
+ const v=ft*12+inch;return v>0?v:null}
+
+// ---------- the made-up sheet: M-201 at 1/4" = 1'-0", with a scale area ----------
+const SHEET={num:'M-201',x:0,y:0,pw:36,ph:24,scale:48,label:'1/4" = 1\'-0"',areas:[{name:'DETAIL 2',x:1.0,y:3.95,w:3.6,h:1.95,scale:12,label:'1" = 1\'-0"'}]};
+function where(p){const s=SHEET,u=(p.x-s.x)/s.scale,v=(p.y-s.y)/s.scale;
+ if(u<0||v<0||u>s.pw||v>s.ph)return{on:false,main:null,here:null,short:'bare canvas',name:'bare canvas'};
+ for(const a of s.areas)if(u>=a.x&&u<=a.x+a.w&&v>=a.y&&v<=a.y+a.h)return{on:true,main:s.scale,here:a.scale,short:a.name,name:`${s.num}, ${a.name} at ${a.label}`};
+ return{on:true,main:s.scale,here:s.scale,short:s.num,name:`${s.num} at ${s.label}`}}
+
+// ---------- symbols: geometry in units of the symbol's width, centred, y down ----------
+const bow=()=>[{t:'pl',p:[[-.5,0],[-.5,-.3],[.5,.3],[.5,0]]},{t:'pl',p:[[-.5,0],[-.5,.3],[.5,-.3],[.5,0]]}];
+const BASE=[
+ {id:'gate',name:'Gate valve',g:bow(),ends:1,A:.25,B:6,C:12,other:[5,2]},
+ {id:'ball',name:'Ball valve',g:[...bow(),{t:'c',x:0,y:0,r:.1}],ends:1,A:.25,B:6,C:12,other:[2,1]},
+ {id:'ctrl',name:'Control valve',g:[...bow(),{t:'pl',p:[[0,0],[0,-.55]]},{t:'arc',x:0,y:-.55,r:.28,a0:Math.PI,a1:2*Math.PI},{t:'pl',p:[[-.28,-.55],[.28,-.55]]}],ends:1,A:.25,B:8,C:12,other:[3,2]},
+ {id:'bubble',name:'Instrument bubble',g:[{t:'c',x:0,y:0,r:.5},{t:'tag',x:0,y:0,h:.24}],tag:'FT',A:.375,B:18,C:18,other:[11,3]},
+ {id:'jb',name:'Junction box',g:[{t:'pl',p:[[-.5,-.35],[.5,-.35],[.5,.35],[-.5,.35],[-.5,-.35]]},{t:'txt',x:0,y:0,h:.3,s:'JB'}],A:.375,B:12,C:18,other:[4,2]},
+ {id:'motor',name:'Motor',g:[{t:'c',x:0,y:0,r:.5},{t:'txt',x:0,y:0,h:.45,s:'M'}],A:.375,B:18,C:18,other:[2,1]}];
+function makeLib(){return BASE.map(b=>({id:b.id,name:b.name,g:JSON.parse(JSON.stringify(b.g)),ends:b.ends?[[-.5,0],[.5,0]]:[],tag:b.tag||null,size:b[V],v:V==='C'&&b.id==='gate'?2:1,from:'Vellum',other:{n:b.other[0],c:b.other[1]}}))}
+function geomPaths(g){const out=[];for(const it of g){
+ if(it.t==='pl')out.push({p:it.p.map(([x,y])=>({x,y}))});
+ else if(it.t==='c'){const p=[];for(let i=0;i<=40;i++){const a=i/40*2*Math.PI;p.push({x:it.x+it.r*Math.cos(a),y:it.y+it.r*Math.sin(a)})}out.push({p})}
+ else if(it.t==='arc'){const p=[];for(let i=0;i<=20;i++){const a=it.a0+(it.a1-it.a0)*i/20;p.push({x:it.x+it.r*Math.cos(a),y:it.y+it.r*Math.sin(a)})}out.push({p})}}
+ return out}
+function gBox(g){let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;const add=(x,y)=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y)};
+ for(const pl of geomPaths(g))for(const q of pl.p)add(q.x,q.y);
+ for(const it of g)if(it.t==='txt'||it.t==='tag'){const n=it.t==='tag'?2:1,w=(it.t==='tag'?3:it.s.length)*it.h*.62;add(it.x-w/2,it.y-n*it.h*.6);add(it.x+w/2,it.y+n*it.h*.6)}
+ if(x0>x1){x0=y0=-.5;x1=y1=.5}return{x0,y0,x1,y1}}
+function txtSVG(x,y,h,lines){const n=lines.length;return lines.map((s,i)=>`<text x="${(+x).toFixed(3)}" y="${(y+(i-(n-1)/2)*h*1.1).toFixed(3)}" font-size="${(+h).toFixed(3)}" text-anchor="middle" dominant-baseline="central">${esc(s)}</text>`).join('')}
+function symSVG(sym,px,ends){const b=gBox(sym.g),w=Math.max(b.x1-b.x0,b.y1-b.y0)*1.16||1,cx=(b.x0+b.x1)/2,cy=(b.y0+b.y1)/2;
+ let h=`<svg viewBox="${(cx-w/2).toFixed(3)} ${(cy-w/2).toFixed(3)} ${w.toFixed(3)} ${w.toFixed(3)}" width="${px}" height="${px}" class="sym" aria-hidden="true">`;
+ for(const pl of geomPaths(sym.g))h+=`<path d="M${pl.p.map(q=>q.x.toFixed(3)+' '+q.y.toFixed(3)).join('L')}" vector-effect="non-scaling-stroke"/>`;
+ for(const it of sym.g){if(it.t==='txt')h+=txtSVG(it.x,it.y,it.h,[it.s]);if(it.t==='tag')h+=txtSVG(it.x,it.y,it.h,[sym.tag||'FT','101'])}
+ if(ends)ends.cand.forEach((q,i)=>{h+=`<circle class="endc${ends.ends.includes(i)?' on':''}" data-act="mend" data-arg="${i}" cx="${q[0]}" cy="${q[1]}" r="${(w*.035).toFixed(3)}" vector-effect="non-scaling-stroke"/>`});
+ return h+'</svg>'}
+// a symbol at a centre, size and angle: the strokes and text it makes
+function emit(sym,c,size,ang,tag,useConn){const co=Math.cos(ang),si=Math.sin(ang),T=(u,v)=>({x:c.x+size*(u*co-v*si),y:c.y+size*(u*si+v*co)});
+ const ends=useConn?(sym.ends||[]):[],isEnd=q=>ends.some(e=>Math.abs(e[0]-q.x)<1e-6&&Math.abs(e[1]-q.y)<1e-6);
+ const strokes=geomPaths(sym.g).map(pl=>({pts:pl.p.map(q=>T(q.x,q.y)),conn:[isEnd(pl.p[0]),isEnd(pl.p[pl.p.length-1])]}));
+ const texts=[];for(const it of sym.g){if(it.t==='txt')texts.push({...T(it.x,it.y),h:it.h*size,text:it.s});
+  else if(it.t==='tag'&&tag&&(tag.l||tag.n))texts.push({...T(it.x,it.y),h:it.h*size,text:(tag.l||'')+'\n'+(tag.n||''),isTag:true})}
+ return{strokes,texts}}
+const symW=size=>Math.max(.35,Math.min(PENW.Medium,size*.065));
+const tagH=sym=>{const t=sym.g.find(i=>i.t==='tag');return t?t.h:.24};
+
+// ---------- state ----------
+let st=null,view={ox:250,oy:92,ppi:1.8},G=null,pinch=null,cdrag=null;const fingers=new Map();
+const emptySel=()=>({s:new Set(),t:new Set(),c:new Set()});
+const nid=()=>st.idn++;
+const lib=id=>st.lib.find(s=>s.id===id);
+function mkStroke(pts,color,w,extra){return{id:nid(),pts,color,w,conn:[false,false],cp:null,...(extra||{})}}
+function addStroke(pts,color,w,extra){const k=mkStroke(pts,color,w,extra);st.strokes.push(k);return k}
+function addText(c,h,text,color,extra){const t={id:nid(),x:c.x,y:c.y,h,text,color,isTag:false,cp:null,...(extra||{})};st.texts.push(t);return t}
+function fresh(){
+ st={tool:'lasso',sub:'line',pick:null,fly:false,panel:false,cpick:null,ink:'Red',weight:'Medium',strokes:[],texts:[],copies:[],lib:makeLib(),sel:emptySel(),undo:[],redo:[],idn:1,cn:1,bsize:{},draft:null,snap:null,hover:null,tip:null,tagPop:null,textEdit:null,modal:null,edit:null,laptop:false,last:'',dragSym:null};
+ if(V==='A'){st.tool='symbols';st.pick='gate';st.fly=true}
+ if(V==='B'){st.tool='line';st.sub='sym:gate';st.fly=true}
+ if(V==='C'){st.panel=true;st.tool='cplace';st.cpick='gate'}
+ view={ox:250,oy:92,ppi:1.8};seed()}
+function seed(){const P=(u,v)=>({x:u*48,y:v*48});
+ addStroke([P(2.6,2.0),P(2.6,3.4),P(5.4,3.4),P(5.4,2.0)],'Red',PENW.Medium);
+ const hand=(a,b,n,amp,ph)=>{const o=[],len=dist(a,b),nx=-(b.y-a.y)/len,ny=(b.x-a.x)/len;for(let i=0;i<=n;i++){const t=i/n,w=Math.sin(t*Math.PI*2.3+ph)*amp*Math.sin(t*Math.PI);o.push({x:a.x+(b.x-a.x)*t+nx*w,y:a.y+(b.y-a.y)*t+ny*w})}return o};
+ addStroke(hand(P(5.6,4.75),P(6.45,4.75),14,.6,0),'Black',PENW.Medium);
+ addStroke(hand(P(5.88,4.78),P(6.16,5.12),8,.5,1),'Black',PENW.Medium);
+ addStroke(hand(P(6.06,5.24),P(6.28,5.05),6,.3,2),'Black',PENW.Medium);
+ addText(P(6.25,3.05),6,'BYPASS:\n2 GATE VALVES + FT','Blue')}
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+const S=p=>({x:view.ox+p.x*view.ppi,y:view.oy+p.y*view.ppi});
+const M=s=>({x:(s.x-view.ox)/view.ppi,y:(s.y-view.oy)/view.ppi});
+const selCount=()=>st.sel.s.size+st.sel.t.size+st.sel.c.size;
+
+// ---------- undo ----------
+const snapState=()=>JSON.stringify({s:st.strokes,t:st.texts,c:st.copies});
+function pushUndo(){st.undo.push(snapState());if(st.undo.length>80)st.undo.shift();st.redo=[]}
+function restore(j){const o=JSON.parse(j);st.strokes=o.s;st.texts=o.t;st.copies=o.c;st.sel=emptySel();st.tagPop=null;st.textEdit=null}
+function undo(){if(st.draft){st.draft=null;render();return}if(!st.undo.length)return;st.redo.push(snapState());restore(st.undo.pop());render()}
+function redo(){if(!st.redo.length)return;st.undo.push(snapState());restore(st.redo.pop());render()}
+
+// ---------- placing ----------
+function placingSym(){if(V==='A'&&st.tool==='symbols')return st.pick;if(V==='B'&&st.tool==='line'&&st.sub.startsWith('sym:'))return st.sub.slice(4);if(V==='C'&&st.tool==='cplace')return st.cpick;return null}
+function sizeFor(sym,p){const w=where(p);
+ if(V==='A'){const size=sym.size*(w.on?w.main:48),real=sym.size*(w.on?w.here:48);
+  return{size,w,label:`${pr(sym.size)} printed`+(w.on?` · ${ftin(real)} in ${w.short}`:` · off a sheet, at 1/4" = 1'-0"`)}}
+ if(V==='B'){const real=st.bsize[sym.id]||sym.size,size=w.on?real*w.main/w.here:real;
+  return{size,w,real,label:`${ftin(real)} real`+(w.on?` · prints ${pr(real/w.here)} in ${w.short}`:' · off a sheet, true size')}}
+ return{size:sym.size,w,label:`as saved · ${ftin(sym.size)} across`}}
+function endsInfo(sym){if(!sym.ends||sym.ends.length!==2)return null;const[e1,e2]=sym.ends;return{m:{x:(e1[0]+e2[0])/2,y:(e1[1]+e2[1])/2},phi:Math.atan2(e2[1]-e1[1],e2[0]-e1[0]),span:Math.hypot(e2[0]-e1[0],e2[1]-e1[1])}}
+// B: a symbol with two connection ends, near a plain line, turns onto it and cuts in
+function bFit(p,sym,size){const ei=V==='B'?endsInfo(sym):null;if(!ei)return{c:p,ang:0};const s=S(p);let best=null;
+ for(const k of st.strokes){if(k.cp)continue;for(let i=0;i+1<k.pts.length;i++){const a=k.pts[i],b=k.pts[i+1],L=dist(a,b);if(L<1e-6)continue;
+  let t=((p.x-a.x)*(b.x-a.x)+(p.y-a.y)*(b.y-a.y))/(L*L);t=Math.max(0,Math.min(1,t));const q={x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t},d=dist(S(q),s);
+  if(d<=20&&(!best||d<best.d))best={d,q,k,i,t,L,a,b}}}
+ if(!best){const co=Math.cos(-ei.phi),si=Math.sin(-ei.phi);return{c:{x:p.x-size*(ei.m.x*co-ei.m.y*si),y:p.y-size*(ei.m.x*si+ei.m.y*co)},ang:-ei.phi}}
+ let la=Math.atan2(best.b.y-best.a.y,best.b.x-best.a.x);if(la>Math.PI/2+1e-9)la-=Math.PI;if(la<=-Math.PI/2+1e-9)la+=Math.PI;
+ const ang=la-ei.phi,co=Math.cos(ang),si=Math.sin(ang),c={x:best.q.x-size*(ei.m.x*co-ei.m.y*si),y:best.q.y-size*(ei.m.x*si+ei.m.y*co)};
+ const d0=best.t*best.L,half=size*ei.span/2,cut=d0-half>size*.05&&d0+half<best.L-size*.05;
+ return{c,ang,line:best,cut,half,d0}}
+function cutLine(f){const k=f.line.k,i=f.line.i,a=f.line.a,b=f.line.b,L=f.line.L,u={x:(b.x-a.x)/L,y:(b.y-a.y)/L};
+ const A={x:a.x+u.x*(f.d0-f.half),y:a.y+u.y*(f.d0-f.half)},B={x:a.x+u.x*(f.d0+f.half),y:a.y+u.y*(f.d0+f.half)};
+ const idx=st.strokes.indexOf(k);if(idx<0)return;st.strokes.splice(idx,1,mkStroke(k.pts.slice(0,i+1).concat([A]),k.color,k.w,{conn:[k.conn[0],true]}),mkStroke([B].concat(k.pts.slice(i+1)),k.color,k.w,{conn:[true,k.conn[1]]}))}
+function nextTag(l){let m=100;for(const t of st.texts)if(t.isTag){const[a,b]=t.text.split('\n');if(a===l&&+b>m)m=+b}
+ for(const c of st.copies)if(c.mode==='linked'&&c.tag&&c.tag.l===l&&+c.tag.n>m)m=+c.tag.n;return m+1}
+function place(p,id){const sym=lib(id);if(!sym)return;pushUndo();const z=sizeFor(sym,p);
+ if(V==='C'){const c={id:nid(),n:st.cn++,sym:sym.id,name:sym.name,mode:'linked',x:p.x,y:p.y,ang:0,size:z.size,k:1,color:st.ink,tag:sym.tag?{l:sym.tag,n:String(nextTag(sym.tag))}:null,where:z.w.name,v:sym.v};
+  st.copies.push(c);st.last=`placed ${sym.name} #${c.n}, linked`;if(c.tag)st.tagPop={copy:c.id,l:c.tag.l,n:c.tag.n};return}
+ let c=p,ang=0,fit=null;if(V==='B'){fit=bFit(p,sym,z.size);c=fit.c;ang=fit.ang}
+ const tag=V==='B'&&sym.tag?{l:sym.tag,n:String(nextTag(sym.tag))}:null,out=emit(sym,c,z.size,ang,tag,V==='B');
+ const rec={id:nid(),n:st.cn++,sym:sym.id,name:sym.name,mode:'ink',x:c.x,y:c.y,ang,size:z.size,tag,where:z.w.name,sids:[],tids:[],label:z.label};
+ for(const s of out.strokes)rec.sids.push(addStroke(s.pts,st.ink,symW(z.size),{conn:s.conn,cp:rec.id}).id);
+ for(const t of out.texts)rec.tids.push(addText(t,t.h,t.text,st.ink,{isTag:!!t.isTag,cp:rec.id}).id);
+ if(fit&&fit.cut)cutLine(fit);
+ st.copies.push(rec);st.last=`placed ${sym.name} #${rec.n} as ink`;
+ if(V==='A'&&sym.tag)st.tagPop={rec:rec.id,c,h:tagH(sym)*z.size,l:sym.tag,n:String(nextTag(sym.tag))};
+ if(V==='B'){const msg=[];if(fit&&fit.line)msg.push(fit.cut?'On the line: cut in at its connection ends':'On the line; too short to cut in');if(tag)msg.push(`${tag.l} ${tag.n}: to change it, tap it with the Text box tool`);if(msg.length)toast(msg.join('. '))}}
+function tagOk(skip){const tp=st.tagPop;if(!tp)return;const l=skip?'':($('#tpl')?$('#tpl').value.trim().toUpperCase():tp.l),n=skip?'':($('#tpn')?$('#tpn').value.trim():tp.n);st.tagPop=null;
+ if(tp.rec){const rec=st.copies.find(r=>r.id===tp.rec);if(rec&&(l||n)){const t=addText(tp.c,tp.h,l+'\n'+n,st.ink,{isTag:true,cp:rec.id});rec.tids.push(t.id);rec.tag={l,n}}}
+ else{const c=st.copies.find(r=>r.id===tp.copy);if(c)c.tag=(l||n)?{l,n}:null}
+ render()}
+
+// ---------- selection ----------
+function textBox(t){const lines=t.text.split('\n'),n=lines.length,w=Math.max(1,...lines.map(l=>l.length))*t.h*.62;return{x0:t.x-w/2,y0:t.y-n*t.h*.58,x1:t.x+w/2,y1:t.y+n*t.h*.58}}
+function copyBox(c){const sym=lib(c.sym),b=gBox(sym?sym.g:[]),z=c.size*c.k;return{x0:c.x+b.x0*z,y0:c.y+b.y0*z,x1:c.x+b.x1*z,y1:c.y+b.y1*z}}
+function selBounds(sel){sel=sel||st.sel;let b=null;const add=(x0,y0,x1,y1)=>{if(!b)b={x0,y0,x1,y1};else{b.x0=Math.min(b.x0,x0);b.y0=Math.min(b.y0,y0);b.x1=Math.max(b.x1,x1);b.y1=Math.max(b.y1,y1)}};
+ for(const k of st.strokes)if(sel.s.has(k.id))for(const p of k.pts)add(p.x-k.w/2,p.y-k.w/2,p.x+k.w/2,p.y+k.w/2);
+ for(const t of st.texts)if(sel.t.has(t.id)){const q=textBox(t);add(q.x0,q.y0,q.x1,q.y1)}
+ for(const c of st.copies)if(sel.c.has(c.id)&&c.mode==='linked'){const q=copyBox(c);add(q.x0,q.y0,q.x1,q.y1)}
+ return b}
+function selScreen(){const b=selBounds();if(!b)return null;const a=S({x:b.x0,y:b.y0}),z=S({x:b.x1,y:b.y1});return{x0:a.x-6,y0:a.y-6,x1:z.x+6,y1:z.y+6,b}}
+function inPoly(p,poly){let ins=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)ins=!ins}return ins}
+function samples(pts){const o=[];for(let i=0;i<pts.length;i++){o.push(pts[i]);if(i+1<pts.length)for(let k=1;k<4;k++)o.push({x:pts[i].x+(pts[i+1].x-pts[i].x)*k/4,y:pts[i].y+(pts[i+1].y-pts[i].y)*k/4})}return o}
+function hitCopy(p){for(let i=st.copies.length-1;i>=0;i--){const c=st.copies[i];if(c.mode!=='linked')continue;const b=copyBox(c),pad=6/view.ppi;if(p.x>=b.x0-pad&&p.x<=b.x1+pad&&p.y>=b.y0-pad&&p.y<=b.y1+pad)return c}return null}
+function finishLoop(g){let len=0;for(let i=1;i<g.pts.length;i++)len+=dist(g.pts[i],g.pts[i-1]);
+ if(len*view.ppi<10){const p=g.pts[0];st.sel=emptySel();
+  if(V==='C'){const c=hitCopy(p);if(c){st.sel.c.add(c.id);return}}
+  const onInk=st.strokes.some(k=>distToLine(S(p),k.pts.map(S))<10);
+  if(where(p).on)toast('A tap picks up the sheet, as today (not in this prototype)'+(onInk&&V!=='C'?'. A placed symbol is ink: loop it to select it':''));return}
+ const poly=g.pts;st.sel=emptySel();
+ for(const k of st.strokes){const sm=samples(k.pts);let n=0;for(const q of sm)if(inPoly(q,poly))n++;if(n>=sm.length/2)st.sel.s.add(k.id)}
+ for(const t of st.texts)if(inPoly(t,poly))st.sel.t.add(t.id);
+ for(const c of st.copies)if(c.mode==='linked'&&inPoly(c,poly))st.sel.c.add(c.id)}
+function hitSel(s){const q=selScreen();if(!q)return null;const b=q.b;
+ const corners=[[q.x0,q.y0,{x:b.x1,y:b.y1},{x:b.x0,y:b.y0}],[q.x1,q.y0,{x:b.x0,y:b.y1},{x:b.x1,y:b.y0}],[q.x0,q.y1,{x:b.x1,y:b.y0},{x:b.x0,y:b.y1}],[q.x1,q.y1,{x:b.x0,y:b.y0},{x:b.x1,y:b.y1}]];
+ for(const[x,y,anchor,c0]of corners)if(Math.hypot(s.x-x,s.y-y)<=14)return{kind:'resize',anchor,c0};
+ if(s.x>=q.x0&&s.x<=q.x1&&s.y>=q.y0&&s.y<=q.y1)return{kind:'move'};return null}
+function origSel(){const o={s:{},t:{},c:{}};for(const k of st.strokes)if(st.sel.s.has(k.id))o.s[k.id]={pts:k.pts.map(p=>({...p})),w:k.w};
+ for(const t of st.texts)if(st.sel.t.has(t.id))o.t[t.id]={x:t.x,y:t.y,h:t.h};for(const c of st.copies)if(st.sel.c.has(c.id))o.c[c.id]={x:c.x,y:c.y,k:c.k};return o}
+function xformSel(p){let fn,f=1;
+ if(G.mode==='move'){const dx=p.x-G.start.x,dy=p.y-G.start.y;fn=q=>({x:q.x+dx,y:q.y+dy})}
+ else{const o=G.anchor,v0={x:G.c0.x-o.x,y:G.c0.y-o.y},L2=v0.x*v0.x+v0.y*v0.y||1;f=Math.max(.05,((p.x-o.x)*v0.x+(p.y-o.y)*v0.y)/L2);fn=q=>({x:o.x+(q.x-o.x)*f,y:o.y+(q.y-o.y)*f})}
+ const O=G.orig;for(const k of st.strokes){const r=O.s[k.id];if(r){k.pts=r.pts.map(fn);k.w=r.w*f}}
+ for(const t of st.texts){const r=O.t[t.id];if(r){const q=fn(r);t.x=q.x;t.y=q.y;t.h=r.h*f}}
+ for(const c of st.copies){const r=O.c[c.id];if(r){const q=fn(r);c.x=q.x;c.y=q.y;c.k=r.k*f}}}
+function duplicate(){const b=selBounds();if(!b)return;pushUndo();const dx=(b.x1-b.x0)+12/view.ppi,ns=emptySel();
+ for(const k of st.strokes.slice())if(st.sel.s.has(k.id))ns.s.add(addStroke(k.pts.map(q=>({x:q.x+dx,y:q.y})),k.color,k.w,{conn:k.conn.slice()}).id);
+ for(const t of st.texts.slice())if(st.sel.t.has(t.id))ns.t.add(addText({x:t.x+dx,y:t.y},t.h,t.text,t.color,{isTag:t.isTag}).id);
+ for(const c of st.copies.slice())if(st.sel.c.has(c.id)){const n={...c,id:nid(),n:st.cn++,x:c.x+dx,tag:c.tag?{l:c.tag.l,n:String(nextTag(c.tag.l))}:null};st.copies.push(n);ns.c.add(n.id)}
+ st.sel=ns;st.last='duplicated the selection'}
+function delSel(){pushUndo();st.strokes=st.strokes.filter(k=>!st.sel.s.has(k.id));st.texts=st.texts.filter(t=>!st.sel.t.has(t.id));st.copies=st.copies.filter(c=>!st.sel.c.has(c.id));st.sel=emptySel();st.last='deleted the selection'}
+function unlink(){pushUndo();const ns=emptySel();let n=0;
+ for(const c of st.copies)if(st.sel.c.has(c.id)&&c.mode==='linked'){const sym=lib(c.sym);const out=emit(sym,c,c.size*c.k,0,c.tag,false);c.mode='unlinked';c.uv=sym.v;c.sids=[];c.tids=[];n++;
+  for(const s of out.strokes){const k=addStroke(s.pts,c.color,symW(c.size*c.k),{cp:c.id});c.sids.push(k.id);ns.s.add(k.id)}
+  for(const t of out.texts){const k=addText(t,t.h,t.text,c.color,{isTag:!!t.isTag,cp:c.id});c.tids.push(k.id);ns.t.add(k.id)}}
+ st.sel=ns;st.last=`unlinked ${n} cop${n===1?'y':'ies'}`;toast('Unlinked: it is plain ink now, so editing the symbol won\'t change it')}
+
+// ---------- ink tools ----------
+function distToLine(s,pts){let m=1e9;for(let i=0;i<pts.length;i++){const a=pts[i],b=pts[i+1]||a,dx=b.x-a.x,dy=b.y-a.y,L=dx*dx+dy*dy;let t=L?((s.x-a.x)*dx+(s.y-a.y)*dy)/L:0;t=Math.max(0,Math.min(1,t));m=Math.min(m,Math.hypot(s.x-a.x-t*dx,s.y-a.y-t*dy))}return m}
+function eraseAt(s){for(let i=st.strokes.length-1;i>=0;i--){const k=st.strokes[i];if(distToLine(s,k.pts.map(S))<Math.max(8,k.w*view.ppi/2+4)){if(!G.pushed){pushUndo();G.pushed=true}st.strokes.splice(i,1);st.sel.s.delete(k.id);st.last='erased a stroke'}}
+ if(V==='C'&&!G.warned){const c=hitCopy(M(s));if(c){G.warned=true;toast(`That is a linked ${c.name}: unlink it to erase part of it, or edit the symbol`)}}}
+function snapAt(s){let best=null;const consider=(p,kind)=>{const q=S(p),d=Math.hypot(q.x-s.x,q.y-s.y);if(d<=20&&(!best||d<best.d))best={p,kind,d}};
+ for(const k of st.strokes){if(k.pts.length<2)continue;consider(k.pts[0],k.conn[0]?'Connection end':'End');consider(k.pts[k.pts.length-1],k.conn[1]?'Connection end':'End')}
+ for(const c of st.copies)if(c.mode==='linked'){const sym=lib(c.sym);if(!sym)continue;for(const s2 of emit(sym,c,c.size*c.k,0,null,false).strokes){consider(s2.pts[0],'End');consider(s2.pts[s2.pts.length-1],'End')}}
+ return best}
+function simplify(pts){const o=[pts[0]];for(const p of pts)if(dist(S(p),S(o[o.length-1]))>=1.5)o.push(p);if(o.length<2)o.push(pts[pts.length-1]);return o}
+function textTap(p){if(V==='C'){const c=hitCopy(p);if(c&&c.tag!==undefined&&lib(c.sym)&&lib(c.sym).tag){st.tagPop={copy:c.id,l:c.tag?c.tag.l:lib(c.sym).tag,n:c.tag?c.tag.n:''};return}}
+ const t=[...st.texts].reverse().find(t=>{const b=textBox(t),pad=4/view.ppi;return p.x>=b.x0-pad&&p.x<=b.x1+pad&&p.y>=b.y0-pad&&p.y<=b.y1+pad});
+ if(t){st.textEdit={id:t.id,val:t.text.replace('\n',' ')}}else{pushUndo();const n=addText(p,8,'',st.ink);st.textEdit={id:n.id,val:'',fresh:true}}}
+function commitTextEdit(){const te=st.textEdit;if(!te)return;st.textEdit=null;const t=st.texts.find(x=>x.id===te.id);if(!t)return;const v=$('#textedit').value.trim();
+ if(!v){st.texts=st.texts.filter(x=>x!==t);return}
+ if(t.isTag){const m=v.match(/^([A-Za-z]+)[\s-]*(\d+\w*)$/);t.text=m?m[1].toUpperCase()+'\n'+m[2]:v;const rec=st.copies.find(r=>r.id===t.cp);if(rec&&m)rec.tag={l:m[1].toUpperCase(),n:m[2]}}else t.text=v;
+ if(v!==te.val&&!te.fresh)st.last='changed a text box to '+v}
+
+// ---------- save as symbol, make symbol ----------
+function normalizeSel(){const b=selBounds();if(!b)return null;const c={x:(b.x0+b.x1)/2,y:(b.y0+b.y1)/2};let unit=b.x1-b.x0;if(unit<(b.y1-b.y0)*.25)unit=b.y1-b.y0;
+ const g=[],cand=[];let tag=null,tagN='';const r=v=>+v.toFixed(4);
+ for(const k of st.strokes)if(st.sel.s.has(k.id)){const p=k.pts.map(q=>[r((q.x-c.x)/unit),r((q.y-c.y)/unit)]);g.push({t:'pl',p});for(const e of[p[0],p[p.length-1]])if(!cand.some(q=>Math.hypot(q[0]-e[0],q[1]-e[1])<.02))cand.push(e)}
+ for(const t of st.texts)if(st.sel.t.has(t.id)){const x=r((t.x-c.x)/unit),y=r((t.y-c.y)/unit),h=r(t.h/unit);if(t.isTag){g.push({t:'tag',x,y,h});[tag,tagN]=t.text.split('\n')}else g.push({t:'txt',x,y,h,s:t.text})}
+ return{g,cand,unit,c,tag,tagN,color:(st.strokes.find(k=>st.sel.s.has(k.id))||{color:st.ink}).color}}
+function openModal(kind){const ns=normalizeSel();if(!ns||!ns.g.length)return;const m={kind,...ns,ends:[],w:where(ns.c)};
+ if(kind==='B'){let best=null;for(let i=0;i<ns.cand.length;i++)for(let j=i+1;j<ns.cand.length;j++){const d=Math.hypot(ns.cand[i][0]-ns.cand[j][0],ns.cand[i][1]-ns.cand[j][1]);if(!best||d>best.d)best={d,i,j}}if(best)m.ends=[best.i,best.j]}
+ m.size=kind==='A'?ns.unit/(m.w.on?m.w.main:48):kind==='B'?(m.w.on?ns.unit*m.w.here/m.w.main:ns.unit):ns.unit;st.modal=m;render()}
+function modalHTML(m){const n=st.lib.filter(s=>s.from!=='Vellum'&&s.from!=='laptop').length+1;
+ let h=`<div class="modal"><h2>${m.kind==='C'?'Make symbol':'Save as symbol'}</h2><div class="pv"><div>${symSVG({g:m.g,tag:m.tag},136,m.kind==='B'?m:null)}</div><div style="flex:1">`;
+ h+=`<label>Name<input class="f" id="mname" placeholder="Y-strainer ${n>1?n:''}" autocomplete="off"></label>`;
+ if(m.kind==='A')h+=`<label>Printed size across<input class="f" id="msize" value="${esc(pr(m.size))}"></label><p class="mute small">It measures ${pr(m.size)} on the paper here (${esc(m.w.name)}). It is drawn this size on the paper of any sheet it lands on.</p>`;
+ if(m.kind==='B')h+=`<label>Real size across<input class="f" id="msize" value="${esc(ftin(m.size))}"></label><p class="mute small">Connection ends: tap the ends where pipes join; filled ones are picked (two, or none). A line it lands on turns it and cuts in at them.</p>`;
+ if(m.kind==='C')h+=`<p class="mute small">Size: ${ftin(m.size)} across, as drawn; a corner resizes a copy. The ink you looped becomes a linked copy of it.</p>`;
+ h+=`</div></div><p class="small" style="margin:8px 0 0">${m.kind==='A'?'Kept on this Duo, in the library every canvas uses. The ink you looped stays plain ink.':m.kind==='B'?'Saved as Dropbox/Vellum/Symbols/<i>name</i>.vsym, so every canvas, and the laptop, has it after the next sync. The ink you looped stays as it is.':'Shared by every canvas in Dropbox/Vellum/Symbols. Edit it later and every linked copy follows.'}</p>`;
+ return h+`<div class="act"><button class="btn" data-act="mcancel">Cancel</button><button class="primary" data-act="mok">${m.kind==='C'?'Make symbol':'Save'}</button></div></div>`}
+function modalOk(){const m=st.modal;if(!m)return;const inp=$('#mname'),name=(inp.value.trim()||inp.placeholder.trim());
+ const sym={id:'u'+nid(),name,g:m.g,ends:[],tag:m.tag,size:m.size,v:1,from:'you',other:{n:0,c:0}};
+ if(m.kind!=='C'){const v=parseIn($('#msize').value);if(v)sym.size=v}
+ if(m.kind==='B'&&m.ends.length===2)sym.ends=m.ends.map(i=>m.cand[i]);
+ st.lib.push(sym);st.modal=null;
+ if(m.kind==='A'){st.pick=sym.id;toast(`Saved ${name} to this Duo's symbols, ${pr(sym.size)} printed. Pick it from the Symbols tool.`)}
+ if(m.kind==='B'){st.bsize[sym.id]=sym.size;toast(`Saved Dropbox/Vellum/Symbols/${name}.vsym (made up), ${ftin(sym.size)} real${sym.ends.length?', with 2 connection ends':''}. It is in the line and shape flyout.`)}
+ if(m.kind==='C'){pushUndo();st.strokes=st.strokes.filter(k=>!st.sel.s.has(k.id));st.texts=st.texts.filter(t=>!st.sel.t.has(t.id));
+  const c={id:nid(),n:st.cn++,sym:sym.id,name,mode:'linked',x:m.c.x,y:m.c.y,ang:0,size:m.unit,k:1,color:m.color,tag:m.tag?{l:m.tag,n:m.tagN}:null,where:m.w.name,v:1};
+  st.copies.push(c);st.sel=emptySel();st.sel.c.add(c.id);toast(`${name} is a symbol now; the ink became a linked copy`)}
+ st.last=`saved ${name} as a symbol`;render()}
+
+// ---------- C: editing a symbol ----------
+function openEdit(id){const sym=lib(id);if(!sym)return;const b=gBox(sym.g),bx0=Math.min(b.x0,-.75),bx1=Math.max(b.x1,.75),by0=Math.min(b.y0,-.6),by1=Math.max(b.y1,.6);
+ const es=Math.min(440/(bx1-bx0),280/(by1-by0));st.edit={id,g:JSON.parse(JSON.stringify(sym.g)),mode:'pen',hist:[],cur:null,es,ox:245-(bx0+bx1)/2*es,oy:160-(by0+by1)/2*es};st.sel=emptySel();render()}
+function editDone(){const e=st.edit,sym=lib(e.id);if(!sym)return;sym.g=e.g;sym.v++;st.edit=null;
+ const here=st.copies.filter(c=>c.sym===sym.id&&c.mode==='linked').length,un=st.copies.filter(c=>c.sym===sym.id&&c.mode==='unlinked').length;
+ st.last=`edited ${sym.name}, now v${sym.v}`;
+ toast(`${sym.name} is v${sym.v}: ${here} linked cop${here===1?'y':'ies'} here changed${un?`, ${un} unlinked stayed as ${un===1?'it was':'they were'}`:''}.${sym.other.n?` ${sym.other.n} more on ${sym.other.c} other canvas${sym.other.c>1?'es':''} change when they open.`:''}`);render()}
+const ecv=$('#ecv'),ectx=ecv.getContext('2d');let EG=null;
+function eToU(e){const r=ecv.getBoundingClientRect(),x=(e.clientX-r.left)*490/r.width,y=(e.clientY-r.top)*320/r.height,E=st.edit;return{x,y,u:+((x-E.ox)/E.es).toFixed(4),v:+((y-E.oy)/E.es).toFixed(4)}}
+ecv.addEventListener('pointerdown',e=>{if(!st.edit)return;try{ecv.setPointerCapture(e.pointerId)}catch(_){}const q=eToU(e),E=st.edit;
+ if(E.mode==='pen'){EG={pts:[[q.u,q.v]]};E.cur=EG.pts}
+ else{let best=null;E.g.forEach((it,i)=>{let d;if(it.t==='txt'||it.t==='tag')d=Math.hypot(q.x-(E.ox+it.x*E.es),q.y-(E.oy+it.y*E.es))-it.h*E.es;else d=distToLine({x:q.x,y:q.y},geomPaths([it])[0].p.map(p=>({x:E.ox+p.x*E.es,y:E.oy+p.y*E.es})));if(d<12&&(!best||d<best.d))best={d,i}});
+  if(best){E.hist.push(JSON.stringify(E.g));E.g.splice(best.i,1)}}drawEdit()});
+ecv.addEventListener('pointermove',e=>{if(!EG||!st.edit)return;const q=eToU(e),l=EG.pts[EG.pts.length-1];if(Math.hypot((q.u-l[0])*st.edit.es,(q.v-l[1])*st.edit.es)>=1.5)EG.pts.push([q.u,q.v]);drawEdit()});
+function eUp(){if(!EG||!st.edit)return;const E=st.edit;if(EG.pts.length>1){E.hist.push(JSON.stringify(E.g));E.g.push({t:'pl',p:EG.pts})}EG=null;E.cur=null;drawEdit()}
+ecv.addEventListener('pointerup',eUp);ecv.addEventListener('pointercancel',eUp);
+function drawEdit(){const E=st.edit;if(!E)return;const c=ectx;c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,490,320);c.fillStyle=CL['--paper'];c.fillRect(0,0,490,320);
+ c.strokeStyle=CL['--grid2'];c.lineWidth=1;for(let u=-3;u<=3;u+=.1){const x=E.ox+u*E.es;if(x<0||x>490)continue;c.globalAlpha=Math.abs(u%.5)<.01||Math.abs(Math.abs(u%.5)-.5)<.01?1:.45;c.beginPath();c.moveTo(x,0);c.lineTo(x,320);c.stroke()}
+ for(let v=-3;v<=3;v+=.1){const y=E.oy+v*E.es;if(y<0||y>320)continue;c.globalAlpha=Math.abs(v%.5)<.01||Math.abs(Math.abs(v%.5)-.5)<.01?1:.45;c.beginPath();c.moveTo(0,y);c.lineTo(490,y);c.stroke()}c.globalAlpha=1;
+ c.strokeStyle=CL['--ink'];c.lineWidth=2.4;c.lineCap='round';c.lineJoin='round';
+ for(const pl of geomPaths(E.g)){c.beginPath();pl.p.forEach((q,i)=>{const x=E.ox+q.x*E.es,y=E.oy+q.y*E.es;i?c.lineTo(x,y):c.moveTo(x,y)});c.stroke()}
+ c.fillStyle=CL['--ink'];c.textAlign='center';c.textBaseline='middle';
+ for(const it of E.g){if(it.t!=='txt'&&it.t!=='tag')continue;const lines=it.t==='tag'?[lib(E.id).tag||'FT','101']:[it.s];c.font=`600 ${it.h*E.es}px -apple-system,system-ui,sans-serif`;c.globalAlpha=it.t==='tag'?.5:1;lines.forEach((s,i)=>c.fillText(s,E.ox+it.x*E.es,E.oy+(it.y+(i-(lines.length-1)/2)*it.h*1.1)*E.es))}c.globalAlpha=1;
+ if(E.cur&&E.cur.length>1){c.strokeStyle=CL['--accent'];c.beginPath();E.cur.forEach((q,i)=>{const x=E.ox+q[0]*E.es,y=E.oy+q[1]*E.es;i?c.lineTo(x,y):c.moveTo(x,y)});c.stroke()}
+ c.fillStyle=CL['--mute'];c.font='11px -apple-system,system-ui,sans-serif';c.textAlign='left';c.fillText(`Grid: 1/10 of the symbol's width (${ftin(lib(E.id).size/10)} as saved)`,8,310)}
+
+// ---------- pointer input on the canvas ----------
+function toStage(e){const r=stage.getBoundingClientRect(),s=r.width/W;return{x:(e.clientX-r.left)/s,y:(e.clientY-r.top)/s}}
+function overCanvas(s){const right=st.panel&&V==='C'?W-80-240-4:W-78;return s.x>66&&s.x<right&&s.y>50&&s.y<624}
+function zoomAt(x,y,f){const n=Math.min(40,Math.max(.15,view.ppi*f));f=n/view.ppi;view.ox=x-(x-view.ox)*f;view.oy=y-(y-view.oy)*f;view.ppi=n}
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('pointerdown',e=>{const s=toStage(e);fingers.set(e.pointerId,{...s,type:e.pointerType});
+ const touches=[...fingers.values()].filter(f=>f.type==='touch');
+ if(touches.length===2){if(G&&G.type==='touch'){if(G.mode==='line'&&st.draft&&st.draft.fresh)st.draft=null;G=null}const[a,b]=touches;pinch={d:Math.hypot(a.x-b.x,a.y-b.y)||1,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};draw();return}
+ if(G)return;try{cv.setPointerCapture(e.pointerId)}catch(_){}
+ if(e.button===1||e.button===2){G={mode:'pan',id:e.pointerId,type:e.pointerType,down:s,last:s};return}
+ st.fly=false;if(st.textEdit)commitTextEdit();if(st.tagPop)tagOk();
+ const p=M(s);st.tip=s;G={id:e.pointerId,type:e.pointerType,down:s,last:s,moved:false};const t=st.tool;
+ if(placingSym()){G.mode='place';st.hover=p}
+ else if(t==='pen'){G.mode='pen';G.pts=[p]}
+ else if(t==='eraser'){G.mode='erase';eraseAt(s)}
+ else if(t==='line'){G.mode='line';const r=snapAt(s),q=r?r.p:p;st.snap=r;if(!st.draft)st.draft={p1:q,cur:q,fresh:true};else{st.draft.cur=q;st.draft.fresh=false}}
+ else if(t==='lasso'){const h=hitSel(s);if(h){G.mode=h.kind;G.orig=origSel();G.start=p;G.anchor=h.anchor;G.c0=h.c0}else{G.mode='loop';G.pts=[p]}}
+ else if(t==='text')G.mode='text';
+ render()});
+cv.addEventListener('pointermove',e=>{const s=toStage(e);if(fingers.has(e.pointerId))fingers.set(e.pointerId,{...s,type:e.pointerType});
+ if(pinch){const t=[...fingers.values()].filter(f=>f.type==='touch');if(t.length>=2){const[a,b]=t,d=Math.hypot(a.x-b.x,a.y-b.y)||1,mx=(a.x+b.x)/2,my=(a.y+b.y)/2;zoomAt(pinch.mx,pinch.my,d/pinch.d);view.ox+=mx-pinch.mx;view.oy+=my-pinch.my;pinch={d,mx,my};draw()}return}
+ st.tip=s;const p=M(s);
+ if(!G||G.id!==e.pointerId){if(e.pointerType!=='touch'&&!G){st.hover=p;if(st.tool==='line'&&!placingSym()){st.snap=snapAt(s);if(st.draft)st.draft.cur=st.snap?st.snap.p:p}draw()}return}
+ if(!G.moved&&Math.hypot(s.x-G.down.x,s.y-G.down.y)>4)G.moved=true;
+ switch(G.mode){
+  case'pan':view.ox+=s.x-G.last.x;view.oy+=s.y-G.last.y;break;
+  case'pen':G.pts.push(p);break;
+  case'erase':eraseAt(s);break;
+  case'place':st.hover=p;break;
+  case'line':{const r=snapAt(s);st.snap=r;st.draft.cur=r?r.p:p;break}
+  case'loop':G.pts.push(p);break;
+  case'move':case'resize':if(G.moved){if(!G.pushed){pushUndo();G.pushed=true}xformSel(p)}break}
+ G.last=s;draw()});
+function endPointer(e){const mine=G&&G.id===e.pointerId;fingers.delete(e.pointerId);
+ if(pinch){if([...fingers.values()].filter(f=>f.type==='touch').length<2)pinch=null;return}
+ if(!mine)return;const g=G;G=null;const s=toStage(e),p=M(s);
+ if(e.type==='pointercancel'){if(g.mode==='line'&&st.draft&&st.draft.fresh)st.draft=null;render();return}
+ switch(g.mode){
+  case'pen':if(g.pts.length>1){pushUndo();addStroke(simplify(g.pts),st.ink,PENW[st.weight]);st.last='drew a stroke'}break;
+  case'place':{const id=placingSym();if(id)place(p,id);if(e.pointerType==='touch')st.hover=null;break}
+  case'line':{const d=st.draft;if(!d)break;if(dist(S(d.p1),S(d.cur))>6){pushUndo();addStroke([d.p1,d.cur],st.ink,PENW[st.weight]);st.draft=null;st.snap=null;st.last='drew a line'}else d.fresh=false;break}
+  case'loop':finishLoop(g);break;
+  case'move':case'resize':if(g.moved)st.last=g.mode==='move'?'moved the selection':'resized the selection';break;
+  case'text':textTap(p);break}
+ render()}
+cv.addEventListener('pointerup',endPointer);cv.addEventListener('pointercancel',endPointer);
+cv.addEventListener('pointerleave',e=>{if(!G&&e.pointerType!=='touch'){st.hover=null;draw()}});
+cv.addEventListener('wheel',e=>{e.preventDefault();const s=toStage(e);if(e.ctrlKey||(Math.abs(e.deltaY)>=40&&!e.shiftKey&&Number.isInteger(e.deltaY)&&!e.deltaX))zoomAt(s.x,s.y,Math.exp(-e.deltaY*.002));else{view.ox-=e.deltaX;view.oy-=e.deltaY}draw()},{passive:false});
+// C: drag a symbol out of the panel
+$('#cpanel').addEventListener('pointerdown',e=>{const t=e.target.closest('.ct');if(!t||e.target.closest('button'))return;e.preventDefault();cdrag={id:e.pointerId,sym:t.dataset.id,x:e.clientX,y:e.clientY,moved:false}});
+addEventListener('pointermove',e=>{if(!cdrag||e.pointerId!==cdrag.id)return;if(!cdrag.moved&&Math.hypot(e.clientX-cdrag.x,e.clientY-cdrag.y)>6)cdrag.moved=true;
+ if(cdrag.moved){const s=toStage(e);st.dragSym=cdrag.sym;st.hover=overCanvas(s)?M(s):null;draw()}});
+addEventListener('pointerup',e=>{if(!cdrag||e.pointerId!==cdrag.id)return;const d=cdrag;cdrag=null;st.dragSym=null;
+ if(d.moved){const s=toStage(e);if(overCanvas(s)){if(st.textEdit)commitTextEdit();if(st.tagPop)tagOk();place(M(s),d.sym)}st.hover=null}
+ else{st.cpick=d.sym;st.tool='cplace';st.sel=emptySel();st.draft=null}render()});
+addEventListener('pointercancel',e=>{if(cdrag&&e.pointerId===cdrag.id){cdrag=null;st.dragSym=null;st.hover=null;draw()}});
+
+// ---------- chrome ----------
+const icon=d=>`<svg viewBox="0 0 24 24"><path d="${d}"/></svg>`;
+const SHAPES=[['auto','Draw it','M3 17c3-9 5 3 8-3s4-7 10-9'],['line','Line','M4 19 L20 5 M4 19h.01 M20 5h.01'],['polyline','Polyline','M3 19 L9 8 L15 15 L21 5'],['rect','Rectangle','M4 6h16v12H4z'],['circle','Circle','M12 4a8 8 0 1 0 .01 0'],['arc','Arc','M4 18 A10 10 0 0 1 20 18'],['polygon','Polygon','M12 3 L20 8 L20 16 L12 21 L4 16 L4 8Z']];
+const RAIL=[['pen','Pen','M5 20 L9 6 L12 3 L15 6 L19 20 M9 6h6'],['hl','Highlighter','M4 20h16 M7 16 L16 5 L20 9 L10 19 H6z'],['eraser','Eraser','M8 20 L3 14 L13 4 L21 12 L13 20z'],['line','Line and shape',''],['symbols','Symbols','M3 12h3 M18 12h3 M6 8 L18 16 V8 L6 16z'],'-',['lasso','Lasso','M12 4c5 0 9 2.5 9 6s-4 6-9 6-9-2.5-9-6 4-6 9-6z M8 16c-1 2 0 4 2 4'],['text','Text box','M4 5h16v14H4z M9 16l3-8 3 8 M10 13h4'],'-',['measure','Measure','M2 9h20v6H2z M6 9v3 M10 9v3 M14 9v3 M18 9v3'],['dim','Dimension','M3 12h18 M7 8l-4 4 4 4 M17 8l4 4-4 4'],['frame','Frame','M3 6h18v12H3z M6 9h12v6H6z'],['window','Window','M4 5h16v14H4z']];
+const WORKS={pen:1,eraser:1,line:1,symbols:1,lasso:1,text:1};
+function railHTML(){let h='';for(const r of RAIL){if(r==='-'){h+='<div class="rdiv"></div>';continue}const[k,n,d]=r;if(k==='symbols'&&V!=='A')continue;
+  let ic=icon(d);if(k==='line'){const sub=st.sub;ic=sub.startsWith('sym:')&&lib(sub.slice(4))?symSVG(lib(sub.slice(4)),26):icon(SHAPES.find(x=>x[0]===sub)[2])}
+  if(k==='symbols'&&st.pick&&lib(st.pick))ic=symSVG(lib(st.pick),26);
+  const on=st.tool===k;h+=`<button class="rb${on?' on':''}" data-act="tool" data-arg="${k}" aria-label="${n}" title="${WORKS[k]?n:n+' works in the app; not in this prototype'}"${WORKS[k]?'':' disabled'}${k==='line'||k==='symbols'?` id="rb-${k}"`:''}>${ic}${k==='symbols'?'<i class="new"></i>':''}</button>`}
+ return h}
+function flyHTML(){if(st.tool==='symbols'){let h=`<div class="fh"><span>Symbols</span><span>On this Duo</span></div><div class="fcap">One library for every canvas on this Duo.</div><div class="grid">`;
+  for(const s of st.lib)h+=`<button class="tile${st.pick===s.id?' on':''}" data-act="pickA" data-arg="${s.id}">${symSVG(s,38)}<span>${esc(s.name)}</span><small>${pr(s.size)} printed</small></button>`;
+  return h+`</div><div class="fcap">Drawn at its printed size, at the scale under the tap. To add one, loop ink with the lasso and tap Save as symbol.</div>`}
+ let h='';for(const[k,n,d]of SHAPES)h+=`<button class="${st.sub===k?'on':''}" data-act="shape" data-arg="${k}"${k==='line'?'':' disabled title="Works in the app; not in this prototype"'}>${icon(d)}${n}</button>`;
+ if(V==='B'){h+=`<div class="fh" style="border-top:1px solid var(--line);margin-top:3px;padding-top:7px"><span>Symbols</span><span class="sync">Dropbox</span></div><div class="fcap">Dropbox/Vellum/Symbols: every canvas, and the laptop, share it.</div>`;
+  for(const s of st.lib)h+=`<button class="${st.sub==='sym:'+s.id?'on':''}" data-act="pickB" data-arg="${s.id}">${symSVG(s,19)}${esc(s.name)}<small>${ftin(st.bsize[s.id]||s.size)}${s.from==='laptop'?' · from laptop':''}</small></button>`}
+ return h+`<div class="wt">${['Fine','Medium','Bold'].map(w=>`<button class="${st.weight===w?'on':''}" data-act="weight" data-arg="${w}">${w}</button>`).join('')}</div>`}
+function stripHTML(){if(!(V==='B'&&st.tool==='line'&&st.sub.startsWith('sym:')))return'';const s=lib(st.sub.slice(4));if(!s)return'';const cur=st.bsize[s.id]||s.size;
+ const pre=(s.ends.length===2?[4,6,8,12]:[12,18,24]);if(!pre.some(v=>Math.abs(v-s.size)<1e-6))pre.push(s.size);if(!pre.some(v=>Math.abs(v-cur)<1e-6))pre.push(cur);pre.sort((a,b)=>a-b);
+ return `<div class="strip"><label><b>${esc(s.name)}</b>, real size</label>${pre.map(v=>`<button class="${Math.abs(v-cur)<1e-6?'on':''}" data-act="bsize" data-arg="${v}">${ftin(v)}</button>`).join('')}<input id="bsz" placeholder="type" aria-label="Type a real size"><label>${s.ends.length===2?'Turns onto a line it lands on and cuts in at its connection ends':''}${s.tag?`Numbers itself: next is ${s.tag} ${nextTag(s.tag)}`:''}</label></div>`}
+function cpanelHTML(){let h=`<div class="fh" style="padding:9px 8px 1px 11px"><span style="font-size:14px;color:var(--ink)">Symbols</span><button class="x" data-act="cpanel" aria-label="Close the symbols panel">&times;</button></div><div class="fcap" style="padding:0 11px 6px;max-width:none">Shared by every canvas, in Dropbox/Vellum/Symbols. Placed copies stay linked.</div><div class="clist">`;
+ for(const s of st.lib){const here=st.copies.filter(c=>c.sym===s.id&&c.mode==='linked').length;
+  h+=`<div class="ct${st.tool==='cplace'&&st.cpick===s.id?' on':''}" data-id="${s.id}">${symSVG(s,40)}<div class="nm">${esc(s.name)}<small>v${s.v} · ${here} here${s.other.n?` · ${s.other.n} on ${s.other.c} other canvas${s.other.c>1?'es':''}`:''}</small></div><button data-act="cedit" data-arg="${s.id}">Edit</button></div>`}
+ return h+`</div><div class="fcap" style="padding:6px 11px 9px;max-width:none;border-top:1px solid var(--line)">Drag one onto the canvas, or tap it and then tap where it goes. To make one, loop ink with the lasso and tap Make symbol.</div>`}
+function oneCopy(){return st.sel.c.size===1&&selCount()===1?st.copies.find(c=>st.sel.c.has(c.id)):null}
+function selMenuHTML(){const n=selCount();if(!n)return'';const one=oneCopy();
+ let h=`<span class="cnt">${one?esc(one.name):n+' selected'}</span>`;
+ if(one&&lib(one.sym)&&lib(one.sym).tag)h+=`<button data-act="sel" data-arg="tag">Tag ${one.tag?esc(one.tag.l+' '+one.tag.n):'(none)'}</button>`;
+ h+=`<button data-act="sel" data-arg="dup">Duplicate</button><button data-act="sel" data-arg="del">Delete</button>`;
+ if(V!=='C'&&(st.sel.s.size||st.sel.t.size))h+=`<button class="hi" data-act="sel" data-arg="save">Save as symbol</button>`;
+ if(V==='C'&&!st.sel.c.size)h+=`<button class="hi" data-act="sel" data-arg="make">Make symbol</button>`;
+ if(V==='C'&&st.sel.c.size){h+=`<button data-act="sel" data-arg="unlink">Unlink</button>`;if(one)h+=`<button class="hi" data-act="sel" data-arg="edit">Edit symbol</button>`}
+ return h}
+function badgeHTML(){if(V!=='C'||!st.sel.c.size)return'';const one=oneCopy(),lk='<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>';
+ if(one){const s=lib(one.sym);return`${lk}Linked · ${esc(one.name)} v${s?s.v:'?'}${Math.abs(one.k-1)>.005?` · × ${one.k.toFixed(2)}`:''}`}
+ return`${lk}${st.sel.c.size} linked`}
+function tagPopHTML(tp){const A=!!tp.rec;return`<div style="font-weight:600">${A?'Tag for this bubble':'Tag for this copy'}</div><div class="row"><input class="f l" id="tpl" value="${esc(tp.l)}" aria-label="Letters" autocomplete="off"><input class="f" id="tpn" value="${esc(tp.n)}" aria-label="Number" autocomplete="off" inputmode="numeric"></div><div class="row"><button class="btn" data-act="tagskip" style="flex:1">${A?'No tag':'Clear'}</button><button class="primary" data-act="tagok" style="flex:1">${A?'Place':'Done'}</button></div><div class="mute" style="font-size:11px;line-height:1.3">${A?'Typed as it lands. After this it is a text box: change it with the Text box tool.':'Belongs to this copy. Change it any time from its menu; editing the symbol keeps it.'}</div>`}
+function promptText(){if(st.edit)return'Editing a symbol';if(st.modal)return'Name the symbol';if(st.tagPop)return'Type the tag, or keep it';const id=placingSym(),s=id&&lib(id),nm=s?s.name.replace(/^[A-Z](?=[a-z])/,c=>c.toLowerCase()):'';
+ if(s)return V==='C'?`Tap where the ${nm} goes, or drag one out`:`Tap where the ${nm} goes`;
+ switch(st.tool){case'pen':return'Draw with the Pencil';case'eraser':return'Touch ink to erase a stroke';case'symbols':return'Pick a symbol';
+  case'line':return st.draft?'Tap the second point':'Tap or drag: first point';case'text':return V==='C'?'Tap a text box, or a bubble for its tag':'Tap to place a text box or edit one';
+  case'lasso':return selCount()?'Drag the selection':(V==='C'?'Loop ink, or tap a symbol or a sheet':'Loop ink, or tap a sheet')}
+ return''}
+function toolText(){const id=placingSym(),s=id&&lib(id);if(V==='A'&&st.tool==='symbols')return`Symbols, ${s?s.name+' picked':'nothing picked'}${st.fly?', flyout open':''}`;
+ if(st.tool==='line')return`Line and shape, ${s?s.name+` (${ftin(st.bsize[s.id]||s.size)} real)`:SHAPES.find(x=>x[0]===st.sub)[1]}${st.fly?', flyout open':''}`;
+ if(st.tool==='cplace')return`placing ${s?s.name:'?'} from the panel`;return{pen:'Pen',eraser:'Eraser',lasso:'Lasso',text:'Text box'}[st.tool]+` (ink ${st.ink})`}
+function copyLine(c){const sym=lib(c.sym),tg=c.tag&&(c.tag.l||c.tag.n)?` ${c.tag.l} ${c.tag.n}`:'';
+ if(c.mode==='linked')return`<span class="lnk">#${c.n} ${esc(c.name+tg)}: linked to v${sym?sym.v:'?'}</span>, ${ftin(c.size*c.k)} across${Math.abs(c.k-1)>.005?` (× ${c.k.toFixed(2)})`:''}, on ${esc(c.where)}`;
+ const ids=new Set(st.strokes.map(k=>k.id)),tids=new Set(st.texts.map(t=>t.id)),left=c.sids.filter(i=>ids.has(i)).length,tl=c.tids.filter(i=>tids.has(i)).length;
+ const tagNow=st.texts.find(t=>c.tids.includes(t.id)&&t.isTag),tgNow=tagNow?' '+tagNow.text.replace('\n',' '):tg;
+ if(!left&&!tl)return`<span class="k">#${c.n} ${esc(c.name)}: all its ink is gone</span>`;
+ return`<span class="ink">#${c.n} ${esc(c.name+tgNow)}: ${c.mode==='unlinked'?`unlinked at v${c.uv}, `:''}plain ink</span>, ${left} of ${c.sids.length} strokes${c.tids.length?`, ${tl} text box${tl===1?'':'es'}`:''}, ${ftin(c.size)} across, on ${esc(c.where)}`}
+function stateHTML(){const wl={A:'on this Duo, one library for every canvas; the laptop can\'t add to it',B:'Dropbox/Vellum/Symbols, shared by every canvas and the laptop',C:'Dropbox/Vellum/Symbols, shared by every canvas; each copy is linked'}[V];
+ const ls=s=>V==='A'?`${pr(s.size)} printed`:V==='B'?`${ftin(s.size)} real${s.ends.length===2?', 2 connection ends':''}`:`${ftin(s.size)} as saved, v${s.v}`;
+ let h=`<div class="sh"><span>State</span><button class="x" data-act="statex" aria-label="Close the state panel">&times;</button></div>`;
+ h+=`<div><span class="k">variant</span> ${V}, ${esc(VARS[V].name)}</div><div><span class="k">tool</span> ${esc(toolText())}</div>`;
+ h+=`<div><span class="k">library</span> ${esc(wl)}</div><ul>${st.lib.map(s=>`<li>${esc(s.name)}: ${esc(ls(s))}${s.from!=='Vellum'?`, from ${esc(s.from)}`:''}</li>`).join('')}</ul>`;
+ h+=`<div><span class="k">placed</span> ${st.copies.length?'':'nothing yet'}</div>${st.copies.length?`<ul>${st.copies.map(c=>`<li>${copyLine(c)}</li>`).join('')}</ul>`:''}`;
+ h+=`<div><span class="k">selection</span> ${selCount()?`${st.sel.s.size} strokes, ${st.sel.t.size} text boxes, ${st.sel.c.size} linked copies`:'none'}</div>`;
+ h+=`<div><span class="k">canvas</span> ${st.strokes.length} strokes, ${st.texts.length} text boxes, ${st.copies.filter(c=>c.mode==='linked').length} linked copies; zoom ${(view.ppi*12).toFixed(1)} points per foot</div>`;
+ h+=`<div><span class="k">last</span> ${esc(st.last||'nothing yet')}</div>`;
+ if(V==='B')h+=`<button class="btn" data-act="laptop"${st.laptop?' disabled':''}>${st.laptop?'The laptop added Check valve':'Pretend the laptop adds a symbol'}</button>`;
+ return h}
+function chrome(){document.body.classList.toggle('dark',theme==='dark');readCols();
+ document.querySelectorAll('#theme button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.t===theme));
+ $('#vdesc').innerHTML=`<b>${V}. ${VARS[V].name}.</b> ${VARS[V].desc}`;
+ const tk=V+'|';if($('#tries').dataset.k!==tk){$('#tries').innerHTML=VARS[V].tries.map(t=>`<li>${t}</li>`).join('');$('#tries').dataset.k=tk}
+ $('#vlabel').textContent=`${V}: ${VARS[V].name}`;
+ $('#tools').innerHTML=railHTML();
+ $('#chips').innerHTML=INKS.map(([n,l,d])=>`<button class="cc${st.ink===n?' on':''}" style="background:${theme==='dark'?d:l}" data-act="ink" data-arg="${n}" aria-label="${n} ink"></button>`).join('');
+ const fly=$('#fly'),showFly=st.fly&&(st.tool==='line'||st.tool==='symbols');fly.style.display=showFly?'flex':'none';
+ if(showFly){fly.innerHTML=flyHTML();const btn=$('#rb-'+st.tool),top=btn?btn.offsetTop+$('#rail').offsetTop-$('#tools').scrollTop:60;fly.style.top='8px';const hgt=fly.offsetHeight;fly.style.top=Math.max(8,Math.min(top-4,660-hgt))+'px'}
+ $('#strips').innerHTML=stripHTML();
+ $('#right').innerHTML=`<span class="mute">+ Add sheet</span>`+(V==='C'?`<button class="${st.panel?'on':''}" data-act="cpanel">${symSVG(lib('gate')||st.lib[0],16)}Symbols</button>`:'');
+ const cp=$('#cpanel');cp.style.display=V==='C'&&st.panel?'flex':'none';if(V==='C'&&st.panel){const sc=cp.querySelector('.clist'),y=sc?sc.scrollTop:0;cp.innerHTML=cpanelHTML();cp.querySelector('.clist').scrollTop=y}
+ $('#selmenu').innerHTML=st.tool==='lasso'?selMenuHTML():'';$('#badge').innerHTML=badgeHTML();
+ const tp=$('#tagpop');if(st.tagPop){if(tp._for!==st.tagPop){tp._for=st.tagPop;tp.innerHTML=tagPopHTML(st.tagPop);tp.style.display='block';setTimeout(()=>{const n=$('#tpn');if(n){n.focus();n.select()}},0)}}else{tp._for=null;tp.style.display='none'}
+ const te=$('#textedit');if(st.textEdit){if(te._for!==st.textEdit){te._for=st.textEdit;te.value=st.textEdit.val;te.style.display='block';setTimeout(()=>{te.focus();te.select()},0)}}else{te._for=null;te.style.display='none'}
+ const md=$('#modal');if(st.modal){if(md._for!==st.modal){md._for=st.modal;md.innerHTML=modalHTML(st.modal);md.style.display='flex';setTimeout(()=>{const n=$('#mname');if(n)n.focus()},0)}}else{md._for=null;md.style.display='none'}
+ const ed=$('#edit');if(st.edit){const s=lib(st.edit.id),here=st.copies.filter(c=>c.sym===s.id&&c.mode==='linked').length;ed.style.display='flex';
+  $('#etitle').textContent=`Editing ${s.name} (v${s.v})`;$('#esub').textContent=`Pen adds lines, Erase takes one away. Done makes v${s.v+1}: ${here} linked cop${here===1?'y':'ies'} on this canvas change now${s.other.n?`, ${s.other.n} on ${s.other.c} other canvas${s.other.c>1?'es':''} when they open`:''}. Unlinked copies and tags stay as they are.`;
+  $('#emode').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.arg===st.edit.mode));drawEdit()}else ed.style.display='none';
+ document.body.classList.toggle('stateopen',stateOpen);const side=stateOpen&&innerWidth>=1350;if(document.body.classList.contains('side')!==side){document.body.classList.toggle('side',side);setTimeout(fit,0)}
+ $('#stateBtn').classList.toggle('on',stateOpen);$('#stateBtn').setAttribute('aria-pressed',stateOpen);
+ if(stateOpen)$('#statep').innerHTML=stateHTML();
+ const u=new URLSearchParams(location.search);u.set('v',V);if(theme==='dark')u.set('theme','dark');else u.delete('theme');history.replaceState(null,'','?'+u)}
+
+// ---------- the canvas ----------
+function drawSheet(c){const s=SHEET,pz=view.ppi*s.scale,o=S({x:s.x,y:s.y});c.save();c.translate(o.x,o.y);c.scale(pz,pz);
+ c.shadowColor='rgba(0,0,0,.2)';c.shadowBlur=8;c.fillStyle=CL['--sheet'];c.fillRect(0,0,s.pw,s.ph);c.shadowBlur=0;
+ const ink=CL['--sheetInk'];c.strokeStyle=ink;c.fillStyle=ink;c.lineWidth=Math.max(.004,.9/pz);c.lineCap='round';c.lineJoin='round';
+ const L=pts=>{c.beginPath();pts.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.stroke()},O=(x,y,r)=>{c.beginPath();c.arc(x,y,r,0,7);c.stroke()};
+ const T=(t,x,y,h,al)=>{if(h*pz<3)return;c.font=`600 ${h}px -apple-system,system-ui,sans-serif`;c.textAlign=al||'left';c.textBaseline='middle';c.fillText(t,x,y)};
+ c.strokeRect(.5,.5,s.pw-1,s.ph-1);
+ L([[1.2,1.35],[1.2,3.05]]);L([[2.0,1.35],[2.0,3.05]]);c.beginPath();c.ellipse(1.6,1.35,.4,.16,0,Math.PI,2*Math.PI);c.stroke();c.beginPath();c.ellipse(1.6,3.05,.4,.16,0,0,Math.PI);c.stroke();T('TK-101',1.6,3.45,.12,'center');
+ L([[2.0,2.0],[2.875,2.0]]);L([[2.875,1.925],[3.125,2.075],[3.125,1.925],[2.875,2.075],[2.875,1.925]]);L([[3.125,2.0],[5.9,2.0]]);T('4"-W-101',2.15,1.88,.08);T('HV-100',3.0,1.8,.07,'center');
+ O(6.15,2.0,.25);L([[6.15,1.75],[6.15,.95],[7.9,.95]]);L([[6.0,1.82],[6.38,2.0],[6.0,2.18]]);T('P-101',6.15,2.42,.1,'center');
+ O(4.3,1.2,.1875);T('FT',4.3,1.15,.07,'center');T('100',4.3,1.26,.07,'center');c.setLineDash([.04,.03]);L([[4.3,1.3875],[4.3,2.0]]);c.setLineDash([]);
+ L([[1.3,4.75],[2.3,4.75]]);L([[1.3,5.125],[2.3,5.125]]);L([[3.4,4.75],[4.3,4.75]]);L([[3.4,5.125],[4.3,5.125]]);for(const x of[2.3,2.42,3.28,3.4])L([[x,4.6],[x,5.275]]);
+ c.strokeRect(2.42,4.55,.86,.775);L([[2.85,4.55],[2.85,4.3]]);L([[2.6,4.3],[3.1,4.3]]);T('DETAIL 2  BYPASS VALVE STATION',1.3,5.6,.1);T('SCALE: 1" = 1\'-0"',1.3,5.75,.08);
+ c.strokeRect(28.5,21,7,2.5);L([[28.5,22.1],[35.5,22.1]]);L([[33,22.1],[33,23.5]]);T('PUMP HOUSE TIE-IN P&ID (MADE UP)',28.7,21.55,.22);T('SCALE: 1/4" = 1\'-0"',28.7,22.8,.16);T('M-201',34.25,22.8,.4,'center');
+ c.restore();
+ for(const a of s.areas){const p0=S({x:s.x+a.x*s.scale,y:s.y+a.y*s.scale}),w=a.w*pz,h=a.h*pz;c.save();c.strokeStyle=CL['--accent'];c.setLineDash([6,4]);c.lineWidth=1.2;c.strokeRect(p0.x,p0.y,w,h);c.restore();backLabel(c,p0.x+4,p0.y+4,[a.name,a.label],w-8,h-8)}
+ backLabel(c,o.x+4,o.y+4,[`${s.num}  ${s.label}`],1e9,1e9,true)}
+function backLabel(c,x,y,lines,maxW,maxH,bold){c.save();c.font='600 11px -apple-system,system-ui,sans-serif';const w=Math.max(...lines.map(l=>c.measureText(l).width))+10,h=lines.length*14+4;if(w>maxW||h>maxH){c.restore();return}
+ c.fillStyle=CL['--panel'];c.globalAlpha=.92;c.beginPath();c.roundRect(x,y,w,h,5);c.fill();c.globalAlpha=1;c.fillStyle=bold?CL['--ink']:CL['--accent'];c.textBaseline='top';lines.forEach((l,i)=>c.fillText(l,x+5,y+3+i*14));c.restore()}
+function strokePath(c,pts,color,w,alpha){c.save();c.globalAlpha=alpha||1;c.strokeStyle=inkCol(color);c.lineWidth=Math.max(1,w*view.ppi);c.lineCap='round';c.lineJoin='round';c.beginPath();pts.forEach((p,i)=>{const q=S(p);i?c.lineTo(q.x,q.y):c.moveTo(q.x,q.y)});c.stroke();c.restore()}
+function textDraw(c,t,color,alpha){const fs=t.h*view.ppi;if(fs<2.5||!t.text)return;const lines=t.text.split('\n'),q=S(t);c.save();c.globalAlpha=alpha||1;c.fillStyle=inkCol(color);c.font=`600 ${fs}px -apple-system,system-ui,sans-serif`;c.textAlign='center';c.textBaseline='middle';lines.forEach((l,i)=>c.fillText(l,q.x,q.y+(i-(lines.length-1)/2)*fs*1.1));c.restore()}
+function drawSymbolAt(c,sym,ctr,size,ang,color,tag,alpha){const out=emit(sym,ctr,size,ang,tag,false);for(const s of out.strokes)strokePath(c,s.pts,color,symW(size),alpha);for(const t of out.texts)textDraw(c,t,color,alpha)}
+function label(c,q,t){c.save();c.font='600 12px ui-monospace,Menlo,Consolas,monospace';const w=c.measureText(t).width+12;let x=Math.max(70,Math.min(q.x+16,W-w-84)),y=Math.max(54,Math.min(q.y-36,590));c.fillStyle=CL['--ink'];c.globalAlpha=.9;c.beginPath();c.roundRect(x,y,w,21,6);c.fill();c.globalAlpha=1;c.fillStyle=CL['--paper'];c.textBaseline='middle';c.fillText(t,x+6,y+11);c.restore()}
+function scene(c){c.fillStyle=CL['--paper'];c.fillRect(0,0,W,H);
+ const st2=[1,5,10,50,100,500].find(v=>v*12*view.ppi>=14)||500,step=st2*12;c.lineWidth=1;
+ const x0=Math.floor(-view.ox/view.ppi/step)*step,x1=(W-view.ox)/view.ppi,y0=Math.floor(-view.oy/view.ppi/step)*step,y1=(H-view.oy)/view.ppi;
+ for(let x=x0;x<=x1;x+=step){const q=view.ox+x*view.ppi;c.strokeStyle=Math.round(x/step)%5===0?CL['--grid2']:CL['--grid'];c.beginPath();c.moveTo(q,0);c.lineTo(q,H);c.stroke()}
+ for(let y=y0;y<=y1;y+=step){const q=view.oy+y*view.ppi;c.strokeStyle=Math.round(y/step)%5===0?CL['--grid2']:CL['--grid'];c.beginPath();c.moveTo(0,q);c.lineTo(W,q);c.stroke()}
+ drawSheet(c);
+ for(const k of st.strokes)strokePath(c,k.pts,k.color,k.w);
+ for(const cp of st.copies)if(cp.mode==='linked'){const sym=lib(cp.sym);if(sym)drawSymbolAt(c,sym,cp,cp.size*cp.k,0,cp.color,cp.tag)}
+ for(const t of st.texts)if(!(st.textEdit&&st.textEdit.id===t.id))textDraw(c,t,t.color)}
+function marker(c,q,kind){c.save();c.strokeStyle=CL['--teal'];c.lineWidth=2;c.beginPath();c.rect(q.x-6,q.y-6,12,12);c.stroke();c.font='600 12px -apple-system,system-ui,sans-serif';const w=c.measureText(kind).width+12;c.fillStyle=CL['--teal'];c.beginPath();c.roundRect(q.x+10,q.y+8,w,20,6);c.fill();c.fillStyle=theme==='dark'?'#10201f':'#fff';c.textBaseline='middle';c.fillText(kind,q.x+16,q.y+18);c.restore()}
+function draw(){const c=ctx;const fitW=$('#fit').clientWidth||W,dpr=Math.max(1,Math.min(3,(devicePixelRatio||1)*(fitW/W)));
+ if(cv.width!==Math.round(W*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr)}c.setTransform(dpr,0,0,dpr,0,0);scene(c);
+ // live ink
+ if(G&&G.mode==='pen'&&G.pts.length>1)strokePath(c,G.pts,st.ink,PENW[st.weight]);
+ if(st.draft&&st.tool==='line'){const d=st.draft;if(dist(S(d.p1),S(d.cur))>1)strokePath(c,[d.p1,d.cur],st.ink,PENW[st.weight],.8);const q=S(d.p1);c.fillStyle=CL['--teal'];c.beginPath();c.arc(q.x,q.y,3.5,0,7);c.fill()}
+ if(G&&G.mode==='loop'&&G.pts.length>1){c.save();c.strokeStyle=CL['--accent'];c.setLineDash([5,4]);c.lineWidth=1.5;c.beginPath();G.pts.forEach((p,i)=>{const q=S(p);i?c.lineTo(q.x,q.y):c.moveTo(q.x,q.y)});c.stroke();c.restore()}
+ // the symbol waiting to be placed
+ const gid=st.dragSym||placingSym(),gs=gid&&lib(gid);
+ if(gs&&st.hover&&!st.modal&&!st.edit&&!st.tagPop&&(st.dragSym||!G||G.mode==='place')){const z=sizeFor(gs,st.hover);let ctr=st.hover,ang=0,fit=null;if(V==='B'){fit=bFit(st.hover,gs,z.size);ctr=fit.c;ang=fit.ang}
+  const tag=gs.tag?{l:gs.tag,n:String(nextTag(gs.tag))}:null;
+  if(fit&&fit.line&&fit.cut){const a=fit.line.a,b=fit.line.b,L=fit.line.L,u={x:(b.x-a.x)/L,y:(b.y-a.y)/L},A=S({x:a.x+u.x*(fit.d0-fit.half),y:a.y+u.y*(fit.d0-fit.half)}),B=S({x:a.x+u.x*(fit.d0+fit.half),y:a.y+u.y*(fit.d0+fit.half)});c.save();c.strokeStyle=CL['--paper'];c.lineWidth=Math.max(3,fit.line.k.w*view.ppi+2);c.beginPath();c.moveTo(A.x,A.y);c.lineTo(B.x,B.y);c.stroke();c.restore();for(const q of[A,B]){c.save();c.strokeStyle=CL['--teal'];c.lineWidth=1.5;c.strokeRect(q.x-4,q.y-4,8,8);c.restore()}}
+  drawSymbolAt(c,gs,ctr,z.size,ang,st.ink,tag,.55);
+  const q=S(st.hover);label(c,q,z.label+(fit&&fit.line?(fit.cut?' · cuts in':' · on the line'):''))}
+ // selection
+ const vis=st.tool==='lasso'&&selCount()&&!st.modal&&!st.edit;const sq=vis?selScreen():null,busy=G&&(G.mode==='move'||G.mode==='resize'||G.mode==='loop');
+ if(sq){c.save();c.strokeStyle=CL['--accent'];c.setLineDash([6,4]);c.lineWidth=1.5;c.strokeRect(sq.x0,sq.y0,sq.x1-sq.x0,sq.y1-sq.y0);c.setLineDash([]);c.fillStyle=CL['--card'];for(const[x,y]of[[sq.x0,sq.y0],[sq.x1,sq.y0],[sq.x0,sq.y1],[sq.x1,sq.y1]]){c.beginPath();c.arc(x,y,6,0,7);c.fill();c.stroke()}c.restore()}
+ const sm=$('#selmenu'),bd=$('#badge');
+ if(sq&&!busy&&sm.innerHTML){sm.style.display='flex';const w=sm.offsetWidth,h=sm.offsetHeight,cx=(sq.x0+sq.x1)/2;let y=sq.y1+10;if(y+h>620)y=Math.max(54,sq.y0-h-10);sm.style.left=Math.max(70,Math.min(cx-w/2,W-80-w))+'px';sm.style.top=y+'px'}else sm.style.display='none';
+ if(sq&&!busy&&bd.innerHTML){bd.style.display='flex';bd.style.left=Math.max(70,sq.x0)+'px';bd.style.top=Math.max(52,sq.y0-28)+'px'}else bd.style.display='none';
+ // snap
+ if(st.tool==='line'&&!placingSym()&&st.snap&&(G||st.draft||st.hover))marker(c,S(st.snap.p),st.snap.kind);
+ // floating inputs follow the canvas
+ if(st.tagPop){const tp=$('#tagpop');let ctr=null;if(st.tagPop.rec)ctr=st.tagPop.c;else{const cp=st.copies.find(x=>x.id===st.tagPop.copy);if(cp)ctr=cp}if(ctr){const q=S(ctr),w=tp.offsetWidth,h=tp.offsetHeight;tp.style.left=Math.max(70,Math.min(q.x+24,W-84-w))+'px';tp.style.top=Math.max(54,Math.min(q.y-h/2,620-h))+'px'}}
+ if(st.textEdit){const t=st.texts.find(x=>x.id===st.textEdit.id),te=$('#textedit');if(t){const q=S(t);te.style.left=Math.max(70,Math.min(q.x-95,W-84-190))+'px';te.style.top=Math.max(54,Math.min(q.y-16,590))+'px'}}
+ // status bar
+ const m=st.tip?M(st.tip):{x:0,y:0};$('#coords').textContent=`X ${ftin(m.x)}  Y ${ftin(-m.y)}`;
+ const f=[1,2,5,10,20,50,100,200].find(v=>v*12*view.ppi>=60)||200;$('#sb i').style.width=f*12*view.ppi+'px';$('#sb span').textContent=f+"'-0\"";
+ $('#prompt').textContent=promptText()}
+let toastT=null;function toast(t){const el=$('#toast');el.textContent=t;el.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>{el.style.display='none'},4200)}
+function render(){chrome();draw()}
+
+// ---------- actions ----------
+function act(a,arg){
+ switch(a){
+  case'tool':if(!WORKS[arg])return;if(st.tagPop)tagOk();if(st.textEdit)commitTextEdit();
+   if(arg==='line'){if(st.tool==='line')st.fly=!st.fly;else{st.tool='line';st.fly=false}}
+   else if(arg==='symbols'){if(st.tool==='symbols')st.fly=!st.fly;else{st.tool='symbols';st.fly=!st.pick}}
+   else{st.tool=arg;st.fly=false}
+   st.draft=null;st.snap=null;if(arg!=='lasso')st.sel=emptySel();st.hover=null;break;
+  case'ink':st.ink=arg;break;
+  case'pickA':st.pick=arg;st.tool='symbols';st.fly=false;break;
+  case'pickB':st.sub='sym:'+arg;st.tool='line';st.fly=false;st.draft=null;break;
+  case'shape':st.sub=arg;st.tool='line';st.fly=false;st.draft=null;break;
+  case'weight':st.weight=arg;break;
+  case'bsize':st.bsize[st.sub.slice(4)]=+arg;break;
+  case'cpanel':st.panel=!st.panel;if(!st.panel&&st.tool==='cplace')st.tool='lasso';break;
+  case'cedit':openEdit(arg);return;
+  case'undo':undo();return;case'redo':redo();return;
+  case'sel':{const one=oneCopy();
+   if(arg==='dup')duplicate();else if(arg==='del')delSel();else if(arg==='save')openModal(V);else if(arg==='make')openModal('C');
+   else if(arg==='unlink')unlink();else if(arg==='edit'&&one)openEdit(one.sym);
+   else if(arg==='tag'&&one){const s=lib(one.sym);st.tagPop={copy:one.id,l:one.tag?one.tag.l:s.tag,n:one.tag?one.tag.n:''}}
+   break}
+  case'tagok':tagOk();return;case'tagskip':tagOk(true);return;
+  case'mcancel':st.modal=null;break;case'mok':modalOk();return;
+  case'mend':{const m=st.modal,i=+arg,j=m.ends.indexOf(i);if(j>=0)m.ends.splice(j,1);else{m.ends.push(i);if(m.ends.length>2)m.ends.shift()}
+   $('#modal').querySelectorAll('.endc').forEach(el=>el.classList.toggle('on',m.ends.includes(+el.dataset.arg)));return}
+  case'emode':st.edit.mode=arg;break;
+  case'eundo':{const E=st.edit;if(E.hist.length)E.g=JSON.parse(E.hist.pop());drawEdit();return}
+  case'ecancel':st.edit=null;break;case'edone':editDone();return;
+  case'statex':stateOpen=false;break;
+  case'laptop':if(!st.laptop){st.laptop=true;st.lib.push({id:'check',name:'Check valve',g:[...bow(),{t:'pl',p:[[-.3,-.48],[.3,-.48]]},{t:'pl',p:[[.17,-.56],[.3,-.48],[.17,-.4]]}],ends:[[-.5,0],[.5,0]],tag:null,size:6,v:1,from:'laptop',other:{n:0,c:0}});st.fly=true;st.tool='line';
+   toast('Check valve came in from Dropbox/Vellum/Symbols: it was added on the laptop')}break}
+ render()}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b||b.disabled)return;if(b.closest('#ecv'))return;act(b.dataset.act,b.dataset.arg)});
+document.addEventListener('keydown',e=>{const tgt=e.target,typing=tgt&&(tgt.tagName==='INPUT'||tgt.tagName==='TEXTAREA'||tgt.isContentEditable);
+ if(typing){if(e.key==='Enter'){e.preventDefault();if(tgt.id==='textedit'){commitTextEdit();render()}else if(tgt.closest('#tagpop'))tagOk();else if(tgt.closest('#modal'))modalOk();else if(tgt.id==='bsz'){const v=parseIn(tgt.value);if(v){st.bsize[st.sub.slice(4)]=v;render()}else{tgt.value='';tgt.placeholder="can't read"}}}
+  else if(e.key==='Escape'){tgt.blur();if(tgt.id==='textedit'){st.textEdit=null;render()}else if(tgt.closest('#tagpop'))tagOk();else if(tgt.closest('#modal')){st.modal=null;render()}}return}
+ if(e.metaKey||e.ctrlKey){if(e.key==='z'){e.preventDefault();e.shiftKey?redo():undo()}return}
+ if(e.key==='ArrowLeft'||e.key==='ArrowRight'){if(st.modal||st.edit)return;e.preventDefault();switchV(e.key==='ArrowRight'?1:-1);return}
+ if(e.key==='Escape'){if(st.modal)st.modal=null;else if(st.edit)st.edit=null;else if(st.draft)st.draft=null;else if(st.fly)st.fly=false;else if(st.tool==='cplace')st.tool='lasso';else st.sel=emptySel();render();return}
+ if((e.key==='Delete'||e.key==='Backspace')&&selCount()&&st.tool==='lasso'){e.preventDefault();delSel();render()}});
+document.addEventListener('blur',e=>{if(e.target&&e.target.id==='textedit'&&st.textEdit){setTimeout(()=>{if(st.textEdit&&document.activeElement!==$('#textedit')){commitTextEdit();render()}},120)}},true);
+function switchV(d){V=ORDER[(ORDER.indexOf(V)+d+ORDER.length)%ORDER.length];G=null;fresh();render()}
+$('#prev').onclick=()=>switchV(-1);$('#next').onclick=()=>switchV(1);
+$('#stateBtn').onclick=()=>{stateOpen=!stateOpen;render()};
+$('#reset').onclick=()=>{fresh();render()};
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{theme=b.dataset.t;render()});
+function fit(){const f=$('#fit'),m=f.parentElement,cs=getComputedStyle(m),aw=m.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight),top=f.getBoundingClientRect().top+scrollY,avail=innerHeight-top-56;let s=Math.min(1,aw/W);if(avail/H>=s*.8)s=Math.min(s,avail/H);$('#stage').style.transform=`scale(${s})`;f.style.height=H*s+'px';f.style.width=W*s+'px';draw()}
+addEventListener('resize',()=>{const side=stateOpen&&innerWidth>=1350;document.body.classList.toggle('side',side);fit()});
+$('#tryd').addEventListener('toggle',fit);
+fresh();render();fit();
+</script></body></html>

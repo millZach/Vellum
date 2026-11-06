@@ -1,5 +1,6 @@
 import AuthenticationServices
 import SwiftUI
+import UIKit
 import VellumCore
 
 /// The Drawings tab. Until the drawing index exists (ADR-0007) it shows Zach's Dropbox: Connect Dropbox while signed
@@ -90,13 +91,15 @@ struct DropboxFoldersView: View {
     }
 }
 
-/// A small Settings sheet: Draw with finger (#24), then the Dropbox connection and Sign Out.
+/// A small Settings sheet: Draw with finger (#24), the Speed check (#42), then the Dropbox connection and Sign Out.
 struct SettingsSheet: View {
     let dropbox: DropboxConnection
     @Environment(\.dismiss) private var dismiss
     @State private var confirmsSignOut = false
     /// Kept on this Duo; the canvas reads it when it changes.
     @AppStorage(FingerDrawingSetting.storageKey) private var drawsWithFinger = FingerDrawingSetting.default
+    /// Kept on this Duo, as Draw with finger is; the canvas reads it when it changes.
+    @AppStorage(SpeedCheckSetting.storageKey) private var speedCheck = SpeedCheckSetting.default
 
     var body: some View {
         NavigationStack {
@@ -110,6 +113,7 @@ struct SettingsSheet: View {
                          ? "One finger draws, erases or uses the selected tool. Two fingers pan and pinch. The Apple Pencil always draws."
                          : "Only the Apple Pencil draws. Fingers pan and pinch.")
                 }
+                SpeedCheckSection(isOn: $speedCheck)
                 Section("Dropbox") {
                     switch dropbox.phase {
                     case .notSetUp:
@@ -150,6 +154,68 @@ struct SettingsSheet: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
+    }
+}
+
+/// The Speed check (#42, variant B of the prototype at the tag `prototype/speed-check`): the switch, and while it is on
+/// the last ten timed gestures, newest first, with Copy all and Clear. They are held in memory only.
+private struct SpeedCheckSection: View {
+    @Binding var isOn: Bool
+    private let recorder = SpeedCheckRecorder.shared
+    @State private var copied = false
+
+    var body: some View {
+        Section {
+            Toggle("Speed check", isOn: $isOn)
+            if isOn {
+                if recorder.gestures.isEmpty {
+                    Text("No gestures timed yet. Pan or pinch on a canvas.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(recorder.gestures) { gesture in
+                        row(gesture)
+                    }
+                    HStack(spacing: 12) {
+                        Button(copied ? "Copied" : "Copy all") {
+                            UIPasteboard.general.string = recorder.copyText()
+                            copied = true
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Clear", role: .destructive) {
+                            recorder.clear()
+                            copied = false
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+        } header: {
+            Text("Speed")
+        } footer: {
+            Text(SpeedCheckSetting.footer(isOn: isOn))
+        }
+        .onChange(of: isOn) { _, on in
+            if !on { copied = false }
+        }
+    }
+
+    private func row(_ gesture: SpeedCheckGesture) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(gesture.title)
+                Text(gesture.timeOfDay).font(.footnote).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 2) {
+                // The missed frames in red when there are any, as the prototype has them.
+                Text("\(SpeedCheckText.seconds(gesture.seconds)) s · \(Text("\(gesture.summary.missed) missed").foregroundStyle(gesture.summary.missed > 0 ? Color.red : Color.secondary))")
+                    .foregroundStyle(.secondary)
+                Text(gesture.worst).foregroundStyle(.secondary)
+            }
+            .font(.system(size: 12, design: .monospaced))
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

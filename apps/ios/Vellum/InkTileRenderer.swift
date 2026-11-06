@@ -110,6 +110,8 @@ final class InkTileRenderer {
     /// Moves the tiles to a new view of the canvas and draws any that came into view.
     func show(_ viewport: Viewport) {
         self.viewport = viewport
+        let ledger = MainThreadLedger.begin()
+        defer { MainThreadLedger.end(.inkPlan, ledger) }
         withoutAnimation {
             book.show(viewport)
             if let current = book.current { place(current, for: viewport) }
@@ -213,6 +215,8 @@ final class InkTileRenderer {
     /// Starts drawing waiting tiles, nearest the front of the queue first, until this frame's share of main-thread
     /// time is spent.
     private func takeWaitingTiles() {
+        let ledger = MainThreadLedger.begin()
+        defer { MainThreadLedger.end(.inkTilesStarted, ledger) }
         let began = CACurrentMediaTime()
         var taken = 0
         while taken < waiting.count {
@@ -250,6 +254,8 @@ final class InkTileRenderer {
     }
 
     private func finish(_ tile: Book.Tile, in level: Book.Level, epoch jobEpoch: Int, image: ImageBox) {
+        let ledger = MainThreadLedger.begin()
+        defer { MainThreadLedger.end(.inkTilesLanded, ledger) }
         inFlight -= 1
         withoutAnimation {
             if !tile.removed, level.isLive, let image = image.image {

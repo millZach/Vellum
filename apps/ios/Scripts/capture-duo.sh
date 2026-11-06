@@ -279,6 +279,15 @@ for appearance in light dark; do
   capture canvas-finger-stroke --ui-tab canvases --ui-reset --ui-new-canvas --ui-finger-stroke --ui-draw-with-finger
 done
 
+# The Speed check (#42), in light and dark. The Debug-only `--ui-speed-check` turns the switch on for that launch only
+# (a registered default, never saved) and `--ui-speed-check-gestures` lists two made-up timed gestures: the Settings
+# sheet with the switch on and the gestures listed, and the canvas with the red dot in its status bar.
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  capture settings-speed-check --ui-tab drawings --ui-settings --ui-speed-check --ui-speed-check-gestures
+  capture canvas-speed-check --ui-tab canvases --ui-reset --ui-fixture --ui-speed-check
+done
+
 # Snap, lasso and text boxes (#7), in light and dark. The simulator cannot hold a Pencil, so Debug-only launch
 # arguments (Vellum/DebugSelection.swift) drive the canvas view's own input paths: a wobbly line and a rough box held
 # still until they snap to a straight line and a rectangle, and a circle snapped by the line and shape tool; a lasso
@@ -343,19 +352,24 @@ capture appearance-light-then-system --ui-tab canvases --ui-reset --ui-new-canva
 # The count beside the longer prompts (#45): the Debug-only `--ui-status-walk` (Vellum/DebugStatusBar.swift) walks every
 # scale label in every units with each prompt and writes which count wording showed. A usual label beside one of the
 # three prompts without the full count fails this job, so the count can't slip back quietly.
+# The walk runs again with the Speed check on (#42), whose mark takes only the room the prompt leaves.
 xcrun simctl ui "$udid" appearance light
-xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
-xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
 data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
-rm -f "$data/Documents/status-bar-walk.txt"
-xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-reset --ui-fixture --ui-status-walk >/dev/null
-waited=0
-while [ "$waited" -lt 240 ] && ! grep -q '^done' "$data/Documents/status-bar-walk.txt" 2>/dev/null; do
-  sleep 5; waited=$((waited + 5))
-done
-cp "$data/Documents/status-bar-walk.txt" "$out/status-bar-walk.txt" 2>/dev/null || : > "$out/status-bar-walk.txt"
-xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
-python3 Scripts/status-bar-check.py "$out/status-bar-walk.txt"
+status_walk() {
+  xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  rm -f "$data/Documents/status-bar-walk.txt"
+  xcrun simctl launch "$udid" "$bundle" --ui-tab canvases --ui-reset --ui-fixture --ui-status-walk "$@" >/dev/null
+  waited=0
+  while [ "$waited" -lt 240 ] && ! grep -q '^done' "$data/Documents/status-bar-walk.txt" 2>/dev/null; do
+    sleep 5; waited=$((waited + 5))
+  done
+  cp "$data/Documents/status-bar-walk.txt" "$out/status-bar-walk$walk.txt" 2>/dev/null || : > "$out/status-bar-walk$walk.txt"
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  python3 Scripts/status-bar-check.py "$out/status-bar-walk$walk.txt"
+}
+walk="" status_walk
+walk="-speed-check" status_walk --ui-speed-check
 
 benchmark ""
 

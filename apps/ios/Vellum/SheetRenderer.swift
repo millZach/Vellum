@@ -135,6 +135,8 @@ final class SheetRenderer {
     func show(_ viewport: Viewport) {
         self.viewport = viewport
         guard !sheets.isEmpty else { return }
+        let ledger = MainThreadLedger.begin()
+        defer { MainThreadLedger.end(.sheetPlan, ledger) }
         let dark = isDark
         let standing = previews.isEmpty ? sheets : sheets.map { previews[$0.id] ?? $0 }
         let plan = book.plan(standing, viewport: viewport) { SheetDisplay.display(dark: dark, invertsBadly: $0.invertsBadly) }
@@ -232,6 +234,8 @@ final class SheetRenderer {
     }
 
     private func finish(_ key: Key, _ box: SheetImage) {
+        let ledger = MainThreadLedger.begin()
+        defer { MainThreadLedger.end(.sheetTilesLanded, ledger) }
         inFlight -= 1
         guard let holder = holders[key.sheet], let tile = holder.tiles[key], !tile.cancelled.isSet else { return }
         guard let image = box.image else {

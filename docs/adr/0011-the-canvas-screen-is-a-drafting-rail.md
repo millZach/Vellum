@@ -66,3 +66,11 @@ As Zach picked them from the prototype at the tag `prototype/drawing-tools` with
 - **Clear of the chrome.** The tag, the pad and the loupe keep 4 points off the rail, the top bar, the status bar and the tab rail, and off any strip open under the top bar (`ExactPlacement`). The loupe moves beside the tip rather than sliding under them.
 - **The pad has a hyphen key.** The prototype's pad had none, and its parser read `61/2` as 6 1/2. Here a fraction after a whole number takes a hyphen or a space (`6-1/2`), and `61/2` is refused, so the last row is backspace and Enter, and the row above it `/ . -`.
 - **Prompts.** Each shape's prompts are 28 characters or fewer, and a prompt part way through comes from the shape (`ShapeDraft.prompt`). The longest is 27 characters; the status bar shows it in full, and the sheet and frame count gives way if it has to, as it does for a long scale label.
+
+## Amendment (#64): Select beside the lasso
+
+Zach picked variant A of the prototype kept at the tag `prototype/select-tool`: a Select tool on the rail above the lasso, in the lasso's group, so the group is Select, lasso and text box, and the rail holds eleven tools. Its icon is the pointer arrow (SF Symbol `cursorarrow`).
+
+- **A tap picks one thing.** With Select in hand a tap of the Pencil, or of a finger as a lasso tap takes one, picks up the topmost stroke, text box, dimension, frame or sheet under it (CONTEXT.md "Select"), and a tap on another thing adds it. The lasso keeps everything it did, its tap on a sheet included. Swapping between the two keeps the selection; any other tool lets go of it.
+- **A sheet is selected alone.** A sheet's strip turns, moves and rescales the sheet and the markups that come along, so a selection never mixes a sheet with ink: a tap on a sheet lets go of the ink, and a tap on ink lets go of the sheet. Zach did not rule on this; it was decided as the simplest rule that keeps the strip as it is.
+- **A drag on empty canvas does nothing.** The status bar says "Loop several with the Lasso" for a moment, or "Tap the sheet, then drag it" from a sheet not selected. Both are 28 characters or fewer, as every prompt is.

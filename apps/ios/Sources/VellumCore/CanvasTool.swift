@@ -1,11 +1,12 @@
 /// The tools on the canvas screen's rail, top to bottom (ADR-0011): pen, highlighter, eraser, line and shape; then
-/// lasso and text box; then measure, dimension, frame and window. Every one works since #8; a tool a later ticket
+/// select, lasso and text box; then measure, dimension, frame and window. Every one works since #8; a tool a later ticket
 /// adds goes on the rail disabled, with a hint saying it is coming, so the rail Zach learns is the rail he keeps.
 public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     case pen
     case highlighter
     case eraser
     case lineAndShape
+    case select
     case lasso
     case textBox
     case measure
@@ -17,7 +18,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     public enum Group: CaseIterable, Hashable, Sendable {
         /// Pen, highlighter, eraser, line and shape.
         case ink
-        /// Lasso and text box.
+        /// Select, lasso and text box.
         case selectionAndText
         /// Measure, dimension, frame and window: real-world lengths and regions.
         case lengthsAndRegions
@@ -59,6 +60,11 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
                        inkTool: .pen, prompt: "Draw a line, box or circle",
                        help: "Draw a line, a rectangle or a circle; it straightens when you lift or hold still. "
                            + "Tap it again to pick a shape and the line weight")
+        case .select:
+            Descriptor(title: "Select", systemImage: "cursorarrow", group: .selectionAndText, comingIn: nil,
+                       inkTool: nil, prompt: Self.selectPrompt,
+                       help: "Tap a stroke, text box, dimension, frame or sheet to select it, and tap another to add it. "
+                           + "Drag to move it. Tap empty canvas to let go. Loop round several with the Lasso")
         case .lasso:
             Descriptor(title: "Lasso", systemImage: "lasso", group: .selectionAndText, comingIn: nil, inkTool: nil,
                        prompt: "Loop ink, or tap a sheet",
@@ -110,6 +116,9 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         case caughtSheet(Double)
         /// A shape part way through being drawn, with what it waits for (`ShapeDraft.prompt`, #40).
         case drawing(String)
+        /// A word for a moment about what the Pencil just did, such as Select's drag on empty canvas (#64). It goes
+        /// before whatever the selection would say.
+        case hint(String)
     }
 
     /// The status bar's prompt part way through a measure, dimension or window.
@@ -123,6 +132,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .turningSheet(let angle): "Turning: \(SheetAngle.reading(angle))"
         case .caughtSheet(let angle): "Caught at \(SheetAngle.reading(angle))"
         case .drawing(let prompt): prompt
+        case .hint(let hint): hint
         }
     }
 
@@ -153,26 +163,41 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     public var isAvailable: Bool { comingIn == nil }
 
+    /// Whether the tool picks things up: Select and the lasso, which share a selection, so taking one from the other keeps
+    /// it (#64). Any other tool lets go of it.
+    public var selects: Bool { self == .select || self == .lasso }
+
+    /// The status bar's prompt for Select with nothing selected (#64).
+    public static let selectPrompt = "Tap anything to select it"
+
+    /// What the status bar says for a moment after a drag with Select on empty canvas (#64), which does nothing: Select
+    /// takes one thing a tap, and the lasso loops round many. Each hint fits the status bar's 28 characters.
+    public static let selectDragHint = "Loop several with the Lasso"
+
+    /// What the status bar says for a moment after a drag with Select on a sheet that isn't selected (#64).
+    public static let selectSheetDragHint = "Tap the sheet, then drag it"
+
     /// The status bar's prompt for the lasso while something is selected.
     public static let selectionPrompt = "Drag the selection"
 
-    /// The status bar's prompt for the lasso while a sheet is selected (#44): as long as the longest prompt it stands
+    /// The status bar's prompt for the lasso or Select while a sheet is selected (#44): as long as the longest prompt it stands
     /// beside, so the sheet and frame count keeps its room.
     public static let sheetSelectedPrompt = "Twist or drag the sheet"
 
-    /// The status bar's prompt, given whether the lasso has a selection: with one, it says to drag it; and, for a
+    /// The status bar's prompt, given whether the lasso or Select has a selection: with one, it says to drag it; and, for a
     /// measure, dimension or window part way through, what it waits for next (#8); and for the line and shape tool, what the
     /// shape picked expects (#40).
     public func prompt(fingerDraws: Bool, hasSelection: Bool, hasSheet: Bool = false, shape: LineShape = .default,
                        step: Step = .start) -> String {
         if step == .placeSheet { return Self.placeSheetPrompt }
-        if self == .lasso, hasSheet {
+        if case .hint(let hint) = step { return hint }
+        if selects, hasSheet {
             switch step {
             case .turningSheet, .caughtSheet: return Self.prompt(for: step) ?? Self.sheetSelectedPrompt
             default: return Self.sheetSelectedPrompt
             }
         }
-        if self == .lasso, hasSelection { return Self.selectionPrompt }
+        if selects, hasSelection { return Self.selectionPrompt }
         if let next = Self.prompt(for: step) { return next }
         if self == .lineAndShape { return shape.prompt }
         return prompt(fingerDraws: fingerDraws)

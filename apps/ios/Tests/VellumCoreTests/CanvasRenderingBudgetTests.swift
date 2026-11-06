@@ -251,6 +251,42 @@ final class CanvasRenderingBudgetTests: XCTestCase {
         check("lasso_points_inspected", Double(work.pointsInspected), before: Double(Self.totalPoints))
     }
 
+    /// A tap with Select (#64): 200 taps on a 10 by 10 grid over the 10,000-stroke canvas, at everything and four times
+    /// closer, each looking up the stroke it picks within 10 screen points through the index. Each pick is the one a plain
+    /// scan of every stroke, topmost first, finds. The worst tap's strokes compared and points read are the budget.
+    func testASelectTapLooksOnlyAtStrokesNearIt() throws {
+        let bounds = InkIndex.Box(try XCTUnwrap(Self.ink.bounds))
+        var worst = InkIndex.Work()
+        var picked = 0
+        // The plain scan's bounds, worked out once, so the check costs a comparison per stroke a tap.
+        let strokes = Self.ink.strokes.reversed().map { ($0, $0.bounds!) }
+        for zoom in [1.0, 4.0] {
+            var viewport = Self.everything
+            viewport.zoom(by: zoom, about: ScreenPoint(x: 951 / 2, y: 669 / 2))
+            let reach = Length.inches(SelectTap.reach / viewport.pointsPerInch)
+            for i in 0..<10 {
+                for j in 0..<10 {
+                    let point = CanvasPoint(x: .inches(bounds.minX + (bounds.maxX - bounds.minX) * (Double(i) + 0.5) / 10),
+                                            y: .inches(bounds.minY + (bounds.maxY - bounds.minY) * (Double(j) + 0.5) / 10))
+                    var work = InkIndex.Work()
+                    let pick = SelectTap.pick(at: point, pointsPerInch: viewport.pointsPerInch, ink: Self.index, texts: [],
+                                              dimensions: [], frames: [], sheets: SheetIndex(), work: &work)
+                    let scanned = strokes.first { entry in
+                        entry.1.insetBy(-reach).contains(point) && entry.0.distance(to: point) <= entry.0.width / 2 + reach
+                    }?.0
+                    XCTAssertEqual(pick, scanned.map { SelectTap.Pick.stroke($0.id) }, "tap \(i), \(j) at \(zoom)x")
+                    if pick != nil { picked += 1 }
+                    worst.strokesVisited = max(worst.strokesVisited, work.strokesVisited)
+                    worst.pointsInspected = max(worst.pointsInspected, work.pointsInspected)
+                }
+            }
+        }
+        print("select taps picked \(picked) of 200")
+        XCTAssertGreaterThan(picked, 10, "the taps land on ink")
+        check("select_tap_strokes_visited", Double(worst.strokesVisited), before: Double(Self.ink.strokes.count))
+        check("select_tap_points_inspected", Double(worst.pointsInspected), before: Double(Self.totalPoints))
+    }
+
     /// Snapping at a hold (#7) reads the stroke twice and fits shapes to 64 points spaced along it, however many
     /// samples the stroke has: here a 10,000-sample circle. It runs once at the hold, never per Pencil sample.
     func testSnappingAtAHoldTestsABoundedNumberOfPoints() throws {

@@ -18,6 +18,7 @@ One JSON file per area, so work on different areas never conflicts:
 | Dropbox | `baselines/dropbox.json` | #20, #10 |
 | Placed sheets: tiles drawn and kept, PDF downloads | `baselines/sheets.json` | #11 |
 | Syncing canvases to Dropbox: requests and bytes per sync, the folder check and re-upload after a deleted folder, leaving a canvas | `baselines/sync.json` | #12, #37 |
+| The laptop indexer: files read and index files written per rescan and per change, updates per folder copy, scan timings on a made-up 5,000-file Dropbox | `baselines/laptop-indexer.json` | #66 |
 
 Later areas (`jobs`) add their own file the same way. The pan, pinch, draw and turn frame times over a placed sheet are timings in `canvas-rendering.json` (`sheet_pan_*`, `sheet_pinch_*`, `sheet_draw_*`, `sheet_turn_*`), since the same benchmark records them. The `sheet_turn` scenario twists the placed sheet two fingers' worth, 1.5° a frame for 240 frames, through its catches, and logs `tiles_drawn_during_turn`, which should be 0. The `shape` scenario (#40) is the line tool's second point wandering over the 10,000-stroke canvas: each frame a snap lookup with a point to work from, the angle catch, the loupe and the preview. Its timings record until a change gives them samples enough for a baseline. The `sheet_snap` scenario (#57), run last, is the measure tool's Pencil wandering back and forth across the placed sheet's left edge from corner to corner: each frame a snap lookup through the ink index and the sheet index, catching a sheet corner, a sheet edge or the ink, and the loupe. Its timings record the same way until there are samples enough.
 
@@ -46,6 +47,8 @@ A timing may also carry `"scaled_by"`, naming a `"kind": "reference"` entry (its
 - **Budgets only tighten.** When a change makes a count smaller, lower its value in the same PR. Raising one needs its reason in the PR and in the entry's `note`.
 - **Report numbers in the PR.** A PR that touches drawing, storage, sync or the network gives before and after for its area's metrics in its body and says which budgets tightened.
 - **Timings say where they were measured.** A new runner image, Xcode or simulator runtime moves timings; re-baseline then, and say so.
+
+The laptop indexer's counts are budgets in its pytest suite (`laptop/tests/test_incremental.py` and `test_watch.py` read the file the same way), and its timings come from `laptop/scripts/bench.py` in the **Laptop indexer tests (Windows)** job on `windows-latest`, compared with `perf-compare.py laptop-indexer`. They are measured with a stand-in DWG reader, since CI has no AutoCAD: on the laptop, a first scan's time is mostly AutoCAD's core console, a few seconds a DWG. Online-only downloads are counted and timed against a scripted Dropbox API, so they show the indexer's own work, not the network's. The job keeps its measurements as the `laptop-indexer-timings` artifact.
 
 ## Comparing timings in CI
 

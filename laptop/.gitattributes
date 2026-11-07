@@ -1,0 +1,2 @@
+# The fixture index's files are named by the hash of their bytes; a checkout must not change a line ending.
+tests/fixtures/** -text

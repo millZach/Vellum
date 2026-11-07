@@ -1,0 +1,77 @@
+<!doctype html>
+<!--
+  PROTOTYPE - throwaway. Never merge to main; kept at the tag prototype/scale-factor.
+  Question (#41): Zach asked for "a scale up tool": scale a placed symbol (or any selection) up or down by a factor,
+  beyond today's corner resize. Where does it live and how is the factor given?
+   A  Scale in the selection's menu: tap it for ½×, 2×, 3× and a typed factor. Each tap applies at once, about the
+      selection's centre, one undo step each.
+   B  Two buttons right in the menu, ½× and 2×. No typed factor; tap 2× twice for 4×.
+   C  Scale in the menu asks for the printed size you want ("3/8" now, make it 3/4"") or a factor.
+  ?v=A|B|C  &theme=dark
+-->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vellum prototype: scale by a factor</title>
+<style>
+:root{--paper:#fbfaf6;--ink:#1d1d1f;--sel:#2f6fde;--menu:#1d1d1f;--muted:#666;--bar:#f1f0ec}
+.dark{--paper:#1c1c1e;--ink:#f2f2f2;--sel:#5b9bff;--menu:#3a3b40;--muted:#aaa;--bar:#2a2a2d}
+body{margin:0;font:14px -apple-system,system-ui,sans-serif;background:#888;color:var(--ink)}
+#stage{position:relative;width:951px;height:669px;margin:12px auto;background:var(--paper);overflow:hidden;border-radius:6px}
+#status{position:absolute;left:0;right:0;top:0;height:34px;background:var(--bar);display:flex;align-items:center;padding:0 14px;font-size:13px}
+#rail{position:absolute;left:0;top:34px;bottom:0;width:52px;background:var(--bar)}
+svg{position:absolute;left:52px;top:34px}
+.menu{position:absolute;background:var(--menu);color:#fff;border-radius:10px;display:flex;align-items:center;gap:4px;padding:4px 4px 4px 10px;box-shadow:0 2px 6px #0006;font-size:12px}
+.menu .n{color:#aaa;margin-right:4px}
+.menu button{background:none;border:0;color:#fff;font:500 12px -apple-system,system-ui;padding:6px 9px;border-radius:7px}
+.menu button:hover,.menu button.on{background:#ffffff22}
+.pop{position:absolute;background:var(--menu);color:#fff;border-radius:10px;padding:6px;display:none;gap:4px;align-items:center;font-size:12px;box-shadow:0 2px 6px #0006}
+.pop button{background:#ffffff18;border:0;color:#fff;font:500 12px -apple-system;padding:6px 10px;border-radius:7px}
+.pop input{width:64px;font:12px -apple-system;padding:5px;border-radius:6px;border:0}
+#bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);background:#222;color:#fff;border-radius:12px;padding:8px 12px;display:flex;gap:8px;align-items:center;font-size:13px}
+#bar button{background:#444;color:#fff;border:0;border-radius:8px;padding:6px 10px}
+#bar button.on{background:#2f6fde}
+#notes{max-width:951px;margin:0 auto 90px;color:#fff;font-size:14px;line-height:1.45}
+#state{font-family:ui-monospace,monospace;font-size:12px;background:#0003;padding:8px;border-radius:6px}
+</style></head><body>
+<div id="stage"><div id="status">Drag the selection</div><div id="rail"></div>
+<svg id="cv" width="899" height="635"></svg>
+<div class="menu" id="menu"></div><div class="pop" id="pop"></div></div>
+<div id="notes"><p id="desc"></p><div id="state"></div></div>
+<div id="bar"><b>Scale by a factor</b><button data-v="A">A</button><button data-v="B">B</button><button data-v="C">C</button><button id="undo">Undo</button><button id="reset">Reset</button><button id="theme">Light/Dark</button></div>
+<script>
+const q=new URLSearchParams(location.search);let V=q.get('v')||'A';if(q.get('theme')==='dark')document.body.classList.add('dark');
+const DESC={A:'<b>A. Scale in the selection\'s menu.</b> Tap <b>Scale</b>: ½×, 2×, 3× and a box to type any factor (1.5, 0.75). Each tap scales the selection about its centre at once, one undo step each; the pop-up stays open so 2× then 2× gives 4×. Works on anything selected, symbols or not. Corner resize stays as it is.',
+B:'<b>B. ½× and 2× right in the menu.</b> No pop-up and no typed factor: tap 2× twice for 4×, ½× to halve. Fewest taps for the common case, but 1.5× is not possible except by corner resize.',
+C:'<b>C. Scale to a printed size.</b> Tap <b>Scale</b> and type the printed size you want ("3/4"") or a factor ("2x"). The menu shows the selection\'s printed size now at the scale under it. Most exact, most typing.'};
+let k=1,hist=[],popOpen=false;const PS=0.375;// bubble printed size, inches
+function fmt(i){const e=Math.round(i*16);const w=Math.floor(e/16),r=e%16;let f='';if(r){let n=r,d=16;while(n%2==0){n/=2;d/=2}f=n+'/'+d}return (w?w+(f?' ':''):'')+(f||(w?'':'0'))+'"'}
+function draw(){const cx=430,cy=300,r=27*k;
+ const s=`<rect x="120" y="60" width="660" height="480" fill="none" stroke="#999" stroke-width="1"/><text x="130" y="80" font-size="11" fill="#999">M-201 at 1/4" = 1'-0" (made up)</text>
+ <line x1="160" y1="${cy}" x2="${cx-r}" y2="${cy}" stroke="var(--ink)" stroke-width="2"/><line x1="${cx+r}" y1="${cy}" x2="740" y2="${cy}" stroke="var(--ink)" stroke-width="2"/>
+ <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--ink)" stroke-width="2"/><text x="${cx}" y="${cy-2}" text-anchor="middle" font-size="${11*k}" fill="var(--ink)">FT</text><text x="${cx}" y="${cy+11*k}" text-anchor="middle" font-size="${11*k}" fill="var(--ink)">101</text>
+ <rect x="${cx-r-8}" y="${cy-r-8}" width="${2*r+16}" height="${2*r+16}" fill="none" stroke="var(--sel)" stroke-dasharray="5 4"/>`+
+ [[-1,-1],[1,-1],[1,1],[-1,1]].map(([a,b])=>`<rect x="${cx+a*(r+8)-5}" y="${cy+b*(r+8)-5}" width="10" height="10" fill="#fff" stroke="var(--sel)"/>`).join('');
+ document.getElementById('cv').innerHTML=s;
+ const m=document.getElementById('menu'),top=34+cy+r+18;m.style.left=(52+cx-120)+'px';m.style.top=top+'px';
+ m.innerHTML='<span class="n">2 selected</span><button>Duplicate</button><button>Delete</button>'+(V==='B'?'<button id="half">½×</button><button id="dbl">2×</button>':'<button id="sc" class="'+(popOpen?'on':'')+'">Scale</button>');
+ const p=document.getElementById('pop');p.style.left=(52+cx-60)+'px';p.style.top=(top+40)+'px';
+ if(V==='A'){p.innerHTML='<button data-f="0.5">½×</button><button data-f="2">2×</button><button data-f="3">3×</button><input id="f" placeholder="×1.5"><button id="go">Scale</button>'}
+ if(V==='C'){p.innerHTML='<span>Now '+fmt(PS*k)+' printed ·</span><input id="f" placeholder="3/4&quot; or 2x"><button id="go">Scale</button>'}
+ p.style.display=popOpen&&V!=='B'?'flex':'none';
+ document.querySelectorAll('#bar [data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===V));
+ document.getElementById('desc').innerHTML=DESC[V];
+ document.getElementById('state').textContent=`variant ${V} · factor so far ${+k.toFixed(3)}× · bubble printed ${fmt(PS*k)} (real ${Math.round(PS*k*48*10)/10}" at 1/4"=1'-0") · undo steps ${hist.length}`;
+ wire()}
+function apply(f){if(!(f>0)||!isFinite(f))return;hist.push(k);k*=f;document.getElementById('status').textContent=`Scaled ${+f.toFixed(3)}×`;draw()}
+function parse(s){s=s.trim().toLowerCase();if(!s)return NaN;if(s.endsWith('x')||s.startsWith('x')||s.startsWith('×'))return parseFloat(s.replace(/[x×]/g,''));
+ if(V==='C'){const m=s.replace('"','').split(' ');let v=0;for(const t of m){if(t.includes('/')){const[a,b]=t.split('/');v+=a/b}else v+=+t}return v/(PS*k)}return parseFloat(s)}
+function wire(){const g=id=>document.getElementById(id);
+ if(g('sc'))g('sc').onclick=()=>{popOpen=!popOpen;draw()};
+ if(g('half'))g('half').onclick=()=>apply(.5);if(g('dbl'))g('dbl').onclick=()=>apply(2);
+ document.querySelectorAll('#pop [data-f]').forEach(b=>b.onclick=()=>apply(+b.dataset.f));
+ if(g('go'))g('go').onclick=()=>{apply(parse(g('f').value))}}
+document.querySelectorAll('#bar [data-v]').forEach(b=>b.onclick=()=>{V=b.dataset.v;popOpen=false;history.replaceState(null,'','?v='+V+(document.body.classList.contains('dark')?'&theme=dark':''));draw()});
+document.getElementById('undo').onclick=()=>{if(hist.length){k=hist.pop();document.getElementById('status').textContent='Undid the scale';draw()}};
+document.getElementById('reset').onclick=()=>{k=1;hist=[];popOpen=false;draw()};
+document.getElementById('theme').onclick=()=>{document.body.classList.toggle('dark');draw()};
+draw();
+</script></body></html>

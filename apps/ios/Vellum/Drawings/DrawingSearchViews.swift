@@ -243,8 +243,10 @@ struct DrawingRow: View {
             return Text(Self.highlighted(text.title, query, number: false)).foregroundStyle(.secondary)
         }
         guard let number = text.number else { return Text(Self.highlighted(text.title, query, number: false)) }
-        return Text(Self.highlighted(number, query, number: true)).fontWeight(.semibold)
-            + Text(" ") + Text(Self.highlighted(text.title, query, number: false))
+        var line = Self.highlighted(number, query, number: true)
+        line.inlinePresentationIntent = .stronglyEmphasized
+        line += AttributedString(" ") + Self.highlighted(text.title, query, number: false)
+        return Text(line)
     }
 
     static func highlighted(_ text: String, _ query: String, number: Bool) -> AttributedString {

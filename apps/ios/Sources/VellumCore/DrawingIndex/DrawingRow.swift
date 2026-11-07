@@ -51,6 +51,14 @@ public struct DrawingRowText: Equatable, Sendable {
     /// No title block fields: shown quietly, by file name and folder.
     public var quiet: Bool
 
+    public init(number: String?, title: String, details: String?, place: String, quiet: Bool) {
+        self.number = number
+        self.title = title
+        self.details = details
+        self.place = place
+        self.quiet = quiet
+    }
+
     public init(_ entry: DrawingEntry) {
         quiet = entry.number == nil && entry.title == nil
         number = entry.number

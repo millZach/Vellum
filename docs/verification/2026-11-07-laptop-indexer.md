@@ -4,7 +4,37 @@ November 7, 2026, on `feat/laptop-indexer` (PR #74). Every drawing, project, tit
 
 ## What CI proved
 
-RUN_PLACEHOLDER
+The numbers below are from run [42362227818](https://github.com/millZach/Vellum/actions/runs/42362227818) at 74bd602, job **Laptop indexer tests (Windows)** on GitHub's `windows-latest` with Python 3.12, green in 1 min 58 s. The PR's final run (named in the PR) runs the same job again with the timing baselines in place, alongside the five macOS jobs.
+
+- **Lint:** `ruff check src tests scripts`, clean.
+- **pytest:** 111 passed in 16.5 s, every one on made-up drawings. The exact cases cover:
+  - **Skip rules:** `Dropbox/Vellum`, `.dropbox.cache` at any depth, `~$`, `.dwl`, `.dwl2`, `.bak`, `.sv$`, `.~`, settings excludes, and files that are not drawings.
+  - **Online-only files**, with the attribute faked: each attribute bit; they are listed with `read: false` and never handed to the PDF reader, the AutoCAD reader or the preview reader; they still pair by name; they are read once local and not again; and a watched change to one does not open it.
+  - **Pairing:** by plot metadata, by name in the same folder, in a PDF or Plots folder and in cousin folders, by layout and revision suffixes, and by unique drawing number. Also the longest stem, the nearest DWG, too far apart, another project, and case.
+  - **Fields:** from made-up DXF title blocks via ezdxf, paper space before Model space, title lines, blank and `####` values, extra tags from settings, the PDF-text fallback from a made-up title block PDF, refused values, and numbers from file names.
+  - **Projects:** projects roots, the walk-up past discipline and format folders, and no project.
+  - **The index:** the format and its round trip, content names, atomic writes (a failed rename leaves the old file and no temp file; the temp name starts `~$`), nothing written outside `Vellum/Index` and no project file changed, the hour's grace before deletes, another format refused, and a deleted thumbnail written again.
+  - **Incremental updates:** an unchanged file is not read again, also after a restart; a changed PDF or DWG is read alone; a deleted one leaves the index; folders moved in or deleted; a first scan stopped part way carries on; PDFs are read first, with watched changes taken between files; a folder that fails to list keeps its drawings.
+  - **Thumbnails:** 128 px on the long side, the same drawing gives the same name, a changed one a new name, one file for identical drawings, DWG PNG and BMP previews, and the PDF's thumbnail over the DWG's preview.
+  - **The AutoCAD reader**, through a stand-in console: the DWG is read from a copy, the project folder is unchanged and the work folder is emptied; a cut or missing dump is an error; a hung console is stopped.
+  - **The watcher**, with real watchdog on Windows: a saved PDF reached the index within 10 s, and copying in a folder of 40 PDFs was one update.
+  - **The fixture index** is current.
+- **Budgets** (`docs/perf/baselines/laptop-indexer.json`, enforced by those tests), all met: rescan with nothing changed 0 files read, 0 index files written, 0 thumbnails made; one PDF changed 1 file read, 3 index files written; a folder copy 1 update.
+- **Timings** on a made-up 5,000-file Dropbox (`scripts/bench.py`: 2,000 DWGs with previews, 2,000 PDFs, 1,000 skipped files, 50 projects; a stand-in DWG reader because CI has no AutoCAD). These set the first baselines:
+
+  | Metric | windows-latest | Forge (Linux, for comparison) |
+  |---|---|---|
+  | First scan | 23.6 s | 13.1 s |
+  | Rescan, nothing changed | 0.59 s | 0.30 s |
+  | Rescan, one PDF changed | 0.62 s | 0.30 s |
+  | Watcher update for one saved PDF (after the 2 s debounce) | 0.27 s | 0.16 s |
+
+  The first scan wrote 1,072 index files (3.3 MB): 50 shards, about 1,020 thumbnails and the manifest (9,678 bytes for 2,500 drawings). A one-PDF change wrote 47 KB. Nothing came before this PR, so there is no "before".
+- **install.ps1 and uninstall.ps1, for real**, against a made-up Dropbox folder holding one made-up PDF:
+  - The installer made the venv, installed the pins and found the Dropbox folder. It registered `\Vellum\Vellum laptop indexer` with an `MSFT_TaskLogonTrigger` running `venv\Scripts\pythonw.exe -m vellum_indexer run`, and started it.
+  - The task ran: its log reads "Listed 1 drawings and PDFs … Published generation 1", and the index appeared.
+  - `uninstall.ps1 -Purge` removed the task and the indexer's folder and left `Dropbox\Vellum\Index`.
+  - The runner has no AutoCAD, so the log says `DWG reader none`.
 
 ## Hand test on the laptop
 

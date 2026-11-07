@@ -1,23 +1,95 @@
 {
   "area": "laptop-indexer",
   "entries": [
-    { "metric": "files_read_rescan_no_change", "kind": "count", "value": 0, "unit": "files", "tolerance": 0,
+    {
+      "metric": "files_read_rescan_no_change",
+      "kind": "count",
+      "value": 0,
+      "unit": "files",
+      "tolerance": 0,
       "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
-      "note": "A rescan with nothing changed reads no DWG or PDF: size, modified time and online-only state from the listing match the state file." },
-    { "metric": "files_read_rescan_one_pdf_changed", "kind": "count", "value": 1, "unit": "files", "tolerance": 0,
+      "note": "A rescan with nothing changed reads no DWG or PDF: size, modified time and online-only state from the listing match the state file."
+    },
+    {
+      "metric": "files_read_rescan_one_pdf_changed",
+      "kind": "count",
+      "value": 1,
+      "unit": "files",
+      "tolerance": 0,
       "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
-      "note": "One PDF saved again with new content: that PDF is read and nothing else, its DWG included (its fields are kept from the last read)." },
-    { "metric": "index_files_written_rescan_no_change", "kind": "count", "value": 0, "unit": "files", "tolerance": 0,
+      "note": "One PDF saved again with new content: that PDF is read and nothing else, its DWG included (its fields are kept from the last read)."
+    },
+    {
+      "metric": "index_files_written_rescan_no_change",
+      "kind": "count",
+      "value": 0,
+      "unit": "files",
+      "tolerance": 0,
       "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
-      "note": "Nothing is written to Dropbox/Vellum/Index when nothing changed: not the manifest, not a shard, not a thumbnail, so Dropbox uploads nothing and the Duo downloads nothing." },
-    { "metric": "index_files_written_one_pdf_changed", "kind": "count", "value": 3, "unit": "files", "tolerance": 0,
+      "note": "Nothing is written to Dropbox/Vellum/Index when nothing changed: not the manifest, not a shard, not a thumbnail, so Dropbox uploads nothing and the Duo downloads nothing."
+    },
+    {
+      "metric": "index_files_written_one_pdf_changed",
+      "kind": "count",
+      "value": 3,
+      "unit": "files",
+      "tolerance": 0,
       "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
-      "note": "One PDF changed: its project's shard, its new thumbnail and the manifest. Other projects' shards and every other thumbnail stay as they are." },
-    { "metric": "thumbnails_made_rescan_no_change", "kind": "count", "value": 0, "unit": "thumbnails", "tolerance": 0,
+      "note": "One PDF changed: its project's shard, its new thumbnail and the manifest. Other projects' shards and every other thumbnail stay as they are."
+    },
+    {
+      "metric": "thumbnails_made_rescan_no_change",
+      "kind": "count",
+      "value": 0,
+      "unit": "thumbnails",
+      "tolerance": 0,
       "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
-      "note": "Thumbnails are made only when a PDF or DWG is read, so once per file version." },
-    { "metric": "index_updates_for_a_folder_copy", "kind": "count", "value": 1, "unit": "updates", "tolerance": 0,
+      "note": "Thumbnails are made only when a PDF or DWG is read, so once per file version."
+    },
+    {
+      "metric": "index_updates_for_a_folder_copy",
+      "kind": "count",
+      "value": 1,
+      "unit": "updates",
+      "tolerance": 0,
       "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox, 40 files copied",
-      "note": "Copying a folder of drawings in is one debounced update of the index, not one per file." }
+      "note": "Copying a folder of drawings in is one debounced update of the index, not one per file."
+    },
+    {
+      "metric": "first_scan_s",
+      "kind": "time",
+      "value": 23.63,
+      "unit": "s",
+      "tolerance": 0.5,
+      "measured": "PR #74 run 42362227818 2026-11-07 windows-latest, Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in DWG reader",
+      "note": "First scan of 4,000 DWGs and PDFs (and 1,000 skipped files) across 50 projects: listing, 2,000 PDFs read with thumbnails, 2,000 DWG previews, publishing 50 shards and about 1,000 thumbnails. One sample: raise to the upper quartile of six once there are six. On the laptop add AutoCAD's few seconds per DWG."
+    },
+    {
+      "metric": "rescan_no_change_s",
+      "kind": "time",
+      "value": 0.59,
+      "unit": "s",
+      "tolerance": 0.5,
+      "measured": "PR #74 run 42362227818 2026-11-07 windows-latest, Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in DWG reader",
+      "note": "A rescan with nothing changed: list 5,000 files, compare each with the state file, rebuild the entries, write nothing. What every start costs."
+    },
+    {
+      "metric": "rescan_one_pdf_changed_s",
+      "kind": "time",
+      "value": 0.62,
+      "unit": "s",
+      "tolerance": 0.5,
+      "measured": "PR #74 run 42362227818 2026-11-07 windows-latest, Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in DWG reader",
+      "note": "A rescan with one PDF changed: the listing, one PDF read, one shard, one thumbnail and the manifest written."
+    },
+    {
+      "metric": "update_one_pdf_saved_s",
+      "kind": "time",
+      "value": 0.27,
+      "unit": "s",
+      "tolerance": 0.5,
+      "measured": "PR #74 run 42362227818 2026-11-07 windows-latest, Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in DWG reader",
+      "note": "The watcher's update for one saved PDF, after its 2-second debounce: one listing lookup, one PDF read, publish. A saved PDF is in the index about 2.3 s after Dropbox finishes writing it."
+    }
   ]
 }

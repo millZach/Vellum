@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 import VellumCore
 
 /// One canvas open on the canvas screen: what is on it, what part of it is on screen, and the tool in hand. Every
@@ -245,8 +246,12 @@ final class CanvasEditor {
     /// Told to finish typing in a text box: when the canvas closes or the app leaves the screen.
     @ObservationIgnored var onFinishTextEditing: (@MainActor () -> Void)?
 
-    /// Finishes a text box being typed in, saving its text.
-    func finishTextEditing() { onFinishTextEditing?() }
+    /// Finishes what is being typed, saving it: a bubble's tag waiting in its pop-up (#41), as typed, then a text box.
+    /// Closing the canvas, the app leaving the screen and the app being terminated all come through here.
+    func finishTextEditing() {
+        finishTag()
+        onFinishTextEditing?()
+    }
 
     // MARK: The selection (#7)
 
@@ -441,7 +446,13 @@ final class CanvasEditor {
     func saveSymbol(_ draft: SymbolDraft, name: String, printed: PrintedLength) {
         let symbol = Symbol(id: UUID().uuidString.lowercased(), name: name, printedSize: printed,
                             tagLetters: draft.drawing.tagLetters, parts: draft.drawing.parts)
-        SymbolShelf.shared.save(symbol)
+        SymbolShelf.shared.save(symbol) { [weak self] failure in
+            // Its file couldn't be written: it has left the library, so the status bar says so and why (#41).
+            guard let self else { return }
+            if self.symbolID == symbol.id { self.symbolID = Symbol.starters[0].id }
+            self.toolStep = .hint(failure.statusBar)
+            UIAccessibility.post(notification: .announcement, argument: failure.spoken)
+        }
         symbolID = symbol.id
     }
 

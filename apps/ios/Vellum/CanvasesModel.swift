@@ -330,6 +330,8 @@ final class CanvasesModel {
     /// The app is being terminated: flush every canvas, waiting a moment for it. The flushing runs on the savers'
     /// queues; the main thread only waits, since after this there is no later.
     func appWillTerminate() {
+        // A tag or a text box still being typed is saved first, as when the app leaves the screen.
+        openEditor?.finishTextEditing()
         guard let savers else { return }
         let finished = DispatchSemaphore(value: 0)
         savers.flushAll { finished.signal() }

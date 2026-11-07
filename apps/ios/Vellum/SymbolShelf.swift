@@ -14,8 +14,12 @@ final class SymbolShelf {
 
     /// The starters first, then the saved symbols by name.
     private(set) var symbols: [Symbol] = Symbol.starters
-    /// Each symbol's drawing for the flyout and the rail, made once per symbol rather than per frame.
-    @ObservationIgnored private var drawings: [String: Path] = [:]
+    /// Each symbol's drawing for the flyout and the rail, made once per symbol rather than per layout: its lines and
+    /// where its letters go, fitted to a unit square.
+    @ObservationIgnored private var drawings: [String: Fitted] = [:]
+    /// Symbols saved in this session that a read of the files has not caught up with yet. A reload started before their
+    /// file landed keeps them, so a sync finishing mid-save never drops one from the flyout.
+    @ObservationIgnored private var savedHere: [String: Symbol] = [:]
     @ObservationIgnored private var store: (any SymbolFolderStore)?
     @ObservationIgnored private var sync: SymbolSync?
 
@@ -40,57 +44,83 @@ final class SymbolShelf {
         }
     }
 
+    /// Reads the files off the main thread. A symbol saved in this session that the read doesn't hold yet stays.
     private func reload() async {
         guard let store else { return }
         let saved = await Task.detached(priority: .utility) { store.symbols() }.value
-        symbols = Symbol.starters + saved.filter { !$0.isStarter }
+        let read = Set(saved.map(\.id))
+        for id in savedHere.keys where read.contains(id) { savedHere[id] = nil }
+        let kept = savedHere.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        symbols = Symbol.starters + saved.filter { !$0.isStarter } + kept
         drawings = [:]
     }
 
-    /// Saves a new symbol: in the library at once, its file written off the main thread, then synced.
-    func save(_ symbol: Symbol) {
-        symbols.append(symbol)
-        guard let store else { return }
-        Task { [weak self] in
-            await Task.detached(priority: .userInitiated) { try? store.save(symbol) }.value
-            self?.syncNow()
+    /// Why a symbol wasn't saved, for the status bar (28 characters at most) and VoiceOver.
+    struct SaveFailure: Error {
+        let outOfSpace: Bool
+        var statusBar: String { outOfSpace ? "Symbol not saved: Duo full" : "Symbol not saved: disk error" }
+        var spoken: String {
+            outOfSpace ? "The symbol was not saved: this Duo is full."
+                : "The symbol was not saved: its file could not be written. Try again."
         }
     }
 
-    /// The symbol's drawing in a unit square: its lines, fitted with a little room round them. Text and the tag are
-    /// drawn by the flyout's own labels.
-    func drawing(of symbol: Symbol) -> Path {
+    /// Saves a new symbol: in the library at once, its file written off the main thread, then synced. If the file can't
+    /// be written it leaves the library again, and `failed` hears why.
+    func save(_ symbol: Symbol, failed: @escaping @MainActor (SaveFailure) -> Void) {
+        symbols.append(symbol)
+        savedHere[symbol.id] = symbol
+        guard let store else { return }
+        Task { [weak self] in
+            let error: (any Error)? = await Task.detached(priority: .userInitiated) { () -> (any Error)? in
+                do { try store.save(symbol) } catch { return error }
+                return nil
+            }.value
+            guard let self else { return }
+            if let error {
+                self.savedHere[symbol.id] = nil
+                self.symbols.removeAll { $0.id == symbol.id }
+                let outOfSpace = (error as? any StorageFailure)?.isOutOfSpace == true
+                    || (error as NSError).code == NSFileWriteOutOfSpaceError
+                failed(SaveFailure(outOfSpace: outOfSpace))
+                return
+            }
+            self.syncNow()
+        }
+    }
+
+    /// A symbol's lines and letters fitted to a unit square with a little room round them, worked out from its extent once.
+    struct Fitted {
+        var lines: Path
+        var letters: [(text: String, centre: CGPoint, height: CGFloat)]
+    }
+
+    /// The symbol's drawing, made once and kept: its extent is walked here, not on every layout.
+    func fitted(_ symbol: Symbol) -> Fitted {
         if let made = drawings[symbol.id] { return made }
         let e = symbol.extent
         let side = max(e.maxX - e.minX, e.maxY - e.minY, 1e-9) * 1.12
         let cx = (e.minX + e.maxX) / 2, cy = (e.minY + e.maxY) / 2
+        func fit(_ p: SymbolPoint) -> CGPoint { CGPoint(x: (p.x - cx) / side + 0.5, y: (p.y - cy) / side + 0.5) }
         var path = Path()
         for line in symbol.polylines {
             for (i, p) in line.enumerated() {
-                let point = CGPoint(x: (p.x - cx) / side + 0.5, y: (p.y - cy) / side + 0.5)
-                if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                if i == 0 { path.move(to: fit(p)) } else { path.addLine(to: fit(p)) }
             }
         }
-        drawings[symbol.id] = path
-        return path
-    }
-
-    /// Where each of the symbol's letters goes in the unit square the drawing is fitted to, with their height there.
-    func letters(of symbol: Symbol) -> [(text: String, centre: CGPoint, height: CGFloat)] {
-        let e = symbol.extent
-        let side = max(e.maxX - e.minX, e.maxY - e.minY, 1e-9) * 1.12
-        let cx = (e.minX + e.maxX) / 2, cy = (e.minY + e.maxY) / 2
-        return symbol.parts.compactMap { part in
+        let letters = symbol.parts.compactMap { part -> (text: String, centre: CGPoint, height: CGFloat)? in
             switch part {
             case .text(let c, let h, let text, _, _):
-                return (text, CGPoint(x: (c.x - cx) / side + 0.5, y: (c.y - cy) / side + 0.5), CGFloat(h / side))
+                return (text, fit(c), CGFloat(h / side))
             case .tag(let c, let h):
-                return ("\(symbol.tagLetters ?? "")\n\(SymbolTag.first)",
-                        CGPoint(x: (c.x - cx) / side + 0.5, y: (c.y - cy) / side + 0.5), CGFloat(h / side))
+                return ("\(symbol.tagLetters ?? "")\n\(SymbolTag.first)", fit(c), CGFloat(h / side))
             default:
                 return nil
             }
         }
+        let made = Fitted(lines: path, letters: letters)
+        drawings[symbol.id] = made
+        return made
     }
 }
 
@@ -100,14 +130,14 @@ struct SymbolMark: View {
     var lineWidth: CGFloat = 1.4
 
     var body: some View {
-        let shelf = SymbolShelf.shared
-        let path = shelf.drawing(of: symbol)
+        let fitted = SymbolShelf.shared.fitted(symbol)
+        let path = fitted.lines
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height)
             ZStack(alignment: .topLeading) {
                 path.applying(CGAffineTransform(scaleX: side, y: side))
                     .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
-                ForEach(Array(shelf.letters(of: symbol).enumerated()), id: \.offset) { _, letter in
+                ForEach(Array(fitted.letters.enumerated()), id: \.offset) { _, letter in
                     Text(letter.text)
                         .font(.system(size: max(4, letter.height * side), weight: .medium))
                         .multilineTextAlignment(.center)

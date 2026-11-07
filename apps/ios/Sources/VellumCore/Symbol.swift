@@ -331,7 +331,8 @@ extension Symbol {
 /// any size.
 public struct SymbolDrawing: Hashable, Sendable {
     public var parts: [SymbolPart]
-    /// The tag letters a text box of letters over a number gave it (`FT` over `101`), which becomes its tag slot.
+    /// The tag letters a text box of letters over a number gave it (`FT` over `101`, on two lines), which becomes its tag
+    /// slot. A one-line `ROOM 204` stays ordinary text.
     public var tagLetters: String?
     /// The canvas length one unit of the drawing is: the selection's width, or its height.
     public var unit: Length
@@ -353,7 +354,7 @@ public struct SymbolDrawing: Hashable, Sendable {
         var tagLetters: String?
         for box in texts {
             let middle = local(box.rect.center)
-            if tagLetters == nil, let letters = SymbolTag.letters(ofTag: box.text) {
+            if tagLetters == nil, let letters = SymbolTag.letters(ofSlot: box.text) {
                 tagLetters = letters
                 parts.append(.tag(centre: middle, height: box.fontSize.inches / unit))
             } else {
@@ -384,8 +385,13 @@ public enum SymbolTag {
         return highest + 1
     }
 
-    /// The letters of a tag's text, when it is a tag: letters over a number.
-    static func letters(ofTag text: String) -> String? { split(text)?.letters }
+    /// The letters of a text box in a tag's own form, letters on one line and the number on the next (`FT\n101`, as a
+    /// placed bubble's tag is): what Save as symbol makes a tag slot of. A one-line `ROOM 204` is not one.
+    static func letters(ofSlot text: String) -> String? {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count == 2, !lines[0].contains(" "), !lines[1].contains(" ") else { return nil }
+        return split(text)?.letters
+    }
 
     private static func split(_ text: String) -> (letters: String, number: Int)? {
         let lines = text.split(whereSeparator: { $0 == "\n" || $0 == " " }).map { String($0) }

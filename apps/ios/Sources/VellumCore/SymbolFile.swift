@@ -24,6 +24,14 @@ public enum SymbolFile {
         public var description: String { "Malformed symbol file: \(reason)" }
     }
 
+    /// The largest printed size a file may give, in printed inches: 48", past the long side of the largest paper Vellum
+    /// knows (ARCH E1, 42"). A file asking for more is refused, so it is skipped rather than drawn.
+    public static let largestPrintedSize = 48.0
+    /// The largest coordinate, radius, angle or letter height a part may give, in units of the symbol's width. A drawing
+    /// saved from ink is about a unit square (at most 4 units tall, when it is measured in its height), so 1,000 is far
+    /// past any real one, and every number past it, or not finite, is refused.
+    public static let largestCoordinate = 1000.0
+
     /// A saved symbol's file name: its id and the extension.
     public static func fileName(for id: String) -> String { "\(id).\(fileExtension)" }
 
@@ -54,7 +62,9 @@ public enum SymbolFile {
             throw Malformed(reason: "not a symbol's JSON")
         }
         guard file.format <= format else { throw Malformed(reason: "format \(file.format), newer than this Vellum") }
-        guard file.printedSize.isFinite, file.printedSize > 0 else { throw Malformed(reason: "no printed size") }
+        guard file.printedSize.isFinite, file.printedSize > 0, file.printedSize <= largestPrintedSize else {
+            throw Malformed(reason: "no printed size, or one past \(Int(largestPrintedSize))\"")
+        }
         let parts = try file.parts.map { try $0.symbolPart() }
         guard !parts.isEmpty else { throw Malformed(reason: "nothing to draw") }
         let name = file.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -96,15 +106,18 @@ public enum SymbolFile {
             }
         }
 
+        /// A finite number within `largestCoordinate` of zero.
+        static func sane(_ value: Double) -> Bool { value.isFinite && abs(value) <= SymbolFile.largestCoordinate }
+
         func symbolPart() throws -> SymbolPart {
             func numbers(_ values: [Double]?, _ count: Int) throws -> [Double] {
-                guard let values, values.count == count, values.allSatisfy(\.isFinite) else {
+                guard let values, values.count == count, values.allSatisfy(Self.sane) else {
                     throw Malformed(reason: "a part's numbers")
                 }
                 return values
             }
             if let line {
-                guard !line.isEmpty, line.allSatisfy({ $0.count == 2 && $0.allSatisfy(\.isFinite) }) else {
+                guard !line.isEmpty, line.allSatisfy({ $0.count == 2 && $0.allSatisfy(Self.sane) }) else {
                     throw Malformed(reason: "a line's points")
                 }
                 return .line(line.map { SymbolPoint($0[0], $0[1]) })

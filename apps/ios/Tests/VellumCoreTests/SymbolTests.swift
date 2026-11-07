@@ -230,6 +230,29 @@ final class SymbolTests: XCTestCase {
         XCTAssertEqual(SymbolDrawing.of(strokes: [ring], texts: [tag])?.tagLetters, "LT")
     }
 
+    /// Save as symbol takes a tag slot only from a text box in the tag's own form, letters on one line and the number on
+    /// the next, as a placed bubble's tag is. A one-line `ROOM 204` is ordinary text, and places back as it was.
+    func testSaveAsSymbolTakesATagSlotOnlyFromLettersOverANumber() throws {
+        let ring = InkStroke(id: StrokeID(1), tool: .pen, colour: .red, width: .inches(0.5),
+                             points: [p(-2, 2), p(6, 2)].map(\.onInkGrid))
+        let room = TextBox(id: TextBoxID(1), origin: p(0, 0), size: CanvasSize(width: .inches(4), height: .inches(2)),
+                           fontSize: .inches(1.5), colour: .red, text: "ROOM 204")
+        let plain = try XCTUnwrap(SymbolDrawing.of(strokes: [ring], texts: [room]))
+        XCTAssertNil(plain.tagLetters)
+        XCTAssertFalse(plain.parts.contains { if case .tag = $0 { true } else { false } })
+        let saved = Symbol(id: "made-up", name: "Room tag", printedSize: .inches(0.5), parts: plain.parts)
+        XCTAssertFalse(saved.hasTagSlot)
+        let placed = saved.placed(at: plain.centre, size: plain.unit, lineWidth: .inches(0.5))
+        XCTAssertEqual(placed.texts.map(\.text), ["ROOM 204"])
+        XCTAssertNil(placed.tag)
+
+        let tag = TextBox(id: TextBoxID(2), origin: p(0, 0), size: CanvasSize(width: .inches(4), height: .inches(4)),
+                          fontSize: .inches(1.5), colour: .red, text: "FT\n101")
+        let bubble = try XCTUnwrap(SymbolDrawing.of(strokes: [ring], texts: [tag]))
+        XCTAssertEqual(bubble.tagLetters, "FT")
+        XCTAssertTrue(bubble.parts.contains { if case .tag = $0 { true } else { false } })
+    }
+
     // MARK: Tags
 
     func testTheNextTagIsOnePastTheHighestOfItsLettersFrom101() {
@@ -275,6 +298,29 @@ final class SymbolTests: XCTestCase {
             "{\"format\":1,\"id\":\"a\",\"name\":\"a\",\"printedSize\":0.5,\"parts\":[{\"circle\":[0,0,-1]}]}".utf8)))
         XCTAssertThrowsError(try SymbolFile.decode(Array(
             "{\"format\":9,\"id\":\"a\",\"name\":\"a\",\"printedSize\":0.5,\"parts\":[{\"circle\":[0,0,1]}]}".utf8)))
+    }
+
+    /// A file with numbers no drawing has is refused, so it is skipped rather than trapping the flyout: a printed size
+    /// past `SymbolFile.largestPrintedSize`, and any coordinate, radius, angle or height that is not finite or is past
+    /// `SymbolFile.largestCoordinate`.
+    func testASymbolFileWithOutlandishNumbersIsRefused() throws {
+        func file(_ size: String, _ part: String) -> [UInt8] {
+            Array("{\"format\":1,\"id\":\"a\",\"name\":\"a\",\"printedSize\":\(size),\"parts\":[\(part)]}".utf8)
+        }
+        XCTAssertNoThrow(try SymbolFile.decode(file("0.375", "{\"circle\":[0,0,0.5]}")))
+        XCTAssertNoThrow(try SymbolFile.decode(file("48", "{\"line\":[[-1000,0],[1000,0]]}")))
+        XCTAssertThrowsError(try SymbolFile.decode(file("1e308", "{\"circle\":[0,0,0.5]}")))
+        XCTAssertThrowsError(try SymbolFile.decode(file("48.5", "{\"circle\":[0,0,0.5]}")))
+        XCTAssertThrowsError(try SymbolFile.decode(file("0.375", "{\"line\":[[NaN,0],[1,0]]}")))
+        XCTAssertThrowsError(try SymbolFile.decode(file("0.375", "{\"line\":[[1e308,0],[1,0]]}")))
+        XCTAssertThrowsError(try SymbolFile.decode(file("0.375", "{\"circle\":[0,0,1e308]}")))
+        XCTAssertThrowsError(try SymbolFile.decode(file("0.375", "{\"arc\":[0,0,0.5,0,1e308]}")))
+        XCTAssertThrowsError(try SymbolFile.decode(file("0.375", "{\"text\":[0,0,1e308],\"letters\":\"JB\"}")))
+        XCTAssertThrowsError(try SymbolFile.decode(file("0.375", "{\"tag\":[1001,0,0.2]}")))
+        XCTAssertThrowsError(try SymbolFile.decode(file("0.375",
+            "{\"text\":[0,0,0.3],\"letters\":\"JB\",\"box\":[1e308,1]}")))
+        XCTAssertEqual(SymbolFile.largestPrintedSize, 48)
+        XCTAssertEqual(SymbolFile.largestCoordinate, 1000)
     }
 
     /// Dropbox's content hash of a small file is the SHA-256 of its one block's SHA-256.

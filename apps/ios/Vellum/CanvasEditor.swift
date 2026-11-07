@@ -336,14 +336,6 @@ final class CanvasEditor {
         syncInk()
     }
 
-    /// Scales the selection by a factor about its centre, as one undo step (#41): any selection, symbols or not.
-    func scaleSelection(by factor: Double) {
-        guard factor > 0, factor.isFinite, factor != 1, let box = selectionBounds else { return }
-        cancelLift()
-        session.transform(selection, by: .scaling(by: factor, about: box.center))
-        syncInk()
-    }
-
     // MARK: Symbols (#41)
 
     /// The symbol a tap with Symbols places, picked from its flyout. It starts on the gate valve.

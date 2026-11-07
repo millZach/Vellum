@@ -190,7 +190,7 @@ private struct ToolRail: View {
                         .font(.system(size: 18, weight: .regular))
                 }
             }
-                .frame(width: 42, height: 38)
+                .frame(width: 42, height: 36)
                 .foregroundStyle(selected ? Chrome.accent : Chrome.text)
                 .background(selected ? Chrome.selected : Color.clear, in: RoundedRectangle(cornerRadius: 9))
                 .opacity(tool.isAvailable ? 1 : 0.32)

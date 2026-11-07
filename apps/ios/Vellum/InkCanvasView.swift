@@ -256,6 +256,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     /// A drag of the selection: moving it, or resizing it from a corner about the opposite one. The selected strokes
     /// are lifted out of the tiles onto `layer`, in screen points of `base`, and the drag changes only its transform.
+    /// A light tap as a resize catches on a round factor (#41).
+    private let catchFeedback = UIImpactFeedbackGenerator(style: .light)
     private struct SelectionDrag {
         enum Kind {
             case move
@@ -1536,11 +1538,11 @@ extension InkCanvasUIView {
         case .move:
             current.transform = .translation(dx: point.x - current.start.x, dy: point.y - current.start.y)
         case .resize(let anchor, let corner):
-            let (vx, vy) = (corner.x.inches - anchor.x.inches, corner.y.inches - anchor.y.inches)
-            let (px, py) = (point.x.inches - anchor.x.inches, point.y.inches - anchor.y.inches)
-            let lengthSquared = vx * vx + vy * vy
-            let factor = lengthSquared > 0 ? (px * vx + py * vy) / lengthSquared : 1
-            current.transform = .scaling(by: max(factor, 0.05), about: anchor)
+            // The factor shows in the status bar and catches at ½×, 1×, 2×, 3× and 4× (#41).
+            let (factor, isCaught) = ResizeCatch.caught(ResizeCatch.factor(anchor: anchor, corner: corner, point: point))
+            current.transform = .scaling(by: factor, about: anchor)
+            if isCaught, current.transform != drag?.transform { catchFeedback.impactOccurred() }
+            editor.toolStep = .hint(ResizeCatch.label(factor))
         }
         drag = current
         CATransaction.begin()
@@ -1557,6 +1559,7 @@ extension InkCanvasUIView {
     private func finishDrag(keep: Bool) {
         guard let finished = drag else { return }
         drag = nil
+        if case .resize = finished.kind, case .hint = editor.toolStep { editor.toolStep = .start }
         editor.dropSelection(keep ? finished.transform : .identity)
         textOverlay.drag(nil, ids: editor.selection.texts)
         annotationOverlay.drag(nil, selection: editor.selection)

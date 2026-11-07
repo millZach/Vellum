@@ -287,25 +287,63 @@ final class SymbolTests: XCTestCase {
 
     // MARK: Factor scale
 
-    /// Scaling a selection by a factor about its centre (#41): a 1" line from (0, 0) to (1, 0) at 2× runs from -0.5" to
-    /// 1.5", its width doubles, and a text box's letters double; at 0.5× it is half as long about the same centre.
-    func testScalingASelectionByAFactorAboutItsCentre() {
+    /// The corner resize catches at ½×, 1×, 2×, 3× and 4×, within 4% of each (#41): just inside each catch reads the
+    /// catch, just outside reads itself, and 1.5× is left free.
+    func testTheCornerResizeCatchesAtRoundFactors() {
+        for round in ResizeCatch.catches {
+            for inside in [round * 1.039, round * 0.961, round] {
+                XCTAssertEqual(ResizeCatch.caught(inside).factor, round, "\(inside) catches at \(round)")
+                XCTAssertTrue(ResizeCatch.caught(inside).isCaught)
+            }
+            for outside in [round * 1.041, round * 0.959] {
+                XCTAssertEqual(ResizeCatch.caught(outside).factor, outside, "\(outside) is free")
+                XCTAssertFalse(ResizeCatch.caught(outside).isCaught)
+            }
+        }
+        XCTAssertEqual(ResizeCatch.caught(1.5).factor, 1.5)
+        XCTAssertFalse(ResizeCatch.caught(1.5).isCaught)
+        XCTAssertEqual(ResizeCatch.caught(5).factor, 5, "past 4× it is free")
+        XCTAssertEqual(ResizeCatch.label(2), "Scale 2×")
+        XCTAssertEqual(ResizeCatch.label(1.5), "Scale 1.5×")
+        XCTAssertEqual(ResizeCatch.label(0.5), "Scale 0.5×")
+        XCTAssertEqual(ResizeCatch.label(0.37), "Scale 0.37×")
+        XCTAssertEqual(ResizeCatch.label(0.05), "Scale 0.05×")
+        XCTAssertEqual(ResizeCatch.label(12.25), "Scale 12.25×")
+        for factor in stride(from: 0.05, through: 40, by: 0.01) {
+            XCTAssertLessThanOrEqual(ResizeCatch.label(factor).count, 28)
+        }
+    }
+
+    /// The factor is how far along the diagonal from the anchor, the opposite corner, the dragged corner has come; a
+    /// drag past the anchor gives the smallest factor, never a flipped selection.
+    func testTheFactorFromTheDrag() {
+        let anchor = p(0, 0), corner = p(1, 2)
+        XCTAssertEqual(ResizeCatch.factor(anchor: anchor, corner: corner, point: p(2, 4)), 2)
+        XCTAssertEqual(ResizeCatch.factor(anchor: anchor, corner: corner, point: p(1.5, 3)), 1.5)
+        XCTAssertEqual(ResizeCatch.factor(anchor: anchor, corner: corner, point: p(-1, -2)), ResizeCatch.smallest)
+        XCTAssertEqual(ResizeCatch.factor(anchor: anchor, corner: anchor, point: p(3, 3)), 1)
+    }
+
+    /// A selection scaled by the caught 2× about its anchor corner, as one undo step: a 1" line from (0, 0) to (1, 0)
+    /// runs to (2, 0), its width doubles, and a text box's letters double.
+    func testAScaleByACaughtFactorIsOneUndoStep() {
         var session = InkSession()
         session.draw([p(0, 0), p(1, 0)], tool: .pen, colour: .red, width: .inches(0.1))
         session.addText("FT", at: p(0, 1), size: CanvasSize(width: .inches(1), height: .inches(1)),
                         fontSize: .inches(0.5), colour: .red)
         let all = CanvasSelection(strokes: [StrokeID(1)], texts: [TextBoxID(1)])
-        // The selection covers (0, 0) to (1, 2): its centre is (0.5, 1).
-        XCTAssertTrue(session.transform(all, by: .scaling(by: 2, about: p(0.5, 1))))
-        XCTAssertEqual(session.ink.strokes[0].points, [p(-0.5, -1), p(1.5, -1)])
+        // The selection covers (0, 0) to (1, 2); the corner at (1, 2) is dragged to (2.03, 4.06), 2.03×, caught at 2×.
+        let raw = ResizeCatch.factor(anchor: p(0, 0), corner: p(1, 2), point: p(2.03, 4.06))
+        let factor = ResizeCatch.caught(raw).factor
+        XCTAssertEqual(factor, 2)
+        XCTAssertTrue(session.transform(all, by: .scaling(by: factor, about: p(0, 0))))
+        XCTAssertEqual(session.ink.strokes[0].points, [p(0, 0), p(2, 0)])
         XCTAssertEqual(session.ink.strokes[0].width.inches, 0.2, accuracy: 1e-12)
         XCTAssertEqual(session.texts[0].fontSize.inches, 1)
-        XCTAssertEqual(session.texts[0].origin, p(-0.5, 1))
+        XCTAssertEqual(session.texts[0].origin, p(0, 2))
         XCTAssertEqual(session.undoSteps, 3, "one undo step")
         session.undo()
         XCTAssertEqual(session.ink.strokes[0].points, [p(0, 0), p(1, 0)])
-        XCTAssertTrue(session.transform(all, by: .scaling(by: 0.5, about: p(0.5, 1))))
-        XCTAssertEqual(session.ink.strokes[0].points, [p(0.25, 0.5), p(0.75, 0.5)])
     }
 }
 

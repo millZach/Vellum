@@ -61,7 +61,7 @@ The tool that selects by drawing a loop: it takes every stroke at least half ins
 _Avoid_: marquee, window (a window is a dragged rectangle), Select (which takes one thing a tap)
 
 **Selection**:
-The strokes, text boxes, dimensions and frames the Lasso or Select has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner, duplicated or deleted, each as one undo step, and whose ink and text boxes can be kept in the Symbol library with Save as symbol; or the one sheet a tap took, shown with its edge in the accent and a strip under the top bar, which can be turned, moved or changed in scale. It is not saved, it stays selected through undo and redo, and it stays when Select and the Lasso are swapped; any other tool lets go of it.
+The strokes, text boxes, dimensions and frames the Lasso or Select has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner (scaled by a factor about the opposite corner, the factor shown in the status bar and caught at ½×, 1×, 2×, 3× and 4×), duplicated or deleted, each as one undo step, and whose ink and text boxes can be kept in the Symbol library with Save as symbol; or the one sheet a tap took, shown with its edge in the accent and a strip under the top bar, which can be turned, moved or changed in scale. It is not saved, it stays selected through undo and redo, and it stays when Select and the Lasso are swapped; any other tool lets go of it.
 _Avoid_: group, highlight
 
 **Draw with finger**:

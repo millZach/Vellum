@@ -476,10 +476,10 @@ final class DrawingIndexTests: XCTestCase {
         ]
         XCTAssertEqual(numbers("E-2", in: entries), ["E-2", "E-20", "E-201", "X-1"])
         let index = DrawingSearchIndex(entries)
-        XCTAssertEqual(index.rank(of: 3, for: "e2"), .exactNumber)
-        XCTAssertEqual(index.rank(of: 2, for: "e2"), .numberPrefix)
-        XCTAssertEqual(index.rank(of: 1, for: "e2"), .words)
-        XCTAssertNil(index.rank(of: 4, for: "e2"))
+        XCTAssertEqual(index.rank(of: 3, for: "E-2"), .exactNumber)
+        XCTAssertEqual(index.rank(of: 2, for: "E-2"), .numberPrefix)
+        XCTAssertEqual(index.rank(of: 1, for: "E-2"), .words)
+        XCTAssertNil(index.rank(of: 4, for: "E-2"))
         // Natural order within a rank: E-2, E-9, E-10, not E-10 first.
         XCTAssertEqual(numbers("E", in: entries), ["E-2", "E-9", "E-10", "E-20", "E-201", "X-1"])
     }

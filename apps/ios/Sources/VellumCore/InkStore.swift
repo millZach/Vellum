@@ -75,7 +75,8 @@ public final class InkStore {
     /// adds a sheet's turn, move or scale change: its event and undo step, and the angle of a sheet that stands turned;
     /// a canvas saved before it reads with its sheets at 0°, and takes these new events on its old log. Version 6 (#40)
     /// adds a shape corrected through its tag: its event and undo step, which a canvas saved before it takes on its old log.
-    static let version: UInt16 = 6
+    /// Version 7 (#41) adds a placed symbol: its event and undo step, taken on an older log the same way.
+    static let version: UInt16 = 7
     static let snapshotMagic: [UInt8] = Array("VINK".utf8)
     static let logMagic: [UInt8] = Array("VLOG".utf8)
     /// The log's header: magic (4), version (2), reserved (2), generation (8).

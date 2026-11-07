@@ -306,6 +306,21 @@ for appearance in light dark; do
   WAIT=$saved_wait
 done
 
+# Symbols (#41), in light and dark. Debug-only launch arguments (Vellum/DebugSymbols.swift) tap through the canvas view's
+# own placing path: on the fixture, a gate valve and a ball valve placed, then the rail with Symbols in hand and its flyout
+# open; on a new canvas, the made-up 1/4" plan placed and zoomed in to, a gate valve and an instrument bubble placed on
+# it, with the bubble's tag pop-up up beside it. sheets.txt says what landed and the size it landed at.
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  saved_wait=${WAIT:-6}; WAIT=${SYMBOLS_WAIT:-10}
+  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+  rm -f "$data/Documents/sheets.txt"
+  capture canvas-symbols-flyout --ui-tab canvases --ui-reset --ui-fixture --ui-symbols flyout
+  capture canvas-symbols-bubble --ui-tab canvases --ui-reset --ui-new-canvas --ui-symbols bubble
+  grep 'symbols:' "$data/Documents/sheets.txt" 2>/dev/null || true
+  WAIT=$saved_wait
+done
+
 # Measure, dimension, frame and window (#8), in light and dark. Debug-only launch arguments
 # (Vellum/DebugMeasureFrame.swift) drive the canvas view's own input paths on the fixture, tapping a few points off the
 # ink so each tap snaps to it: a measure (36'-8 1/16"), two dimensions pulled off (horizontal 8'-0" and aligned

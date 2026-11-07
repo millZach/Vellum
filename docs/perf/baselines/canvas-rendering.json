@@ -24,6 +24,24 @@
       "note": "A 60 x 30 pt stroke in the middle of the screen at zoom to everything: the screen area of the tiles InkTileBook asks the renderer to draw for it, 4 tiles (the tile anchor sits at the screen centre, the worst case). Main redrew the whole 951 x 669 view, background and grid included."
     },
     {
+      "metric": "symbol_place_strokes_added",
+      "kind": "count",
+      "value": 2,
+      "unit": "strokes",
+      "tolerance": 0,
+      "measured": "feat/symbols 2026-11-07 (deterministic: the gate valve's drawing is two lines)",
+      "note": "A gate valve placed on the 10,000-stroke canvas at zoom to everything (#41): the strokes its one change adds to the ink index and the renderer, the same path a drawn stroke takes. One event is saved for it."
+    },
+    {
+      "metric": "symbol_place_area_invalidated_pt2",
+      "kind": "count",
+      "value": 204678,
+      "unit": "square screen points",
+      "tolerance": 0,
+      "measured": "feat/symbols 194c5fb 2026-11-07 macOS CI, run 42341525392 (deterministic)",
+      "note": "The same gate valve: the screen area of the tiles InkTileBook asks the renderer to draw for it, drawn over rather than redrawn, 4 tiles as for a new stroke at the screen centre (the tile anchor sits there, the worst case). Placing never redraws the view."
+    },
+    {
       "metric": "cull_strokes_visited",
       "kind": "count",
       "value": 2477,

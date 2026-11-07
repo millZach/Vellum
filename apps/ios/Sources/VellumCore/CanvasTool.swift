@@ -1,4 +1,4 @@
-/// The tools on the canvas screen's rail, top to bottom (ADR-0011): pen, highlighter, eraser, line and shape; then
+/// The tools on the canvas screen's rail, top to bottom (ADR-0011): pen, highlighter, eraser, line and shape, symbols; then
 /// select, lasso and text box; then measure, dimension, frame and window. Every one works since #8; a tool a later ticket
 /// adds goes on the rail disabled, with a hint saying it is coming, so the rail Zach learns is the rail he keeps.
 public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
@@ -6,6 +6,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     case highlighter
     case eraser
     case lineAndShape
+    case symbols
     case select
     case lasso
     case textBox
@@ -16,7 +17,7 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
 
     /// The rail's three groups, top to bottom, with a divider between each.
     public enum Group: CaseIterable, Hashable, Sendable {
-        /// Pen, highlighter, eraser, line and shape.
+        /// Pen, highlighter, eraser, line and shape, and symbols (#41).
         case ink
         /// Select, lasso and text box.
         case selectionAndText
@@ -60,6 +61,11 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
                        inkTool: .pen, prompt: "Draw a line, box or circle",
                        help: "Draw a line, a rectangle or a circle; it straightens when you lift or hold still. "
                            + "Tap it again to pick a shape and the line weight")
+        case .symbols:
+            Descriptor(title: "Symbols", systemImage: "square.on.circle", group: .ink, comingIn: nil, inkTool: nil,
+                       prompt: Self.symbolsPrompt,
+                       help: "Tap the canvas to place the symbol picked, at its printed size at the scale under the tap. "
+                           + "Tap Symbols again to pick another from the library")
         case .select:
             Descriptor(title: "Select", systemImage: "cursorarrow", group: .selectionAndText, comingIn: nil,
                        inkTool: nil, prompt: Self.selectPrompt,
@@ -166,6 +172,19 @@ public enum CanvasTool: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// Whether the tool picks things up: Select and the lasso, which share a selection, so taking one from the other keeps
     /// it (#64). Any other tool lets go of it.
     public var selects: Bool { self == .select || self == .lasso }
+
+    /// The status bar's prompt for Symbols (#41): a tap places the symbol picked.
+    public static let symbolsPrompt = "Tap to place the symbol"
+
+    /// The status bar's prompt for Symbols with a symbol picked, 28 characters or fewer: `Tap to place: Gate valve`, or
+    /// the plain prompt when the name won't fit.
+    public static func symbolsPrompt(named name: String) -> String {
+        let prompt = "Tap to place: " + name
+        return prompt.count <= 28 ? prompt : symbolsPrompt
+    }
+
+    /// The status bar's prompt while a bubble's tag is typed (#41).
+    public static let tagPrompt = "Type the tag, or keep it"
 
     /// The status bar's prompt for Select with nothing selected (#64).
     public static let selectPrompt = "Tap anything to select it"

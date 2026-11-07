@@ -40,7 +40,7 @@ enum InkCodec {
     // MARK: Events
 
     /// Each kind of event's code. Codes are never reused: 1 to 4 are version 1's, 5 to 9 came with #7, 10 to 14 with
-    /// #8, 15 with #11, 16 with #44, 17 with #40. A move, duplicate or delete of a selection holding no dimension or frame keeps its #7 code and bytes; one
+    /// #8, 15 with #11, 16 with #44, 17 with #40, 18 with #41. A move, duplicate or delete of a selection holding no dimension or frame keeps its #7 code and bytes; one
     /// holding any takes the #8 code, whose selection adds the dimension and frame ids.
     private enum EventTag: UInt8 {
         case draw = 1, erase = 2, undo = 3, redo = 4
@@ -49,6 +49,7 @@ enum InkCodec {
         case addSheet = 15
         case changeSheet = 16
         case correctStroke = 17
+        case place = 18
     }
 
     static func encode(_ event: InkEvent) -> [UInt8] {
@@ -108,6 +109,13 @@ enum InkCodec {
         case .correctStroke(let stroke):
             w.u8(EventTag.correctStroke.rawValue)
             w.stroke(stroke)
+        case .place(let strokes, let texts, let joining):
+            w.u8(EventTag.place.rawValue)
+            w.u8(joining ? 1 : 0)
+            w.u32(UInt32(strokes.count))
+            for stroke in strokes { w.stroke(stroke) }
+            w.u32(UInt32(texts.count))
+            for box in texts { w.textBox(box) }
         }
         return w.bytes
     }
@@ -158,6 +166,17 @@ enum InkCodec {
             event = .changeSheet(try r.sheetChange())
         case .correctStroke:
             event = .correctStroke(try r.stroke())
+        case .place:
+            let joining = try r.u8() == 1
+            let strokeCount = try r.count(each: 12)
+            var strokes: [InkStroke] = []
+            strokes.reserveCapacity(strokeCount)
+            for _ in 0..<strokeCount { strokes.append(try r.stroke()) }
+            let textCount = try r.count(each: 43)
+            var texts: [TextBox] = []
+            texts.reserveCapacity(textCount)
+            for _ in 0..<textCount { texts.append(try r.textBox()) }
+            event = .place(strokes: strokes, texts: texts, joiningLast: joining)
         }
         guard r.isAtEnd else { throw Malformed(reason: "trailing bytes after an event") }
         return event
@@ -175,6 +194,7 @@ enum InkCodec {
     /// canvas that never had one is written exactly as version 3 wrote it. Version 5 (#44) adds a sheet's angle and the
     /// undo step of a turn, move or scale change; a canvas with neither is written exactly as version 4 wrote it. Version 6
     /// (#40) adds the undo step of a shape corrected through its tag; a canvas with none is written as version 5 wrote it.
+    /// Version 7 (#41) adds the undo step of a placed symbol; a canvas with none is written as version 6 wrote it.
     static func encode(_ session: InkSession) -> [UInt8] {
         var w = ByteWriter()
         w.i64(Int64(session.nextID))
@@ -369,6 +389,9 @@ struct ByteWriter {
             u8(EditTag.correctStroke.rawValue)
             historyStroke(before, on: ink)
             historyStroke(after, on: ink)
+        case .place(let pieces):
+            u8(EditTag.place.rawValue)
+            self.pieces(pieces, on: ink, all: false)
         }
     }
 
@@ -592,6 +615,8 @@ enum EditTag: UInt8 {
     case changeSheet = 14
     // Version 6 (#40).
     case correctStroke = 15
+    // Version 7 (#41).
+    case place = 16
 }
 
 struct ByteReader {
@@ -712,6 +737,8 @@ struct ByteReader {
         case .correctStroke:
             let before = try historyStroke(on: ink)
             return .correctStroke(before: before, after: try historyStroke(on: ink))
+        case .place:
+            return .place(try pieces(on: ink, all: false))
         case .addText:
             return .addText(try textBox())
         case .editText:

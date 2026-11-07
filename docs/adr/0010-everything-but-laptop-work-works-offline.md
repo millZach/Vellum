@@ -11,3 +11,7 @@ A PDF picked in Add sheet is downloaded once, into the app's Caches folder, name
 ## Amendment (#12): the sync outbox
 
 Syncing a canvas never needs a connection to save it. The sync outbox (uploads and deletes still to do in Dropbox) is part of the sync ledger, one small JSON file in the app's Application Support folder (`Sync/ledger.json`), written whole and flushed to storage at every change, so it survives a crash or a relaunch. It is not in Caches, which the system may clear: that would lose deletes made offline and make every canvas upload whole again. It holds folder names, Dropbox revisions, byte counts and canvas ids, never a token or any ink. `NWPathMonitor` says when the Duo is online; when the connection returns, the outbox goes at once. A failure is retried after 5 s, doubling to at most five minutes; Retry goes at once. A failed or half-done sync changes nothing on the Duo: sync only reads the canvas folder, through the canvas saver's queue, and every step leaves Dropbox's copy whole, so the next attempt carries on from the last step that finished.
+
+## Amendment (#41): the symbol library
+
+The symbol library is kept on the Duo, so placing and saving symbols works offline; it syncs both ways with `Dropbox/Vellum/Symbols` when there is a connection (ADR-0016). The library, not a canvas, is the one thing the laptop writes that the Duo reads.

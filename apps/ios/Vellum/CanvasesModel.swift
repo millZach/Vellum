@@ -78,17 +78,37 @@ final class CanvasesModel {
     /// Starts the sync engine over the app's Dropbox session (or, in Debug captures, the made-up Dropbox), and the
     /// connection watcher that tells it when the Duo is online. Nothing here waits for it.
     private func startSync(savers: CanvasSavers, ledger: SyncLedgerFile?) {
-        guard let ledger else { return }
         let (session, madeUp) = SyncSetup.session()
+        startSymbols(session: session)
+        guard let ledger else { return }
         let sync = CanvasSync(session: session, source: savers, ledger: ledger, report: { [weak self] report in
             Task { @MainActor in self?.syncReport = report }
         })
         self.sync = sync
         if session != nil, !madeUp {
             // Any path will do, Wi-Fi or cellular, Low Data Mode or not (Zach's decision 2).
-            connection = ConnectionWatcher { online in Task { await sync.setOnline(online) } }
+            connection = ConnectionWatcher { online in
+                Task { await sync.setOnline(online) }
+                // The symbol library syncs when the connection returns too (#41).
+                if online { Task { @MainActor in SymbolShelf.shared.syncNow() } }
+            }
         }
         Task { await sync.start() }
+    }
+
+    /// Reads the symbol library every canvas shares and starts its sync with `Dropbox/Vellum/Symbols` (#41), off the
+    /// main thread. In Debug captures with the made-up Dropbox (`--ui-sync`) the library syncs to it as well.
+    private func startSymbols(session: DropboxSession?) {
+        Task {
+            guard let found = await Task.detached(priority: .utility, operation: {
+                () -> (SymbolFolder, SymbolSyncLedgerFile)? in
+                guard let folder = try? SymbolFolder.onThisDevice(), let ledger = try? SymbolSyncLedgerFile.onThisDevice()
+                else { return nil }
+                return (folder, ledger)
+            }).value else { return }
+            let sync = SymbolSync(session: session, store: found.0, ledger: found.1)
+            await SymbolShelf.shared.start(store: found.0, sync: sync)
+        }
     }
 
     /// The sync state of a canvas, for the status bar and the list.
@@ -111,6 +131,7 @@ final class CanvasesModel {
 
     /// Zach signed in or out of Dropbox.
     func dropboxSignInChanged() {
+        SymbolShelf.shared.syncNow()
         guard let sync else { return }
         Task { await sync.signInChanged() }
     }
@@ -295,6 +316,8 @@ final class CanvasesModel {
 
     /// The app is back on screen: the canvas on screen waits again until Zach leaves it.
     func appDidBecomeActive() {
+        // A symbol the laptop put in Dropbox comes down when the app comes back (#41).
+        SymbolShelf.shared.syncNow()
         guard let sync else { return }
         Task { await sync.setInBackground(false) }
     }
@@ -307,6 +330,8 @@ final class CanvasesModel {
     /// The app is being terminated: flush every canvas, waiting a moment for it. The flushing runs on the savers'
     /// queues; the main thread only waits, since after this there is no later.
     func appWillTerminate() {
+        // A tag or a text box still being typed is saved first, as when the app leaves the screen.
+        openEditor?.finishTextEditing()
         guard let savers else { return }
         let finished = DispatchSemaphore(value: 0)
         savers.flushAll { finished.signal() }

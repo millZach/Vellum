@@ -11,6 +11,19 @@ struct CanvasScreen: View {
     /// Back to the Canvases list; nil where there is no list (previews).
     var showCanvases: (() -> Void)?
     @Environment(\.colorScheme) private var colorScheme
+    /// Save as symbol's name and printed size as typed (#41).
+    @State private var symbolName = ""
+    @State private var symbolSize = ""
+
+    /// Saves the selection as a symbol with the name and printed size typed; a size that can't be read keeps the
+    /// selection's own.
+    private func saveSymbol() {
+        guard let draft = editor.savingSymbol else { return }
+        editor.savingSymbol = nil
+        let typed = CanvasUnits.feetAndInches.parseLength(symbolSize).map { PrintedLength(inches: $0.inches) }
+        let name = symbolName.trimmingCharacters(in: .whitespacesAndNewlines)
+        editor.saveSymbol(draft, name: name.isEmpty ? "My symbol" : name, printed: typed ?? draft.printed)
+    }
 
     var body: some View {
         ZStack {
@@ -51,6 +64,28 @@ struct CanvasScreen: View {
                 .padding(.trailing, 8)
             }
             .ignoresSafeArea()
+            if editor.pendingTag != nil {
+                TagPopup(editor: editor)
+            }
+        }
+        .alert("Save as symbol", isPresented: Binding(get: { editor.savingSymbol != nil },
+                                                      set: { if !$0 { editor.savingSymbol = nil } })) {
+            TextField("Name", text: $symbolName)
+            TextField("Printed size across", text: $symbolSize)
+                .keyboardType(.numbersAndPunctuation)
+            Button("Cancel", role: .cancel) { editor.savingSymbol = nil }
+            Button("Save") { saveSymbol() }
+        } message: {
+            if let draft = editor.savingSymbol {
+                Text("It measures \(SymbolScale.printedText(draft.printed)) on the paper here (\(draft.place)). "
+                     + "It is drawn this size on the paper of any sheet it lands on, and every canvas has it.")
+            }
+        }
+        .onChange(of: editor.savingSymbol != nil) { _, opened in
+            // Save as symbol opens with its name empty and its size the selection's printed size (#41).
+            guard opened, let printed = editor.savingSymbol?.printed else { return }
+            symbolName = ""
+            symbolSize = SymbolScale.printedText(printed)
         }
         .alert("Sheet not placed", isPresented: Binding(get: { editor.sheetProblem != nil },
                                                          set: { if !$0 { editor.sheetProblem = nil } })) {
@@ -132,6 +167,8 @@ private struct ToolRail: View {
         return Button {
             if selected, tool == .lineAndShape {
                 editor.showsShapeFlyout.toggle()
+            } else if selected, tool == .symbols {
+                editor.showsSymbolFlyout.toggle()
             } else if selected, tool.inkTool != nil {
                 weightsFor = tool
             } else {
@@ -144,12 +181,16 @@ private struct ToolRail: View {
                     LineShapeIcon(shape: editor.lineShape)
                         .stroke(style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round))
                         .frame(width: 22, height: 22)
+                } else if tool == .symbols, let symbol = editor.symbol {
+                    // The symbol picked (#41), as the prototype's rail shows it.
+                    SymbolMark(symbol: symbol, lineWidth: 1.5)
+                        .frame(width: 26, height: 26)
                 } else {
                     Image(systemName: tool.systemImage)
                         .font(.system(size: 18, weight: .regular))
                 }
             }
-                .frame(width: 42, height: 38)
+                .frame(width: 42, height: 36)
                 .foregroundStyle(selected ? Chrome.accent : Chrome.text)
                 .background(selected ? Chrome.selected : Color.clear, in: RoundedRectangle(cornerRadius: 9))
                 .opacity(tool.isAvailable ? 1 : 0.32)
@@ -157,14 +198,21 @@ private struct ToolRail: View {
         .buttonStyle(.plain)
         .disabled(!tool.isAvailable)
         .accessibilityLabel(tool.title)
-        .accessibilityValue(tool == .lineAndShape ? editor.lineShape.title : "")
+        .accessibilityValue(tool == .lineAndShape ? editor.lineShape.title
+            : tool == .symbols ? editor.symbol?.name ?? "" : "")
         .accessibilityHint(selected && tool == .lineAndShape ? "Choose the shape and the line weight"
+            : selected && tool == .symbols ? "Choose a symbol from the library"
             : selected && tool.inkTool != nil ? "Choose the line weight" : tool.hint)
         .accessibilityAddTraits(selected ? .isSelected : [])
         .overlay(alignment: .topLeading) {
             if tool == .lineAndShape, editor.showsShapeFlyout {
                 // Beside the rail, level with the button, as the prototype has it.
                 ShapeFlyout(editor: editor)
+                    .fixedSize()
+                    .offset(x: 52, y: -4)
+            }
+            if tool == .symbols, editor.showsSymbolFlyout {
+                SymbolFlyout(editor: editor)
                     .fixedSize()
                     .offset(x: 52, y: -4)
             }
@@ -277,6 +325,153 @@ private struct ShapeFlyout: View {
         .frame(width: 150)
         .chromePanel(cornerRadius: 12)
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// The Symbols tool's flyout (#41), opened by tapping Symbols while it is in hand, as the prototype's variant A has it:
+/// the library every canvas shares, each symbol drawn with its name and printed size. Picking one closes it; the next
+/// tap on the canvas places it.
+private struct SymbolFlyout: View {
+    @Bindable var editor: CanvasEditor
+    private let shelf = SymbolShelf.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Symbols").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text("Every canvas").font(.system(size: 11)).foregroundStyle(Chrome.secondaryText)
+            }
+            .padding(.horizontal, 6)
+            .padding(.top, 4)
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.fixed(108), spacing: 4), GridItem(.fixed(108), spacing: 4)], spacing: 4) {
+                    ForEach(shelf.symbols) { symbol in
+                        tile(symbol)
+                    }
+                }
+            }
+            .frame(maxHeight: 330)
+            .fixedSize(horizontal: false, vertical: true)
+            Text(editor.lastSymbolLabel.map { "Last placed: \($0)." }
+                 ?? "Drawn at its printed size, at the scale under the tap. To add one, loop ink with the lasso and tap Save as symbol.")
+                .font(.system(size: 11))
+                .foregroundStyle(Chrome.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 6)
+                .padding(.bottom, 4)
+        }
+        .padding(4)
+        .frame(width: 232)
+        .foregroundStyle(Chrome.text)
+        .chromePanel(cornerRadius: 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Symbols")
+    }
+
+    private func tile(_ symbol: Symbol) -> some View {
+        let picked = editor.symbolID == symbol.id
+        return Button {
+            editor.symbolID = symbol.id
+            editor.showsSymbolFlyout = false
+        } label: {
+            VStack(spacing: 3) {
+                SymbolMark(symbol: symbol)
+                    .frame(width: 40, height: 40)
+                Text(symbol.name)
+                    .font(.system(size: 11, weight: picked ? .semibold : .regular))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                Text(SymbolScale.printedText(symbol.printedSize) + " printed")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Chrome.secondaryText)
+            }
+            .padding(.vertical, 6)
+            .frame(width: 108, height: 96)
+            .foregroundStyle(picked ? Chrome.accent : Chrome.text)
+            .background(picked ? Chrome.selected : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(symbol.name)
+        .accessibilityValue(SymbolScale.printedText(symbol.printedSize) + " printed")
+        .accessibilityHint("Pick it, then tap the canvas to place it")
+        .accessibilityAddTraits(picked ? .isSelected : [])
+    }
+}
+
+/// The tag asked for as an instrument bubble lands (#41, the prototype's variant A): its letters and number, prefilled
+/// with the bubble's letters and the next number free on this canvas. Placed beside the bubble and above the keyboard,
+/// which the canvas makes room for by bringing the bubble up first (`InkCanvasUIView.keepBubbleClear`), so neither
+/// covers it. After this the tag is a text box, changed with the Text box tool.
+private struct TagPopup: View {
+    @Bindable var editor: CanvasEditor
+    @FocusState private var numberFocused: Bool
+
+    /// The keyboard's height on the Duo unfolded, at most, and the pop-up's own size.
+    static let keyboardRoom: CGFloat = 360
+    static let size = CGSize(width: 230, height: 150)
+
+    var body: some View {
+        GeometryReader { proxy in
+            let spot = Self.placement(for: editor.pendingTag?.bubble, editor: editor, in: proxy.size)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tag for this bubble").font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 6) {
+                    TextField("Letters", text: binding(\.letters))
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .frame(width: 64)
+                    TextField("Number", text: binding(\.number))
+                        .keyboardType(.numberPad)
+                        .focused($numberFocused)
+                }
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 15, weight: .medium, design: .monospaced))
+                HStack(spacing: 6) {
+                    Button("No tag") { editor.skipTag() }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                    Button("Place") { editor.finishTag() }
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity)
+                }
+                .font(.system(size: 13))
+                Text("Then it is a text box: change it with the Text box tool.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Chrome.secondaryText)
+            }
+            .padding(10)
+            .frame(width: Self.size.width)
+            .foregroundStyle(Chrome.text)
+            .chromePanel(cornerRadius: 12)
+            .position(x: spot.midX, y: spot.midY)
+        }
+        .ignoresSafeArea(.keyboard)
+        .onAppear { numberFocused = true }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Tag for this bubble")
+    }
+
+    private func binding(_ key: WritableKeyPath<CanvasEditor.PendingTag, String>) -> Binding<String> {
+        Binding(get: { editor.pendingTag?[keyPath: key] ?? "" },
+                set: { editor.pendingTag?[keyPath: key] = $0 })
+    }
+
+    /// Beside the bubble on screen, right of it where there is room and else left, level with its middle, kept above
+    /// the keyboard and clear of the chrome.
+    static func placement(for bubble: CanvasRect?, editor: CanvasEditor, in screen: CGSize) -> CGRect {
+        let insets = CanvasEditor.chromeInsets
+        guard let bubble else { return CGRect(origin: .zero, size: size) }
+        let a = editor.viewport.screenPoint(for: bubble.origin)
+        let b = editor.viewport.screenPoint(for: CanvasPoint(x: bubble.maxX, y: bubble.maxY))
+        let box = CGRect(x: CGFloat(a.x), y: CGFloat(a.y), width: CGFloat(b.x - a.x), height: CGFloat(b.y - a.y))
+        var x = box.maxX + 16
+        if x + size.width > screen.width - CGFloat(insets.right) - 6 { x = box.minX - 16 - size.width }
+        x = max(CGFloat(insets.left) + 6, x)
+        let lowest = max(CGFloat(insets.top) + 6, screen.height - keyboardRoom - size.height - 8)
+        let y = min(max(box.midY - size.height / 2, CGFloat(insets.top) + 6), lowest)
+        return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 }
 
@@ -701,12 +896,20 @@ private struct ToolPrompt: View {
     @AppStorage(FingerDrawingSetting.storageKey) private var fingerDraws = FingerDrawingSetting.default
 
     var body: some View {
-        Text(editor.tool.prompt(fingerDraws: fingerDraws, hasSelection: !editor.selection.isEmpty,
-                                hasSheet: editor.selection.sheet != nil, shape: editor.lineShape,
-                                step: editor.toolStep))
+        Text(prompt)
             .foregroundStyle(Chrome.secondaryText)
             .lineLimit(1)
             .truncationMode(.tail)
+    }
+
+    private var prompt: String {
+        // Symbols names the symbol a tap places (#41).
+        if editor.tool == .symbols, editor.toolStep == .start, let symbol = editor.symbol {
+            return CanvasTool.symbolsPrompt(named: symbol.name)
+        }
+        return editor.tool.prompt(fingerDraws: fingerDraws, hasSelection: !editor.selection.isEmpty,
+                                  hasSheet: editor.selection.sheet != nil, shape: editor.lineShape,
+                                  step: editor.toolStep)
     }
 }
 

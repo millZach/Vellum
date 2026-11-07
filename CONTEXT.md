@@ -40,6 +40,18 @@ _Avoid_: label, chip, badge, dimension (a dimension stays on the canvas)
 The small pad a tag opens, which corrects a shape to typed values as its own undo step. A bare number means inches on a feet-and-inches canvas, like AutoCAD (`12` is 12 inches, `12'` is 12 feet, `12'6` is 12'-6"), and the canvas's own unit on any other: feet in decimal feet, millimetres in metric. What it can't read stays on the pad, marked, and changes nothing.
 _Avoid_: keypad, keyboard, command line
 
+**Symbol**:
+A drawing kept in the Symbol library to place again and again: a gate valve, an instrument bubble, a motor. It has a name and a printed size, the width it prints across (a 3/8" bubble), and is drawn its printed size on the paper at the drawing scale under the tap: a Scale area's inside one, else the Sheet's, an NTS sheet at its printed size, a Frame's off a sheet, and 1/4" = 1'-0" on bare canvas. Placed, it is plain Ink and Text boxes in the pen's markup colour, which the Lasso and Select take like any other; nothing links it back to the library, so changing the library never changes what is already placed. An instrument bubble asks for its Instrument tag as it lands.
+_Avoid_: block, stamp, cell
+
+**Instrument tag**:
+The letters over the number inside an instrument bubble, `FT` over `101`. It is typed as the bubble lands, in a pop-up beside it that starts on the bubble's letters and the number after the highest of those letters on the canvas, from 101; once placed it is an ordinary Text box, changed with the Text box tool. Not the Tag that shows a shape's size.
+_Avoid_: tag (alone), label
+
+**Symbol library**:
+Every symbol a canvas can place, shared by every canvas: the six Vellum starts with, built into the app, and each one saved with Save as symbol or put in `Dropbox/Vellum/Symbols` by the Laptop, one small `.vsym` file each. It is kept on the Duo so it works offline, and synced both ways with that folder: only new or changed files move, and a sync never deletes one.
+_Avoid_: block library, palette
+
 **Select**:
 The tool beside the Lasso on the rail that picks up one thing with a tap: a stroke, a text box, a dimension, a frame or a sheet, the topmost under the tap. Text boxes lie over dimensions and frames, which lie over ink, which lies over sheets, so where ink lies over a sheet a tap picks the ink and bare paper picks the sheet. A stroke, a dimension's line or a frame's edge is picked within 10 screen points, a text box or a dimension's length on it, a sheet anywhere on its paper. With something selected, a tap on another thing adds it, a tap on what is selected leaves it to be dragged, and a tap on empty canvas lets go of everything; a sheet is always selected alone. Pressing on a thing and dragging moves it at once. A drag from empty canvas does nothing, and the status bar says to loop with the Lasso.
 _Avoid_: pointer, arrow tool, selection tool
@@ -49,7 +61,7 @@ The tool that selects by drawing a loop: it takes every stroke at least half ins
 _Avoid_: marquee, window (a window is a dragged rectangle), Select (which takes one thing a tap)
 
 **Selection**:
-The strokes, text boxes, dimensions and frames the Lasso or Select has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner, duplicated or deleted, each as one undo step; or the one sheet a tap took, shown with its edge in the accent and a strip under the top bar, which can be turned, moved or changed in scale. It is not saved, it stays selected through undo and redo, and it stays when Select and the Lasso are swapped; any other tool lets go of it.
+The strokes, text boxes, dimensions and frames the Lasso or Select has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner (scaled by a factor about the opposite corner, the factor shown in the status bar and caught at ½×, 1×, 2×, 3× and 4×), duplicated or deleted, each as one undo step, and whose ink and text boxes can be kept in the Symbol library with Save as symbol; or the one sheet a tap took, shown with its edge in the accent and a strip under the top bar, which can be turned, moved or changed in scale. It is not saved, it stays selected through undo and redo, and it stays when Select and the Lasso are swapped; any other tool lets go of it.
 _Avoid_: group, highlight
 
 **Draw with finger**:

@@ -1,7 +1,7 @@
 import Foundation
 
 /// A made-up Dropbox, in memory, that answers the requests syncing makes (`files/upload`, `files/move_v2`,
-/// `files/delete_v2`, `files/list_folder` and `list_folder/continue`, and token renewal) the way Dropbox does, behind
+/// `files/delete_v2`, `files/list_folder` and `list_folder/continue`, `files/download` since #41, and token renewal) the way Dropbox does, behind
 /// the same transport seam the live client uses.
 /// The tests sync through it, and Debug builds use it for the simulator's sync captures (`--ui-sync`), since the
 /// simulator has no Dropbox key. It can be switched offline, made to fail, and have a file changed "on the laptop".
@@ -216,6 +216,14 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
             }
             entries = folders.sorted().map { DropboxTreeEntry(path: $0, kind: .folder) } + entries
             return page(entries, folder: folder, from: changes.count)
+        case "/2/files/download":
+            guard let header = request.headers["Dropbox-API-Arg"],
+                  let argument = try? JSONSerialization.jsonObject(with: Data(header.utf8)) as? [String: Any],
+                  let path = argument["path"] as? String else { return Self.badRequest }
+            _requests.append("download \(path)")
+            let file = path.hasPrefix("rev:") ? files.values.first { "rev:" + $0.rev == path } : files[path.lowercased()]
+            guard let file else { return Self.conflict("path/not_found/") }
+            return DropboxHTTPResponse(status: 200, body: Data(file.bytes))
         case "/2/files/list_folder/continue":
             guard let body = request.body,
                   let argument = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
@@ -238,9 +246,17 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
         let cursor = "made-up-cursor-\(cursorsMade)"
         cursors[cursor] = (folder, from, rest)
         let tags: [DropboxTreeEntry.Kind: String] = [.file: "file", .folder: "folder", .deleted: "deleted"]
-        let listed: [[String: String]] = shown.map {
-            [".tag": tags[$0.kind] ?? "file", "name": ($0.path as NSString).lastPathComponent, "path_lower": $0.path,
-             "path_display": $0.path]
+        let listed: [[String: Any]] = shown.map {
+            var entry: [String: Any] = [".tag": tags[$0.kind] ?? "file", "name": ($0.path as NSString).lastPathComponent,
+                                        "path_lower": $0.path, "path_display": $0.path]
+            // A file's metadata, as Dropbox lists it (#41).
+            if $0.kind == .file, let file = files[$0.path] {
+                entry["id"] = "id:" + $0.path
+                entry["size"] = file.bytes.count
+                entry["content_hash"] = DropboxContentHash.of(file.bytes)
+                entry["rev"] = file.rev
+            }
+            return entry
         }
         return Self.json(["entries": listed, "cursor": cursor, "has_more": !rest.isEmpty])
     }

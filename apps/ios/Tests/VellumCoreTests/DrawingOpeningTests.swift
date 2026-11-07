@@ -301,7 +301,7 @@ final class DrawingOpeningTests: XCTestCase {
         let pdfs = try tempPDFs()
         let bytes = Data("%PDF-1.4 made-up viewer page".utf8)
         let hash = DropboxContentHash.of([UInt8](bytes))
-        let downloads = Counter()
+        let downloads = DownloadCounter()
         let download: @Sendable () async throws -> DropboxDownload = {
             downloads.add()
             return DropboxDownload(bytes: bytes, contentHash: hash)
@@ -340,7 +340,7 @@ final class DrawingOpeningTests: XCTestCase {
     func testTwoOpensOfOnePDFAtOnceShareOneDownload() async throws {
         let pdfs = try tempPDFs()
         let bytes = Data(repeating: 0x25, count: 4096)
-        let downloads = Counter()
+        let downloads = DownloadCounter()
         let download: @Sendable () async throws -> DropboxDownload = {
             downloads.add()
             try await Task.sleep(nanoseconds: 50_000_000)
@@ -368,7 +368,7 @@ final class DrawingOpeningTests: XCTestCase {
 }
 
 /// A count shared with a `@Sendable` closure.
-private final class Counter: @unchecked Sendable {
+private final class DownloadCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
     func add() { lock.withLock { count += 1 } }

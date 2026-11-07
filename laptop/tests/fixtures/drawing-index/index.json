@@ -1,0 +1,30 @@
+{
+ "drawings": 10,
+ "format": 1,
+ "generation": 1,
+ "shards": [
+  {
+   "bytes": 630,
+   "drawings": 1,
+   "file": "shards/3a8c2bf6283e632be11888c49bec4904.json",
+   "project": null,
+   "projectPath": null
+  },
+  {
+   "bytes": 4938,
+   "drawings": 6,
+   "file": "shards/a5bb6e1ad6555c8d808039a86dc9b637.json",
+   "project": "Made-up Plant Upgrade",
+   "projectPath": "/Projects/Made-up Plant Upgrade"
+  },
+  {
+   "bytes": 2510,
+   "drawings": 3,
+   "file": "shards/9035259524b1aa7630681c579fb694a5.json",
+   "project": "Made-up School Addition",
+   "projectPath": "/Projects/Made-up School Addition"
+  }
+ ],
+ "thumbnailBox": 128,
+ "updated": "2026-11-07T12:00:00Z"
+}

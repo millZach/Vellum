@@ -201,7 +201,7 @@ Zach's Windows laptop, where AutoCAD, Dropbox and Sotto run, and where agent wor
 _Avoid_: PC, desktop, computer (in Sotto, a computer is any machine with a host)
 
 **Project folder**:
-The Dropbox folder of the job a sheet's PDF came from, such as a client project's folder. A job's thread runs there.
+The Dropbox folder of the job a sheet's PDF came from, such as a client project's folder. A job's thread runs there. For the drawing index, a drawing's project folder is the top folder under a projects root (`/Projects` unless the laptop indexer's settings name others), or elsewhere the folder holding its discipline and format folders (`Electrical`, `CAD`, `PDF`, `Issued`).
 _Avoid_: workspace, repo, directory
 
 ## Agent work
@@ -237,12 +237,32 @@ A CAD file (DWG) in Zach's Dropbox, with any PDF plotted from it.
 _Avoid_: sheet (a sheet is a placed PDF page), file, plan
 
 **Drawing index**:
-The searchable list of every drawing in Zach's Dropbox: where it is, its project, its title block fields, which PDF is its plot, and a thumbnail. Choosing a drawing from a search opens it in Vellum.
+The searchable list of every drawing in Zach's Dropbox: where it is, its project, its title block fields, which PDF is its plot, and a thumbnail. A DWG with several titled layouts is one entry per layout, each with its own title block and plot. Choosing a drawing from a search opens it in Vellum.
 _Avoid_: catalog, database, register
 
 **Laptop indexer**:
-The tool on the laptop that keeps the drawing index up to date and plots a drawing to PDF when Vellum asks for one that has none.
+The tool on the laptop (`laptop/`) that keeps the drawing index up to date and plots a drawing to PDF when Vellum asks for one that has none. It starts at logon, scans all of Dropbox, reads only files whose size, modified time or online-only state changed, and watches Dropbox so a saved PDF is in the index within seconds.
 _Avoid_: agent (agents run jobs), sync, service
+
+**Index manifest**:
+`Dropbox/Vellum/Index/index.json`: the drawing index's format number, its generation and one line per project's index shard. It is rewritten only when a shard changed, so the Duo learns from one small read whether anything did (ADR-0017).
+_Avoid_: index file, header, catalog
+
+**Index shard**:
+One project's drawings in the drawing index, a file in `Vellum/Index/shards` named by the hash of its bytes, so an unchanged project keeps its name and the Duo downloads only shards it has not got.
+_Avoid_: page, chunk, part (a log part is the ink log's)
+
+**Plot**:
+The PDF a drawing's DWG was plotted to, which the drawing index pairs with it: by the PDF's plot metadata naming the DWG, by the same name nearby, or by the same drawing number in the same project. A drawing with none has no PDF yet; a PDF with no DWG is "PDF only, no DWG".
+_Avoid_: print, export, sheet (a sheet is a placed PDF page)
+
+**Online-only file**:
+A Dropbox file the laptop keeps only in the cloud, a placeholder until it is opened. The laptop indexer never opens the placeholder, because that downloads the file into the laptop's Dropbox folder: it downloads a copy through the Dropbox API to the scratch folder, reads it and deletes the copy. While it can't (the drive unplugged, not signed in), the file is listed unread by its path and name.
+_Avoid_: cloud file, smart sync file, placeholder (alone)
+
+**Scratch folder**:
+The folder on Zach's external drive (`D:\Vellum indexer\scratch`) where the laptop indexer downloads an online-only file to read it, one at a time, deleting each copy once what was read is saved. The indexer works only in its own marked subfolder of it, `Vellum indexer copies`, and refuses a scratch folder inside the Dropbox folder.
+_Avoid_: cache, temp folder, download folder
 
 ## Meetings
 

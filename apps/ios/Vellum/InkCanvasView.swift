@@ -187,6 +187,32 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private var lassoPath = CGMutablePath()
     private var lastLassoScreen: CGPoint = .zero
     private var drag: SelectionDrag?
+    /// The Pencil down with Select (#64), while it is still a tap.
+    private var selectPress: SelectPress?
+
+    /// A press with Select: where it touched down, what a tap there picks (`SelectTap`, looked up once, at touch-down),
+    /// and what a drag from it does. It is a tap until the tip goes `sheetTapReach` points from where it touched down;
+    /// then it becomes the drag, as the lasso's would, or, from empty canvas or a sheet not selected, nothing.
+    private struct SelectPress {
+        enum Target {
+            /// A corner handle of the selection: a drag resizes it.
+            case handle(Int)
+            /// Inside the selection's dashed box: a drag moves it.
+            case selection
+            /// The selected sheet: a drag moves it.
+            case selectedSheet
+            /// A stroke, text box, dimension or frame not selected: a drag picks it up alone and moves it.
+            case thing(SelectTap.Pick)
+            /// Empty canvas, or the bare paper of a sheet not selected: a drag does nothing, and the status bar says so.
+            case nothing(onSheet: Bool)
+        }
+        let location: CGPoint
+        let point: CanvasPoint
+        let pick: SelectTap.Pick?
+        let target: Target
+        /// A drag from where nothing moves: it waits for the lift, which does nothing either.
+        var draggedNothing = false
+    }
 
     // A selected sheet (#44): the strip under the top bar, a finger's tap that picks one up, and the turn or move under way.
     private lazy var sheetStrip = SheetStrip(
@@ -370,7 +396,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         placeTap.delegate = self
         addGestureRecognizer(placeTap)
 
-        // With the lasso in hand, a finger's tap picks up a sheet (#44); the Pencil's goes through the touches below.
+        // With the lasso in hand, a finger's tap picks up a sheet (#44), and with Select whatever is under it (#64); the
+        // Pencil's goes through the touches below.
         sheetTap.addTarget(self, action: #selector(handleSheetTap(_:)))
         sheetTap.allowedTouchTypes = directTouches
         sheetTap.isEnabled = false
@@ -692,7 +719,9 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         // The next thing has started: the tag goes (#40), and the flyout closes.
         shapeDrawing.nextThingStarted()
         if editor.showsShapeFlyout { editor.showsShapeFlyout = false }
-        if editor.tool == .lasso {
+        if editor.tool == .select {
+            beginSelect(at: location, point: point)
+        } else if editor.tool == .lasso {
             beginLasso(at: location, point: point)
         } else if editor.tool.group == .lengthsAndRegions {
             beginRegionInput(at: location, point: point)
@@ -774,7 +803,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
             }
             return
         }
-        if lassoing || drag != nil || sheetDrag != nil {
+        if lassoing || drag != nil || sheetDrag != nil || selectPress != nil {
             lassoMoved(samples)
             return
         }
@@ -819,7 +848,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         } else if shapeDrawing.isDown {
             if let last = samples.last { pendingPenPosition = canvasPoint(last) }
             shapeDrawing.up(at: samples.last, keep: keep)
-        } else if lassoing || drag != nil || sheetDrag != nil {
+        } else if lassoing || drag != nil || sheetDrag != nil || selectPress != nil {
             lassoMoved(samples)
         } else if !samples.isEmpty, snappedShape == nil {
             consume(samples, ending: true)
@@ -860,6 +889,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         }
         if erasing { editor.endEraserSweep() }
         if lassoing { finishLoop(keep: keep) }
+        if selectPress != nil { finishSelectPress(keep: keep) }
         if drag != nil { finishDrag(keep: keep) }
         if let sheetDrag, !sheetDrag.byFinger { finishSheetDrag(keep: keep) }
         if var stroke = liveStroke, let base = liveBase {
@@ -925,7 +955,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
 
     private func stopDisplayLinkIfIdle() {
         guard liveTouch == nil, liveStroke == nil, !erasing, !lassoing, drag == nil, sheetDrag == nil, regionInput == nil,
-              !shapeDrawing.isDown, fingersDown == 0, gestureTiming == nil else { return }
+              selectPress == nil, !shapeDrawing.isDown, fingersDown == 0, gestureTiming == nil else { return }
         displayLink?.invalidate()
         displayLink = nil
     }
@@ -1275,6 +1305,10 @@ extension InkCanvasUIView {
     private func lassoMoved(_ samples: [CGPoint]) {
         guard let last = samples.last else { return }
         pendingPenPosition = canvasPoint(last)
+        if selectPress != nil {
+            selectPressMoved(to: last)
+            return
+        }
         if sheetDrag != nil {
             lastSample = last
             moveSheetDrag(to: canvasPoint(last))
@@ -1323,6 +1357,112 @@ extension InkCanvasUIView {
             UIAccessibility.post(notification: .announcement, argument: count == 0 ? "Nothing selected" : "\(count) selected")
         }
         lassoPoints = []
+    }
+
+    // MARK: Select (#64)
+
+    /// The Pencil touched down with Select: what a tap here picks is looked up once, now, and the press waits to see
+    /// whether it is a tap or a drag. Nothing is lifted and nothing is drawn until it is a drag.
+    private func beginSelect(at location: CGPoint, point: CanvasPoint) {
+        if case .hint = editor.toolStep { editor.toolStep = .start }
+        var corner: Int?
+        var inBox = false
+        if editor.selection.sheet == nil, !editor.selection.isEmpty, editor.selectionBounds != nil {
+            corner = selectionOverlay.handle(at: location)
+            inBox = selectionOverlay.contains(location)
+        }
+        let pick = corner == nil ? editor.selectPick(at: point) : nil
+        let target: SelectPress.Target
+        if let corner {
+            target = .handle(corner)
+        } else if let sheet = editor.selectedSheet, sheet.contains(point) {
+            target = .selectedSheet
+        } else if inBox {
+            // A drag from inside the dashed box moves the selection; a tap there is a tap like any other.
+            target = .selection
+        } else if let pick {
+            if case .sheet = pick { target = .nothing(onSheet: true) } else { target = .thing(pick) }
+        } else {
+            target = .nothing(onSheet: false)
+        }
+        selectPress = SelectPress(location: location, point: point, pick: pick, target: target)
+    }
+
+    /// The Pencil moved with Select: once it is `sheetTapReach` points from where it touched down, the press becomes the
+    /// drag its target makes, from where it touched down, so nothing jumps.
+    private func selectPressMoved(to last: CGPoint) {
+        guard var press = selectPress, !press.draggedNothing,
+              hypot(last.x - press.location.x, last.y - press.location.y) > Self.sheetTapReach else { return }
+        let point = canvasPoint(last)
+        switch press.target {
+        case .handle(let corner):
+            selectPress = nil
+            guard let bounds = editor.selectionBounds else { return }
+            let corners = [CanvasPoint(x: bounds.minX, y: bounds.minY), CanvasPoint(x: bounds.maxX, y: bounds.minY),
+                           CanvasPoint(x: bounds.maxX, y: bounds.maxY), CanvasPoint(x: bounds.minX, y: bounds.maxY)]
+            startDrag(.resize(anchor: corners[(corner + 2) % 4], corner: corners[corner]), at: press.point)
+            dragTo(point)
+        case .selection:
+            selectPress = nil
+            startDrag(.move, at: press.point)
+            dragTo(point)
+        case .thing(let pick):
+            // Pressed on a thing and dragged straight away: it is picked up alone and moves.
+            selectPress = nil
+            editor.select(CanvasSelection(pick))
+            startDrag(.move, at: press.point)
+            dragTo(point)
+        case .selectedSheet:
+            selectPress = nil
+            lastSample = last
+            beginSheetDrag(.move(start: press.point, moved: false), byFinger: false)
+            moveSheetDrag(to: point)
+        case .nothing(let onSheet):
+            press.draggedNothing = true
+            selectPress = press
+            flashHint(onSheet ? CanvasTool.selectSheetDragHint : CanvasTool.selectDragHint)
+        }
+    }
+
+    /// The Pencil lifted with Select. A press that never became a drag is a tap: it picks what lay under it.
+    private func finishSelectPress(keep: Bool) {
+        guard let press = selectPress else { return }
+        selectPress = nil
+        guard keep, !press.draggedNothing else { return }
+        // A tap on a corner handle does nothing, as the prototype's; anywhere else, inside the dashed box or on the
+        // selected sheet too, it picks what lay under it: on another sheet's paper over the selected one, that sheet.
+        if case .handle = press.target { return }
+        applySelectTap(press.pick)
+    }
+
+    /// A tap with Select picked this, or nothing (`SelectTap.selection`): the selection follows, and VoiceOver hears.
+    fileprivate func applySelectTap(_ pick: SelectTap.Pick?) {
+        let after = SelectTap.selection(after: pick, given: editor.selection)
+        guard after != editor.selection else { return }
+        editor.select(after)
+        if let sheet = editor.selectedSheet {
+            UIAccessibility.post(notification: .announcement,
+                                 argument: "Selected \(sheet.label), at \(SheetAngle.reading(sheet.angle))")
+        } else {
+            UIAccessibility.post(notification: .announcement,
+                                 argument: after.isEmpty ? "Nothing selected" : "\(after.count) selected")
+        }
+    }
+
+    /// A finger's tap with Select, with Draw with finger off: the same as the Pencil's.
+    fileprivate func selectTap(at location: CGPoint) {
+        applySelectTap(editor.selectPick(at: canvasPoint(location)))
+    }
+
+    /// Shows a word in the status bar for a moment, unless something else has taken its place by then.
+    private func flashHint(_ hint: String) {
+        let step = CanvasTool.Step.hint(hint)
+        editor.toolStep = step
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2.6))
+            guard let self, self.editor.toolStep == step else { return }
+            self.editor.toolStep = .start
+        }
     }
 
     /// Lifts the selection's strokes out of the tiles onto a layer of their own, which the drag moves by its
@@ -1766,14 +1906,16 @@ extension InkCanvasUIView {
     private static let sheetMoveThreshold = 5.0
     private static let twistThreshold = 0.5
 
-    /// A finger's tap only picks up a sheet with the lasso in hand; with Draw with finger on it goes the Pencil's way.
+    /// A finger's tap only picks something up with the lasso or Select in hand (#64); with Draw with finger on it goes
+    /// the Pencil's way.
     fileprivate func updateSheetTap() {
-        sheetTap.isEnabled = tool == .lasso && editor.placingSheet == nil && !fingerDraws
+        sheetTap.isEnabled = tool.selects && editor.placingSheet == nil && !fingerDraws
     }
 
     @objc fileprivate func handleSheetTap(_ tap: UITapGestureRecognizer) {
-        guard tap.state == .ended, editor.tool == .lasso, editor.placingSheet == nil else { return }
+        guard tap.state == .ended, editor.tool.selects, editor.placingSheet == nil else { return }
         let location = tap.location(in: self)
+        if editor.tool == .select { return selectTap(at: location) }
         // A tap on ink already selected leaves it to be dragged.
         if editor.selection.sheet == nil, selectionOverlay.contains(location) { return }
         pickUpSheet(at: canvasPoint(location))
@@ -2046,7 +2188,7 @@ extension InkCanvasUIView {
     #endif
 
     #if DEBUG
-    /// A tap of the Pencil at a canvas point, as a tap with the lasso in hand: for the captures.
+    /// A tap of the Pencil at a canvas point, with the tool in hand (the lasso's or Select's tap): for the captures.
     func debugTap(at point: CanvasPoint) {
         let s = editor.viewport.screenPoint(for: point)
         let at = CGPoint(x: s.x, y: s.y)

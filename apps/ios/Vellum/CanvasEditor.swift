@@ -108,13 +108,13 @@ final class CanvasEditor {
         }
     }
 
-    /// The tool in hand. Putting the lasso down lets go of its selection; any tool change starts the next one afresh.
+    /// The tool in hand. Putting down Select or the lasso for any tool but the other lets go of the selection (#64); any tool change starts the next one afresh.
     /// A sheet waiting to be placed keeps waiting whatever the tool.
     var tool: CanvasTool {
         get { pen.tool }
         set {
             pen.tool = newValue
-            if newValue != .lasso { select(.empty) }
+            if !newValue.selects { select(.empty) }
             toolStep = placingSheet == nil ? .start : .placeSheet
             if showsShapeFlyout { showsShapeFlyout = false }
         }
@@ -269,6 +269,14 @@ final class CanvasEditor {
         guard let lasso = Lasso(points) else { return select(.empty) }
         select(lasso.select(in: inkIndex, texts: session.texts, dimensions: session.dimensions,
                             frames: session.frames))
+    }
+
+    /// What a tap with Select at a canvas point picks up (`SelectTap`, #64): looked up in the ink and sheet indexes at
+    /// this zoom, never the whole canvas. Once a tap, never per Pencil sample.
+    func selectPick(at point: CanvasPoint) -> SelectTap.Pick? {
+        var work = InkIndex.Work()
+        return SelectTap.pick(at: point, pointsPerInch: viewport.pointsPerInch, ink: inkIndex, texts: session.texts,
+                              dimensions: session.dimensions, frames: session.frames, sheets: sheetIndex, work: &work)
     }
 
     /// The rectangle the selection covers, from the index's cached bounds and the text boxes; nil with nothing
@@ -602,8 +610,8 @@ final class CanvasEditor {
         }
         if change.touchesSheets { onSheetsChange?(change) }
         if let after = session.selectionAfterLastChange {
-            // A sheet is picked up only with the lasso in hand, so undoing its turn with the pen selects nothing.
-            if after.sheet == nil || tool == .lasso { select(after) }
+            // A sheet is picked up only with Select or the lasso in hand, so undoing its turn with the pen selects nothing.
+            if after.sheet == nil || tool.selects { select(after) }
         } else if !selection.isEmpty, !change.removed.isEmpty || !change.removedTexts.isEmpty
                     || !change.removedDimensions.isEmpty || !change.removedFrames.isEmpty
                     || !change.removedSheets.isEmpty {

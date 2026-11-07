@@ -11,6 +11,8 @@ public struct SheetIndex: Sendable {
     struct Outline: Sendable {
         /// Its place in the canvas's list: higher is on top.
         let order: Int
+        /// The sheet, for a tap that asks whether a point is on its paper (`sheet(at:work:)`, #64).
+        let sheet: Sheet
         let xs: [Double]
         let ys: [Double]
         let box: InkIndex.Box
@@ -33,7 +35,7 @@ public struct SheetIndex: Sendable {
             let size = InkIndex.cellSize(level)
             let cell = InkIndex.Cell(x: InkIndex.cellIndex(box.minX, size), y: InkIndex.cellIndex(box.minY, size))
             levels[level, default: [:]][cell, default: []].append(all.count)
-            all.append(Outline(order: order, xs: xs, ys: ys, box: box))
+            all.append(Outline(order: order, sheet: sheet, xs: xs, ys: ys, box: box))
         }
     }
 
@@ -51,5 +53,13 @@ public struct SheetIndex: Sendable {
         }
         found.sort { all[$0].order > all[$1].order }
         return found.map { all[$0] }
+    }
+
+    /// The topmost sheet whose paper holds a canvas point (`Sheet.contains`), looking only at the sheets whose box meets
+    /// it: what a tap with Select picks on bare paper (#64). What it looks at is counted in `work.sheetsVisited`.
+    public func sheet(at point: CanvasPoint, work: inout InkIndex.Work) -> Sheet? {
+        let x = point.x.inches, y = point.y.inches
+        return outlines(in: InkIndex.Box(minX: x, minY: y, maxX: x, maxY: y), work: &work)
+            .first { $0.sheet.contains(point) }?.sheet
     }
 }

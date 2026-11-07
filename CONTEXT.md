@@ -40,12 +40,16 @@ _Avoid_: label, chip, badge, dimension (a dimension stays on the canvas)
 The small pad a tag opens, which corrects a shape to typed values as its own undo step. A bare number means inches on a feet-and-inches canvas, like AutoCAD (`12` is 12 inches, `12'` is 12 feet, `12'6` is 12'-6"), and the canvas's own unit on any other: feet in decimal feet, millimetres in metric. What it can't read stays on the pad, marked, and changes nothing.
 _Avoid_: keypad, keyboard, command line
 
+**Select**:
+The tool beside the Lasso on the rail that picks up one thing with a tap: a stroke, a text box, a dimension, a frame or a sheet, the topmost under the tap. Text boxes lie over dimensions and frames, which lie over ink, which lies over sheets, so where ink lies over a sheet a tap picks the ink and bare paper picks the sheet. A stroke, a dimension's line or a frame's edge is picked within 10 screen points, a text box or a dimension's length on it, a sheet anywhere on its paper. With something selected, a tap on another thing adds it, a tap on what is selected leaves it to be dragged, and a tap on empty canvas lets go of everything; a sheet is always selected alone. Pressing on a thing and dragging moves it at once. A drag from empty canvas does nothing, and the status bar says to loop with the Lasso.
+_Avoid_: pointer, arrow tool, selection tool
+
 **Lasso**:
 The tool that selects by drawing a loop: it takes every stroke at least half inside the loop, every text box whose centre is inside, every dimension whose text is inside, and every frame wholly inside. A tap with it picks up the topmost sheet under the tap instead; a loop never takes a sheet.
-_Avoid_: marquee, selection tool, window (a window is a dragged rectangle)
+_Avoid_: marquee, window (a window is a dragged rectangle), Select (which takes one thing a tap)
 
 **Selection**:
-The strokes, text boxes, dimensions and frames the lasso has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner, duplicated or deleted, each as one undo step; or the one sheet a tap took, shown with its edge in the accent and a strip under the top bar, which can be turned, moved or changed in scale. It is not saved, and it stays selected through undo and redo.
+The strokes, text boxes, dimensions and frames the Lasso or Select has taken, shown with a dashed box and corner handles, which can be moved, resized from a corner, duplicated or deleted, each as one undo step; or the one sheet a tap took, shown with its edge in the accent and a strip under the top bar, which can be turned, moved or changed in scale. It is not saved, it stays selected through undo and redo, and it stays when Select and the Lasso are swapped; any other tool lets go of it.
 _Avoid_: group, highlight
 
 **Draw with finger**:

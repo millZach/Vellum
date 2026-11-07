@@ -6,12 +6,12 @@ final class CanvasToolTests: XCTestCase {
     func testTheRailRunsInTheOrderADR0011Gives() {
         XCTAssertEqual(CanvasTool.allCases.map(\.title), [
             "Pen", "Highlighter", "Eraser", "Line and shape",
-            "Lasso", "Text box",
+            "Select", "Lasso", "Text box",
             "Measure", "Dimension", "Frame", "Window",
         ])
         XCTAssertEqual(CanvasTool.Group.allCases.map(\.tools), [
             [.pen, .highlighter, .eraser, .lineAndShape],
-            [.lasso, .textBox],
+            [.select, .lasso, .textBox],
             [.measure, .dimension, .frame, .window],
         ])
     }

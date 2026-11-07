@@ -220,6 +220,9 @@ struct CaptureSheetsTransport: DropboxTransport {
 ///   selected with its buttons; turned with the 90° left button; twisted to 33.5°; twisted to 88.5° and held there,
 ///   caught at 90° with the guide showing and the fingers still down; twisted to 33.5° and moved by a drag; and twisted
 ///   to 33.5° and changed to 1" = 1'-0". Each logs its printed dimensions as measured and what its labels do.
+/// - `--ui-sheets select-ink`, `select-sheet` (#64): the same sheet and markups, with Select in hand and a tap of the
+///   Pencil on the red cloud on the sheet, which picks the cloud and not the sheet; or on bare paper, which picks the sheet
+///   with its strip. Each logs what the tap picked and the status bar's prompt.
 /// - `--ui-sheets scan`: the scan placed at 1/8" = 1'-0" beside the 1/4" plan: in dark mode the plan inverts and the
 ///   scan dims.
 /// - `--ui-sheets snap-corner`, `snap-edge` (#57): the measure tool's Pencil held down by a placed sheet's outline, so the
@@ -275,7 +278,8 @@ enum DebugSheets {
                                 at: CGPoint(x: view.bounds.midX + 200, y: view.bounds.midY))
                 editor.zoomToEverything()
                 view.viewportJumped()
-            case "turn-selected", "turn-90", "turn-angle", "turn-catch", "turn-moved", "turn-scale":
+            case "turn-selected", "turn-90", "turn-angle", "turn-catch", "turn-moved", "turn-scale", "select-ink",
+                 "select-sheet":
                 await turn(what, view, editor)
             case "snap-corner", "snap-edge":
                 await snap(what, view, editor)
@@ -300,6 +304,7 @@ enum DebugSheets {
         try? await Task.sleep(for: .seconds(0.4))
         markUp(placed, view, editor)
         try? await Task.sleep(for: .seconds(0.3))
+        if what.hasPrefix("select-") { return select(what, placed, view, editor) }
         editor.tool = .lasso
         view.debugTap(at: placed.centre)
         log("picked up \(String(describing: editor.selection.sheet)), prompt \(editor.tool.prompt(fingerDraws: false, hasSelection: true, hasSheet: true))")
@@ -320,6 +325,18 @@ enum DebugSheets {
         view.viewportJumped()
         try? await Task.sleep(for: .seconds(0.3))
         logTurned(editor)
+    }
+
+    /// Takes Select and taps the marked-up sheet with the Pencil (#64): on the red cloud's line, which picks the ink and
+    /// not the sheet under it, or on bare paper clear of every markup, which picks the sheet with its strip.
+    private static func select(_ what: String, _ sheet: Sheet, _ view: InkCanvasUIView, _ editor: CanvasEditor) {
+        editor.tool = .select
+        let paper = what == "select-ink" ? PaperPoint(x: .inches(15.8), y: .inches(3)) : PaperPoint(x: .inches(15), y: .inches(7.5))
+        view.debugTap(at: sheet.canvasPoint(at: paper))
+        let picked = editor.selection
+        log("select: \(what) picked \(picked.strokes.count) strokes, \(picked.texts.count) text boxes, "
+            + "\(picked.dimensions.count) dimensions, \(picked.frames.count) frames, sheet \(String(describing: picked.sheet)); "
+            + "prompt \(editor.tool.prompt(fingerDraws: false, hasSelection: !picked.isEmpty, hasSheet: picked.sheet != nil))")
     }
 
     /// Places a sheet (turned to 33.5° for the edge), takes Measure, and holds the Pencil down 10 points off its outline, by

@@ -3,41 +3,180 @@
   "issue": "#68",
   "about": "The Duo's copy of the drawing index and its search on the Drawings tab. Counts are budgets enforced by DrawingIndexTests (refreshes against the laptop indexer's made-up fixture on a made-up Dropbox) and DrawingSearchTimingTests (a made-up 20,000-drawing index); timings are measured by DrawingSearchTimingTests in an optimised build (swift test -c release) in the VellumCore tests job and compared by perf-compare.py.",
   "entries": [
-    { "metric": "index_requests_first_refresh", "kind": "count", "value": 5, "unit": "requests", "tolerance": 0,
+    {
+      "metric": "index_requests_first_refresh",
+      "kind": "count",
+      "value": 5,
+      "unit": "requests",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingIndexTests (deterministic)",
-      "note": "A first refresh of the fixture (3 projects): one list_folder of Vellum/Index, the manifest, and one download per shard. No thumbnail: they come down as rows show them (ADR-0017). At Zach's scale it is 2 + one per project." },
-    { "metric": "index_bytes_first_refresh", "kind": "count", "value": 8744, "unit": "bytes", "tolerance": 0,
+      "note": "A first refresh of the fixture (3 projects): one list_folder of Vellum/Index, the manifest, and one download per shard. No thumbnail: they come down as rows show them (ADR-0017). At Zach's scale it is 2 + one per project."
+    },
+    {
+      "metric": "index_bytes_first_refresh",
+      "kind": "count",
+      "value": 8744,
+      "unit": "bytes",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingIndexTests (deterministic)",
-      "note": "File bytes a first refresh of the fixture downloads: the 666-byte manifest and its three shards (630, 4,938 and 2,510 bytes). The listing's reply is metadata, about 1 KB from Dropbox, and not counted." },
-    { "metric": "index_thumbnails_downloaded_per_refresh", "kind": "count", "value": 0, "unit": "requests", "tolerance": 0,
+      "note": "File bytes a first refresh of the fixture downloads: the 666-byte manifest and its three shards (630, 4,938 and 2,510 bytes). The listing's reply is metadata, about 1 KB from Dropbox, and not counted."
+    },
+    {
+      "metric": "index_thumbnails_downloaded_per_refresh",
+      "kind": "count",
+      "value": 0,
+      "unit": "requests",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingIndexTests (deterministic)",
-      "note": "A refresh downloads no thumbnail; a row downloads its own the first time it is shown online." },
-    { "metric": "index_requests_no_change_refresh", "kind": "count", "value": 1, "unit": "requests", "tolerance": 0,
+      "note": "A refresh downloads no thumbnail; a row downloads its own the first time it is shown online."
+    },
+    {
+      "metric": "index_requests_no_change_refresh",
+      "kind": "count",
+      "value": 1,
+      "unit": "requests",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingIndexTests (deterministic)",
-      "note": "A refresh with nothing changed is the listing of Vellum/Index alone: index.json's content hash there is the copy's manifest's, so not even the manifest comes down." },
-    { "metric": "index_bytes_no_change_refresh", "kind": "count", "value": 0, "unit": "bytes", "tolerance": 0,
+      "note": "A refresh with nothing changed is the listing of Vellum/Index alone: index.json's content hash there is the copy's manifest's, so not even the manifest comes down."
+    },
+    {
+      "metric": "index_bytes_no_change_refresh",
+      "kind": "count",
+      "value": 0,
+      "unit": "bytes",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingIndexTests (deterministic)",
-      "note": "File bytes downloaded by a refresh with nothing changed: none, only the listing's metadata." },
-    { "metric": "index_requests_one_shard_changed", "kind": "count", "value": 3, "unit": "requests", "tolerance": 0,
+      "note": "File bytes downloaded by a refresh with nothing changed: none, only the listing's metadata."
+    },
+    {
+      "metric": "index_requests_one_shard_changed",
+      "kind": "count",
+      "value": 3,
+      "unit": "requests",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingIndexTests (deterministic)",
-      "note": "One drawing changed on the laptop: the listing, the new manifest and that project's shard; its bytes are exactly the manifest's and the shard's (asserted), whatever the number of projects." },
-    { "metric": "index_thumbnail_downloads_per_thumbnail", "kind": "count", "value": 1, "unit": "requests", "tolerance": 0,
+      "note": "One drawing changed on the laptop: the listing, the new manifest and that project's shard; its bytes are exactly the manifest's and the shard's (asserted), whatever the number of projects."
+    },
+    {
+      "metric": "index_thumbnail_downloads_per_thumbnail",
+      "kind": "count",
+      "value": 1,
+      "unit": "requests",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingIndexTests (deterministic)",
-      "note": "A thumbnail shown twice, online, downloads once; offline, or one the copy does not name, never." },
-    { "metric": "search_index_bytes_20000", "kind": "count", "value": 2497673, "unit": "bytes", "tolerance": 0,
+      "note": "A thumbnail shown twice, online, downloads once; offline, or one the copy does not name, never."
+    },
+    {
+      "metric": "search_index_bytes_20000",
+      "kind": "count",
+      "value": 2497673,
+      "unit": "bytes",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingSearchTimingTests (deterministic)",
-      "note": "The search structure of a made-up 20,000-drawing index: every entry's words and numbers packed into flat byte arrays with Int32 offsets, and the natural order. About 125 bytes a drawing." },
-    { "metric": "index_copy_bytes_20000", "kind": "count", "value": 15870066, "unit": "bytes", "tolerance": 0,
+      "note": "The search structure of a made-up 20,000-drawing index: every entry's words and numbers packed into flat byte arrays with Int32 offsets, and the natural order. About 125 bytes a drawing."
+    },
+    {
+      "metric": "index_copy_bytes_20000",
+      "kind": "count",
+      "value": 15870066,
+      "unit": "bytes",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingSearchTimingTests (deterministic)",
-      "note": "The copy's 20,000 entries in memory, estimated: each entry's own size plus the bytes of every string longer than Swift keeps inline. About 790 bytes a drawing; index_resident_20000_mb is the measured counterpart." },
-    { "metric": "search_entries_scanned_typing_pump_house", "kind": "count", "value": 50680, "unit": "entries", "tolerance": 0,
+      "note": "The copy's 20,000 entries in memory, estimated: each entry's own size plus the bytes of every string longer than Swift keeps inline. About 790 bytes a drawing; index_resident_20000_mb is the measured counterpart."
+    },
+    {
+      "metric": "search_entries_scanned_typing_pump_house",
+      "kind": "count",
+      "value": 50680,
+      "unit": "entries",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingSearchTimingTests (deterministic)",
-      "note": "Entries looked at while typing \"pump house\" a key at a time into the 20,000-drawing index: the first key looks at all 20,000, and each key after it only at the last key's matches. Without narrowing it would be 200,000." },
-    { "metric": "search_entries_scanned_typing_e_123", "kind": "count", "value": 32463, "unit": "entries", "tolerance": 0,
+      "note": "Entries looked at while typing \"pump house\" a key at a time into the 20,000-drawing index: the first key looks at all 20,000, and each key after it only at the last key's matches. Without narrowing it would be 200,000."
+    },
+    {
+      "metric": "search_entries_scanned_typing_e_123",
+      "kind": "count",
+      "value": 32463,
+      "unit": "entries",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingSearchTimingTests (deterministic)",
-      "note": "The same, typing the drawing number \"E-123\" (100,000 without narrowing)." },
-    { "metric": "search_entries_scanned_typing_made_up_project_042", "kind": "count", "value": 361800, "unit": "entries", "tolerance": 0,
+      "note": "The same, typing the drawing number \"E-123\" (100,000 without narrowing)."
+    },
+    {
+      "metric": "search_entries_scanned_typing_made_up_project_042",
+      "kind": "count",
+      "value": 361800,
+      "unit": "entries",
+      "tolerance": 0,
       "measured": "feat/drawing-search 2026-11-07 VellumCore DrawingSearchTimingTests (deterministic)",
-      "note": "The same, typing a project's name: every made-up project starts \"Made-up Project\", so most keys look at all 20,000 until its number; the worst case of the three (380,000 without narrowing)." }
+      "note": "The same, typing a project's name: every made-up project starts \"Made-up Project\", so most keys look at all 20,000 until its number; the worst case of the three (380,000 without narrowing)."
+    },
+    {
+      "metric": "search_keystroke_p50_ms",
+      "kind": "time",
+      "value": 0.56,
+      "unit": "ms",
+      "tolerance": 0.5,
+      "measured": "feat/drawing-search 2026-11-07 run 42406413271, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
+      "note": "Median time of one keystroke's search while typing three queries (a title, a number, a project) a key at a time into the made-up 20,000-drawing index, narrowing as the app does. The main thread does none of it."
+    },
+    {
+      "metric": "search_keystroke_max_ms",
+      "kind": "time",
+      "value": 1.42,
+      "unit": "ms",
+      "tolerance": 1.0,
+      "measured": "feat/drawing-search 2026-11-07 run 42406413271, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
+      "note": "The slowest of those keystrokes: a first key, which looks at all 20,000 entries.",
+      "warn": false
+    },
+    {
+      "metric": "search_full_scan_ms",
+      "kind": "time",
+      "value": 0.8,
+      "unit": "ms",
+      "tolerance": 0.5,
+      "measured": "feat/drawing-search 2026-11-07 run 42406413271, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
+      "note": "One search looking at all 20,000 entries (\"plan\", which most match), ranked and sorted."
+    },
+    {
+      "metric": "index_load_20000_ms",
+      "kind": "time",
+      "value": 404.27,
+      "unit": "ms",
+      "tolerance": 0.5,
+      "measured": "feat/drawing-search 2026-11-07 run 42406413271, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
+      "note": "Reading the copy: decoding 100 shards of 200 drawings (about 15 MB of JSON) and building the search, once per index generation, off the main thread."
+    },
+    {
+      "metric": "index_decode_20000_ms",
+      "kind": "time",
+      "value": 258.77,
+      "unit": "ms",
+      "tolerance": 0.5,
+      "measured": "feat/drawing-search 2026-11-07 run 42406413271, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
+      "note": "The decoding part of index_load_20000_ms.",
+      "warn": false
+    },
+    {
+      "metric": "search_build_20000_ms",
+      "kind": "time",
+      "value": 145.5,
+      "unit": "ms",
+      "tolerance": 0.5,
+      "measured": "feat/drawing-search 2026-11-07 run 42406413271, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
+      "note": "The search-building part of index_load_20000_ms.",
+      "warn": false
+    },
+    {
+      "metric": "index_resident_20000_mb",
+      "kind": "time",
+      "value": 15.27,
+      "unit": "MB",
+      "tolerance": 0.5,
+      "measured": "feat/drawing-search 2026-11-07 run 42406413271, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
+      "note": "Resident memory added by holding the 20,000 entries and their search, measured with task_info; index_copy_bytes_20000 and search_index_bytes_20000 are the deterministic estimates.",
+      "warn": false
+    }
   ]
 }

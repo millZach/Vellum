@@ -136,19 +136,18 @@ struct DrawingIndexLine: View {
             ? "\(model.total) drawings in the index"
             : "\(model.matchCount) of \(model.total) drawings match “\(model.resultQuery)”"
         let updated = model.updated.map { " · updated by the laptop \(Self.relative.localizedString(for: $0, relativeTo: Date()))" } ?? ""
+        // One run of text, so it wraps as a sentence on the folded screen rather than being cut short.
+        let offline = model.online
+            ? Text("")
+            : Text("\(Image(systemName: "wifi.slash")) Offline · searching the copy on this Duo · ")
+                .fontWeight(.semibold).foregroundStyle(DrawingIndexColors.plot)
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-            if !model.online {
-                Label("Offline · searching the copy on this Duo ·", systemImage: "wifi.slash")
-                    .labelStyle(DrawingInlineLabel())
-                    .fontWeight(.semibold)
-                    .foregroundStyle(DrawingIndexColors.plot)
-                    .fixedSize()
-            }
-            Text(count + updated).foregroundStyle(.secondary)
+            Text("\(offline)\(Text(count + updated).foregroundStyle(.secondary))")
+                .fixedSize(horizontal: false, vertical: true)
             if model.refreshing { ProgressView().controlSize(.mini) }
         }
         .font(.system(size: 12))
-        .lineLimit(2)
+        .lineLimit(3)
     }
 
     static let relative: RelativeDateTimeFormatter = {
@@ -156,15 +155,6 @@ struct DrawingIndexLine: View {
         formatter.unitsStyle = .short
         return formatter
     }()
-}
-
-private struct DrawingInlineLabel: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 4) {
-            configuration.icon.font(.system(size: 11))
-            configuration.title
-        }
-    }
 }
 
 /// A newer format the laptop wrote, said once.

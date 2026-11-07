@@ -149,7 +149,28 @@ def test_a_first_scan_stopped_part_way_carries_on(dropbox: Path, make_indexer):
     indexer.state.close()
     again = make_indexer()
     again.scan()
-    # Read in path order: E-201.dwg, E-202.dwg and E-201.pdf were kept before the stop on V-12; only the rest is read.
+    # PDFs first, in path order: E-201.pdf was kept before the stop on V-12; only the rest is read.
     assert again.read_pdf.names() == ["V-12 Pump skid GA.pdf", "M-101.pdf"]
-    assert [p.name for p in again.dwg_reader.read_paths] == ["M-101.dwg"]
+    assert [p.name for p in again.dwg_reader.read_paths] == ["E-201.dwg", "E-202.dwg", "M-101.dwg"]
     assert len(read_index(dropbox / "Vellum" / "Index")[1]) == 4
+
+
+def test_a_long_scan_reads_pdfs_first_and_takes_watched_changes_between_files(dropbox: Path, make_indexer):
+    small_tree(dropbox)
+    indexer = make_indexer()
+    order = []
+    real_pdf, real_dwg = indexer.read_pdf.fn, indexer.dwg_reader.read
+    indexer.read_pdf.fn = lambda p: order.append(p.name) or real_pdf(p)
+    indexer.dwg_reader.read = lambda p: order.append(p.name) or real_dwg(p)
+    saved = f"/{PLANT}/CAD/E-202.dwg"
+    batches = [None, None, ({saved}, set())]  # the watcher has a saved DWG ready after the second file
+
+    def poll():
+        return batches.pop(0) if batches else None
+
+    indexer.poll_changes = poll
+    indexer.scan()
+    assert order[:3] == ["E-201.pdf", "V-12 Pump skid GA.pdf", "E-202.dwg"]  # the batch's DWG jumps the queue
+    assert order.count("E-202.dwg") == 1  # and is not read again when the scan reaches it
+    assert sorted(order) == sorted(["E-201.pdf", "V-12 Pump skid GA.pdf", "M-101.pdf", "E-201.dwg", "E-202.dwg",
+                                    "M-101.dwg"])

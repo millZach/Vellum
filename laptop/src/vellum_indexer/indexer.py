@@ -70,6 +70,8 @@ class Indexer:
         self.progress_seconds = progress_seconds
         self.publish_every_seconds = publish_every_seconds
         self.index_folder = root.joinpath(*INDEX_FOLDER)
+        # Set by the watcher: gives a batch of (paths, folders) when one is due, else None.
+        self.poll_changes: Callable[[], tuple[set[str], set[str]] | None] | None = None
         self.writer = IndexWriter(self.index_folder)
         self.counters = Counters()
 
@@ -167,13 +169,25 @@ class Indexer:
         for key in self.state.all_keys() - seen:
             self.state.delete(key)
             self.counters.removed += 1
-        self._read_all(changed)
+        # PDFs first: they take a moment each, DWGs a few seconds each in AutoCAD, so a long first scan has every
+        # drawing with a PDF in the index early, and DWG fields refine it after.
+        changed.sort(key=lambda f: files.kind_of(f.path) != "pdf")
+        self._read_all(changed, poll=True)
         self.publish()
         log.info("Scan done in %.1f s", time.monotonic() - started)
 
-    def _read_all(self, changed: list[files.FileFacts]) -> None:
+    def _read_all(self, changed: list[files.FileFacts], poll: bool = False) -> set[str]:
+        """Read each file. During a scan (``poll``), changes the watcher has gathered are taken between files, so a
+        saved PDF reaches the index within seconds even while a first scan runs for hours."""
         last_log = last_publish = time.monotonic()
+        taken_by_updates: set[str] = set()
         for i, facts in enumerate(changed, 1):
+            if poll and self.poll_changes is not None:
+                batch = self.poll_changes()
+                if batch is not None:
+                    taken_by_updates |= self.update(*batch)
+            if files.key(facts.path) in taken_by_updates:
+                continue
             self.take(facts)
             now = time.monotonic()
             if now - last_log >= self.progress_seconds:
@@ -183,13 +197,14 @@ class Indexer:
                 self.publish()  # a long first scan shows its progress on the Duo as it goes
                 last_publish = time.monotonic()
         self.state.commit()
+        return {files.key(f.path) for f in changed}
 
     def _walk_error(self, path: Path, error: OSError) -> None:
         log.warning("Could not list %s: %s", path, error)
 
-    def update(self, paths: Iterable[str], folders: Iterable[str] = ()) -> None:
+    def update(self, paths: Iterable[str], folders: Iterable[str] = ()) -> set[str]:
         """What the watcher saw: Dropbox paths of files changed, made or deleted, and of folders made, moved in or
-        deleted. Reads only those, then publishes."""
+        deleted. Reads only those, then publishes. Returns the keys of the files it read."""
         changed: list[files.FileFacts] = []
         for folder in sorted(set(folders)):
             if self.rules.skips_folder(folder):
@@ -207,17 +222,16 @@ class Indexer:
                     self.counters.removed += 1
             else:
                 self.counters.removed += self.state.delete_under(files.key(folder))
-        for path in sorted(set(paths)):
-            if not self.rules.indexes(path):
-                continue
-            facts = files.stat_file(self.root, path, self.attributes)
+        wanted = sorted(p for p in set(paths) if self.rules.indexes(p))
+        for path, facts in files.stat_files(self.root, wanted, self.attributes).items():
             if facts is None:
                 if self.state.delete(files.key(path)):
                     self.counters.removed += 1
             elif self.needs_read(facts):
                 changed.append(facts)
-        self._read_all(changed)
+        taken = self._read_all(changed)
         self.publish()
+        return taken
 
     # --- Publishing ---
 

@@ -77,7 +77,8 @@ Dropbox that could be the whole account. The indexer reads each file's attribute
 does not download anything, and **never opens an online-only file**: it lists it in the index by its path and name,
 with `"read": false` and its fields unread (only a drawing number taken from its file name), and it can still pair
 with a DWG by name. Once the file is local (opened, or made available offline), its attributes change, and the
-indexer reads it then, once.
+indexer reads it then, once. A change the watcher reports is looked up in its folder's listing too, not with
+`os.stat`, which on Windows opens a handle to the file.
 
 ## How it reads a drawing
 
@@ -132,7 +133,9 @@ none.
 - On start it lists Dropbox (sizes, times and attributes only) and reads only files whose size, modified time or
   online-only state changed since the state file last saw them. Each file's result is committed as it is read, so a
   first scan stopped part way carries on where it stopped. Progress goes to the log every 30 seconds, and a long
-  first scan publishes what it has every 10 minutes.
+  first scan publishes what it has every 10 minutes. It reads PDFs before DWGs (a PDF takes a moment, a DWG a few
+  seconds in AutoCAD), so every plotted drawing is searchable early, and it takes the watcher's changes between
+  files, so a PDF saved during a first scan of hours is still in the index within seconds.
 - Then it watches Dropbox (watchdog, `ReadDirectoryChangesW`), and gathers changes until Dropbox has been quiet for 2
   seconds (at most 30), so copying a folder of drawings is one update. A full stat-only rescan runs every 6 hours in
   case a notification was lost.

@@ -96,6 +96,7 @@ def watch(indexer, quiet: float, max_wait: float, rescan_hours: float, stop: thr
     observer.schedule(handler, str(indexer.root), recursive=True)
     observer.start()  # before the scan, so nothing changed during it is missed
     log.info("Watching %s", indexer.root)
+    indexer.poll_changes = lambda: debouncer.take() if debouncer.due() else None
     try:
         indexer.scan()
         next_rescan = time.monotonic() + rescan_hours * 3600

@@ -9,7 +9,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import stat as stat_module
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -129,15 +129,36 @@ def facts_for(
     )
 
 
-def stat_file(root: Path, db_path: str, attributes: AttributeReader = default_attributes) -> FileFacts | None:
-    path = local_path(root, db_path)
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    if not stat_module.S_ISREG(st.st_mode):
-        return None
-    return facts_for(root, path, st, attributes)
+def stat_files(
+    root: Path, db_paths: Iterable[str], attributes: AttributeReader = default_attributes
+) -> dict[str, FileFacts | None]:
+    """Each path's facts, or None when it is gone, read from its folder's listing rather than ``os.stat``: on Windows
+    ``os.stat`` opens a handle to the file, and the listing never touches the file at all."""
+    by_folder: dict[Path, list[str]] = {}
+    for db in db_paths:
+        by_folder.setdefault(local_path(root, db).parent, []).append(db)
+    out: dict[str, FileFacts | None] = {}
+    for folder, wanted in by_folder.items():
+        listed: dict[str, os.DirEntry] = {}
+        try:
+            with os.scandir(folder) as entries:
+                for entry in entries:
+                    listed[entry.name.lower()] = entry
+        except OSError:
+            pass
+        for db in wanted:
+            entry = listed.get(PurePosixPath(db).name.lower())
+            out[db] = None
+            if entry is None:
+                continue
+            try:
+                if entry.is_file(follow_symlinks=False):
+                    st = entry.stat(follow_symlinks=False)
+                    if stat_module.S_ISREG(st.st_mode):
+                        out[db] = facts_for(root, Path(entry.path), st, attributes)
+            except OSError:
+                pass
+    return out
 
 
 def walk(

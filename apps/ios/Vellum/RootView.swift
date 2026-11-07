@@ -3,12 +3,14 @@ import UIKit
 import VellumCore
 
 /// The iOS tab bar with Canvases, Drawings, Jobs and Meetings. Canvases holds the list of canvases and, over it, the
-/// canvas screen for the one open; Drawings shows Zach's Dropbox (#10); the other tabs are empty until their tickets
-/// build them.
+/// canvas screen for the one open; Drawings searches the drawing index (#68); the other tabs are empty until their
+/// tickets build them.
 struct RootView: View {
     @State private var selection: AppTab = RootView.launchTab
     /// The canvases and the open canvas live here, above the tabs, so switching tabs keeps the canvas open.
     @State private var canvases = CanvasesModel()
+    /// The Duo's copy of the drawing index and its search (#68), kept fresh from launch whichever tab is open.
+    @State private var drawings = DrawingIndexModel()
     @Environment(\.scenePhase) private var scenePhase
     /// Light, Dark or System (ADR-0011), chosen from the canvas screen's top bar.
     @AppStorage(AppearanceSetting.storageKey) private var appearance = AppearanceSetting.default.rawValue
@@ -21,7 +23,7 @@ struct RootView: View {
                         CanvasesTab(model: canvases)
                             .environment(canvases)
                     } else if tab == .drawings {
-                        DrawingsScreen()
+                        DrawingsScreen(index: drawings)
                     } else {
                         PlaceholderScreen(tab: tab)
                     }
@@ -30,6 +32,8 @@ struct RootView: View {
         }
         .background(WindowAppearance(style: (AppearanceSetting(rawValue: appearance) ?? .default).interfaceStyle))
         .task {
+            // The drawing index is read and refreshed off the main thread; nothing here waits for it.
+            Task { await DrawingIndexSetup.start(drawings) }
             #if DEBUG
             DebugAppearanceSteps.run()
             #endif
@@ -50,9 +54,15 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             // Every change is already written; leaving the screen flushes it to storage so a power cut keeps it too.
             if phase != .active { canvases.appWillLeaveScreen(background: phase == .background) }
-            if phase == .active { canvases.appDidBecomeActive() }
+            if phase == .active {
+                canvases.appDidBecomeActive()
+                drawings.appBecameActive()
+            }
         }
-        .onChange(of: DropboxConnection.app.isSignedIn) { _, _ in canvases.dropboxSignInChanged() }
+        .onChange(of: DropboxConnection.app.isSignedIn) { _, signedIn in
+            canvases.dropboxSignInChanged()
+            drawings.signInChanged(signedIn: signedIn)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
             canvases.appWillTerminate()
         }

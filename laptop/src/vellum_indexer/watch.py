@@ -78,6 +78,9 @@ class DropboxEvents:
                 self.debouncer.add(db, folder=True)
             elif self.rules.indexes(db):
                 self.debouncer.add(db)
+            elif event_type in ("deleted", "moved") and files.kind_of(db) is None and not self.rules.skips_folder(db):
+                # On Windows a deletion cannot say whether it was a folder; a path that is not a drawing may be one.
+                self.debouncer.add(db, folder=True)
 
     def dispatch(self, event) -> None:  # watchdog's FileSystemEventHandler interface
         if event.event_type in ("opened", "closed", "closed_no_write"):

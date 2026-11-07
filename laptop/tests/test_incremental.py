@@ -174,3 +174,25 @@ def test_a_long_scan_reads_pdfs_first_and_takes_watched_changes_between_files(dr
     assert order.count("E-202.dwg") == 1  # and is not read again when the scan reaches it
     assert sorted(order) == sorted(["E-201.pdf", "V-12 Pump skid GA.pdf", "M-101.pdf", "E-201.dwg", "E-202.dwg",
                                     "M-101.dwg"])
+
+
+def test_a_folder_that_cannot_be_listed_keeps_its_drawings(dropbox: Path, make_indexer, monkeypatch):
+    small_tree(dropbox)
+    indexer = make_indexer()
+    indexer.scan()
+    import os as os_module
+
+    from vellum_indexer import files as files_module
+
+    real = os_module.scandir
+    school = dropbox / SCHOOL / "Mechanical"
+
+    def flaky(path):
+        if Path(path) == school:
+            raise PermissionError("made-up sharing violation")
+        return real(path)
+
+    monkeypatch.setattr(files_module.os, "scandir", flaky)
+    counters, _ = rescan(indexer)
+    assert counters.removed == 0
+    assert len(read_index(dropbox / "Vellum" / "Index")[1]) == 4

@@ -157,6 +157,7 @@ class Indexer:
     def scan(self) -> None:
         """Rescan all of Dropbox: list it, read what changed, drop what is gone, publish."""
         started = time.monotonic()
+        self._unlisted: list[str] = []
         seen: set[str] = set()
         changed: list[files.FileFacts] = []
         for facts in files.walk(self.root, self.rules, attributes=self.attributes, on_error=self._walk_error):
@@ -166,7 +167,11 @@ class Indexer:
                 changed.append(facts)
         listed = time.monotonic() - started
         log.info("Listed %d drawings and PDFs in %.1f s; %d to read", len(seen), listed, len(changed))
+        # A folder that could not be listed this time keeps what it had, rather than everything in it being read again.
+        unlisted = tuple(files.key(f).rstrip("/") + "/" for f in self._unlisted)
         for key in self.state.all_keys() - seen:
+            if unlisted and key.startswith(unlisted):
+                continue
             self.state.delete(key)
             self.counters.removed += 1
         # PDFs first: they take a moment each, DWGs a few seconds each in AutoCAD, so a long first scan has every
@@ -201,6 +206,7 @@ class Indexer:
 
     def _walk_error(self, path: Path, error: OSError) -> None:
         log.warning("Could not list %s: %s", path, error)
+        self._unlisted.append(files.dropbox_path(self.root, path))
 
     def update(self, paths: Iterable[str], folders: Iterable[str] = ()) -> set[str]:
         """What the watcher saw: Dropbox paths of files changed, made or deleted, and of folders made, moved in or

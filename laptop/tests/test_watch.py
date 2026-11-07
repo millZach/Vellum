@@ -53,9 +53,11 @@ def test_events_become_dropbox_paths_and_vellums_own_writes_are_left_out(dropbox
     events.handle("moved", str(dropbox / "Projects" / "Old"), str(dropbox / "Projects" / "New"), True)
     events.handle("moved", str(dropbox / "Projects" / "P" / "a.tmp"), str(dropbox / "Projects" / "P" / "E-2.dwg"), False)
     events.handle("created", "/somewhere/else/E-3.pdf", None, False)
+    events.handle("deleted", str(dropbox / "Projects" / "Gone"), None, False)  # Windows: a folder, not marked as one
+    events.handle("deleted", str(dropbox / "Vellum" / "Old canvas 7f3a"), None, False)
     paths, folders = d.take()
     assert paths == {"/Projects/P/E-1.pdf", "/Projects/P/E-2.dwg"}
-    assert folders == {"/Projects/Old", "/Projects/New"}
+    assert folders == {"/Projects/Old", "/Projects/New", "/Projects/Gone", "/Projects/P/a.tmp"}
 
 
 def run_watcher(indexer, quiet=0.5):

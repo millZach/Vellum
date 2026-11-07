@@ -102,7 +102,7 @@ def make(out: Path = OUT) -> Path:
         tmp = Path(tmp)
         root = tmp / "Dropbox"
         for i, rel in enumerate(DWGS):
-            make_dwg_with_preview(root / rel, preview(i))
+            make_dwg_with_preview(root / rel, preview(i), "bmp")  # raw bytes: the same size on every platform
         for i, (rel, (fields, meta, inches, pages)) in enumerate(PDFS.items()):
             title_block_pdf(root / rel, title_meta=meta, inches=inches, pages=pages, mark=i, **fields)
         for i, f in enumerate(sorted(root.rglob("*"), key=lambda p: p.as_posix().lower())):

@@ -113,10 +113,13 @@ final class CanvasEditor {
     var tool: CanvasTool {
         get { pen.tool }
         set {
+            // A bubble's tag being typed goes on as typed before anything else happens (#41).
+            finishTag()
             pen.tool = newValue
             if !newValue.selects { select(.empty) }
             toolStep = placingSheet == nil ? .start : .placeSheet
             if showsShapeFlyout { showsShapeFlyout = false }
+            if showsSymbolFlyout { showsSymbolFlyout = false }
         }
     }
 
@@ -216,6 +219,8 @@ final class CanvasEditor {
 
     func undo() {
         if undoShapePoint?() == true { return }
+        // The tag typed so far joins its bubble, so the undo takes both (#41).
+        finishTag()
         willChangeHistory?()
         endEraserSweep()
         cancelLift()
@@ -225,6 +230,7 @@ final class CanvasEditor {
     }
 
     func redo() {
+        finishTag()
         willChangeHistory?()
         endEraserSweep()
         cancelLift()
@@ -328,6 +334,123 @@ final class CanvasEditor {
     func deleteSelection() {
         session.delete(selection)
         syncInk()
+    }
+
+    /// Scales the selection by a factor about its centre, as one undo step (#41): any selection, symbols or not.
+    func scaleSelection(by factor: Double) {
+        guard factor > 0, factor.isFinite, factor != 1, let box = selectionBounds else { return }
+        cancelLift()
+        session.transform(selection, by: .scaling(by: factor, about: box.center))
+        syncInk()
+    }
+
+    // MARK: Symbols (#41)
+
+    /// The symbol a tap with Symbols places, picked from its flyout. It starts on the gate valve.
+    var symbolID = Symbol.starters[0].id {
+        didSet { if symbolID != oldValue { finishTag() } }
+    }
+    /// Whether the symbol library's flyout is open beside the rail.
+    var showsSymbolFlyout = false
+    /// What the last symbol placed said about its size: `3/8" printed · 1'-6" in M-201`.
+    private(set) var lastSymbolLabel: String?
+
+    /// A bubble just placed, waiting for its tag: where the tag goes, the letters and number typed so far, and where
+    /// the bubble is, so the pop-up and the keyboard stay off it.
+    struct PendingTag: Equatable {
+        var slot: PlacedSymbol.Tag
+        var letters: String
+        var number: String
+        var bubble: CanvasRect
+    }
+    /// The tag being typed as a bubble lands; nil when none is.
+    var pendingTag: PendingTag?
+
+    /// The symbol picked, from the library every canvas shares.
+    var symbol: Symbol? { SymbolShelf.shared.symbol(symbolID) ?? Symbol.starters.first }
+
+    /// The scale a symbol lands at, at a canvas point (`SymbolScale`).
+    func symbolScale(at point: CanvasPoint) -> SymbolScale {
+        SymbolScale.at(point, sheets: session.sheets, frames: session.frames)
+    }
+
+    /// Places the symbol picked centred on a canvas point, upright, at its printed size at the scale there, as one undo
+    /// step: plain strokes in the pen's colour and weight, and text boxes for its letters, saved like any drawn stroke
+    /// before anything else. A symbol with a tag slot then waits for its tag. Once a tap, never per Pencil sample.
+    @discardableResult
+    func placeSymbol(at point: CanvasPoint) -> PlacedSymbol? {
+        finishTag()
+        guard let symbol else { return nil }
+        let scale = symbolScale(at: point)
+        let lineWidth = Length.inches(pen.weight(for: .pen).screenWidth(for: .pen) / viewport.pointsPerInch)
+        let placed = symbol.placed(at: point, size: scale.canvasSize(of: symbol.printedSize), lineWidth: lineWidth)
+        let selection = session.place(strokes: placed.strokes, texts: placed.texts, colour: pen.colour)
+        guard !selection.isEmpty else { return nil }
+        syncInk()
+        lastSymbolLabel = scale.label(for: symbol.printedSize, units: canvas.units)
+        if let slot = placed.tag {
+            let letters = slot.letters
+            pendingTag = PendingTag(slot: slot, letters: letters,
+                                    number: String(SymbolTag.next(letters: letters, in: session.texts)),
+                                    bubble: placed.bounds)
+            toolStep = .drawing(CanvasTool.tagPrompt)
+        } else {
+            // The size it landed at stays in the status bar until the next thing happens; 28 characters at most.
+            let short = scale.shortLabel(for: symbol.printedSize, units: canvas.units)
+            toolStep = .hint(short.count <= 28 ? short : SymbolScale.printedText(symbol.printedSize) + " printed")
+        }
+        return placed
+    }
+
+    /// Puts the tag typed on its bubble, as part of the bubble's undo step, and closes the pop-up. Empty letters and
+    /// number put no tag. Nothing waiting, nothing happens.
+    func finishTag() {
+        guard let pending = pendingTag else { return }
+        pendingTag = nil
+        if case .drawing(CanvasTool.tagPrompt) = toolStep { toolStep = .start }
+        guard let text = pending.slot.text(letters: pending.letters.uppercased(), number: pending.number) else { return }
+        session.place(strokes: [], texts: [text], colour: pen.colour, joiningLast: true)
+        syncInk()
+    }
+
+    /// Leaves the bubble with no tag.
+    func skipTag() {
+        guard pendingTag != nil else { return }
+        pendingTag = nil
+        if case .drawing(CanvasTool.tagPrompt) = toolStep { toolStep = .start }
+    }
+
+    /// What Save as symbol starts from: the selection's ink as a drawing, and the printed size it measures at the scale
+    /// under its middle. Nil with no ink or text selected.
+    struct SymbolDraft {
+        var drawing: SymbolDrawing
+        var printed: PrintedLength
+        var place: String
+    }
+
+    /// Save as symbol's draft while its name and size are asked for; nil otherwise.
+    var savingSymbol: SymbolDraft?
+
+    /// Opens Save as symbol for the selection, from the selection's menu.
+    func beginSavingSymbol() {
+        savingSymbol = symbolDraft()
+    }
+
+    func symbolDraft() -> SymbolDraft? {
+        let strokes = selection.strokes.compactMap { inkIndex.stroke($0) }
+        let texts = selection.texts.compactMap { session.text($0) }
+        guard selection.sheet == nil, let drawing = SymbolDrawing.of(strokes: strokes, texts: texts) else { return nil }
+        let scale = symbolScale(at: drawing.centre)
+        return SymbolDraft(drawing: drawing, printed: scale.printed(of: drawing.unit),
+                           place: scale.place ?? "off a sheet, at \(scale.reading)")
+    }
+
+    /// Saves a drafted symbol to the library, where every canvas has it, and picks it. The ink selected stays as it is.
+    func saveSymbol(_ draft: SymbolDraft, name: String, printed: PrintedLength) {
+        let symbol = Symbol(id: UUID().uuidString.lowercased(), name: name, printedSize: printed,
+                            tagLetters: draft.drawing.tagLetters, parts: draft.drawing.parts)
+        SymbolShelf.shared.save(symbol)
+        symbolID = symbol.id
     }
 
     // MARK: Text boxes (#7)

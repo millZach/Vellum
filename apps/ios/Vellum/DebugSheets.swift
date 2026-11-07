@@ -459,6 +459,12 @@ enum DebugSheets {
     }
 
     /// Confirms a made-up page and taps where it goes, through the canvas view's input path; returns the placed sheet.
+    /// Places a made-up page with a tap, as `place` does, for the symbol captures (#41).
+    static func placeForCapture(_ view: InkCanvasUIView, _ editor: CanvasEditor, file: Int, page: Int,
+                                scale: Sheet.Scale? = nil) async -> Sheet? {
+        await place(view, editor, file: file, page: page, scale: scale)
+    }
+
     private static func place(_ view: InkCanvasUIView, _ editor: CanvasEditor, file: Int, page: Int,
                               scale: Sheet.Scale? = nil, at point: CGPoint? = nil) async -> Sheet? {
         guard let pending = await DebugSheetSource.pending(file: file, page: page, scale: scale) else { return nil }

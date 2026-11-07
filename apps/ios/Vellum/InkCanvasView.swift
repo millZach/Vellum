@@ -69,6 +69,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         didSet {
             guard tool != oldValue else { return }
             textTap.isEnabled = tool == .textBox && editor.placingSheet == nil
+            symbolTap.isEnabled = tool == .symbols && editor.placingSheet == nil
             updateSheetTap()
             scribble?.isActive = tool == .textBox
             if oldValue == .textBox { textOverlay.finishEditing() }
@@ -180,7 +181,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     // The lasso (#7).
     private lazy var selectionOverlay = SelectionOverlay(
         duplicate: { [weak self] in self?.editor.duplicateSelection() },
-        delete: { [weak self] in self?.editor.deleteSelection() })
+        delete: { [weak self] in self?.editor.deleteSelection() },
+        saveSymbol: { [weak self] in self?.editor.beginSavingSymbol() })
     private var lassoing = false
     private var lassoPoints: [CanvasPoint] = []
     private var lassoBase: Viewport?
@@ -270,6 +272,8 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private let textOverlay: TextBoxOverlay
     private var scribble: CanvasScribble?
     private let textTap = UITapGestureRecognizer()
+    /// Symbols (#41): a tap places the symbol picked.
+    private let symbolTap = UITapGestureRecognizer()
 
     /// The line and shape tool's shapes, tag and number pad (#40).
     private let shapeDrawing: ShapeDrawing
@@ -389,6 +393,13 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         textTap.delegate = self
         addGestureRecognizer(textTap)
 
+        // Symbols (#41): a tap with a finger or the Pencil places the symbol picked, centred on the tap.
+        symbolTap.addTarget(self, action: #selector(handleSymbolTap(_:)))
+        symbolTap.allowedTouchTypes = directTouches + [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        symbolTap.isEnabled = false
+        symbolTap.delegate = self
+        addGestureRecognizer(symbolTap)
+
         // A finger's tap places a sheet waiting to be placed (#11); the Pencil's goes through the touches below.
         placeTap.addTarget(self, action: #selector(handlePlaceTap(_:)))
         placeTap.allowedTouchTypes = directTouches
@@ -440,6 +451,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         DebugSheets.attach(self, editor: editor)
         DebugStatusBar.attach(self, editor: editor)
         DebugDrawingTools.attach(self, editor: editor)
+        DebugSymbols.attach(self, editor: editor)
         #endif
     }
 
@@ -1595,7 +1607,10 @@ extension InkCanvasUIView {
             rect = CGRect(x: a.x, y: a.y, width: selected.size.width.inches * viewport.pointsPerInch,
                           height: selected.size.height.inches * viewport.pointsPerInch)
         }
-        selectionOverlay.show(ink: rect, count: editor.selection.count, showsMenu: drag == nil, in: bounds)
+        let selection = editor.selection
+        selectionOverlay.show(ink: rect, count: selection.count, showsMenu: drag == nil,
+                              canSaveSymbol: selection.sheet == nil && (!selection.strokes.isEmpty || !selection.texts.isEmpty),
+                              in: bounds)
         updateSelectedSheet()
     }
 
@@ -1625,6 +1640,41 @@ extension InkCanvasUIView {
             placeText(at: location)
         }
     }
+
+    // MARK: Symbols (#41)
+
+    @objc private func handleSymbolTap(_ tap: UITapGestureRecognizer) {
+        guard tap.state == .ended, tool == .symbols, editor.placingSheet == nil else { return }
+        placeSymbol(at: tap.location(in: self))
+    }
+
+    /// Places the symbol picked centred on a screen point, then, for a bubble, brings it clear of the keyboard its tag
+    /// is typed on. VoiceOver hears the size it landed at.
+    func placeSymbol(at location: CGPoint) {
+        if editor.showsSymbolFlyout { editor.showsSymbolFlyout = false }
+        guard editor.placeSymbol(at: canvasPoint(location)) != nil else { return }
+        if let bubble = editor.pendingTag?.bubble { keepBubbleClear(bubble) }
+        if let label = editor.lastSymbolLabel, let name = editor.symbol?.name { announce("\(name) placed, \(label)") }
+    }
+
+    /// Pans the canvas so a bubble waiting for its tag sits above the keyboard and the pop-up beside it, never under
+    /// them: its foot no lower than the room the keyboard leaves.
+    private func keepBubbleClear(_ bubble: CanvasRect) {
+        let viewport = editor.viewport
+        let foot = viewport.screenPoint(for: CanvasPoint(x: bubble.maxX, y: bubble.maxY)).y
+        let top = viewport.screenPoint(for: bubble.origin).y
+        let lowest = Double(bounds.height) - Self.keyboardRoom - 16
+        let highest = Double(CanvasEditor.chromeInsets.top) + 8
+        var dy = 0.0
+        if foot > lowest { dy = foot - lowest }
+        if top - dy < highest { dy = top - highest }
+        guard dy > 0.5 else { return }
+        editor.viewport.pan(dx: 0, dy: -dy)
+        viewportJumped()
+    }
+
+    /// The most the keyboard takes of the Duo unfolded, from the foot of the screen.
+    static let keyboardRoom = 360.0
 
     /// Starts a new text box whose first line is centred on a screen point.
     func placeText(at location: CGPoint) {
@@ -1860,6 +1910,7 @@ extension InkCanvasUIView {
         placeTap.isEnabled = placing && !fingerDraws
         updateSheetTap()
         textTap.isEnabled = tool == .textBox && !placing
+        symbolTap.isEnabled = tool == .symbols && !placing
         if placing { resetLengthsAndRegions(keepingMeasure: false) }
         shownViewport = nil
         viewportDidChange()

@@ -446,6 +446,10 @@ public enum InkEvent: Hashable, Sendable {
     case changeSheet(SheetChange)
     /// A shape's size corrected through its tag (#40): the stroke as it now stands, under the same id. Its own undo step.
     case correctStroke(InkStroke)
+    /// A symbol placed (#41): its strokes and text boxes whole, plain ink from then on, with their ids. One undo step;
+    /// with `joiningLast` they join the placement just made (a bubble's tag, typed as it lands) rather than start a new
+    /// one, the way an eraser sweep's hits join its step.
+    case place(strokes: [InkStroke], texts: [TextBox], joiningLast: Bool)
 }
 
 /// The ink, text boxes, dimensions and frames on a canvas, with undo and redo: drawing, erasing, and since #7 moving,
@@ -567,6 +571,8 @@ public struct InkSession: Hashable, Sendable {
         case changeSheet(before: Sheet, after: Sheet, markups: Pieces, motion: SheetMotion)
         /// A shape corrected through its tag: the stroke as it was, and as it is.
         case correctStroke(before: InkStroke, after: InkStroke)
+        /// A symbol placed (#41): its strokes and text boxes, and the tag typed as it landed.
+        case place(Pieces)
     }
 
     public init(ink: Ink = Ink(), texts: [TextBox] = [], dimensions: [CanvasDimension] = [], frames: [Frame] = [],
@@ -802,6 +808,28 @@ public struct InkSession: Hashable, Sendable {
         return !lastChange.isEmpty
     }
 
+    // MARK: Symbols (#41)
+
+    /// Places a symbol's ink, as one undo step: strokes and text boxes like any drawn or typed, numbered from the next
+    /// ids, the strokes' points on the ink grid. With `joiningLast`, they join the placement just made, so a bubble and
+    /// the tag typed as it lands undo together; when the last step is not a placement they start their own. Returns
+    /// what was placed; nothing to place places nothing.
+    @discardableResult
+    public mutating func place(strokes: [SymbolStroke], texts: [SymbolText], colour: MarkupColour,
+                               joiningLast: Bool = false) -> CanvasSelection {
+        let drawn = strokes.filter { !$0.points.isEmpty }.enumerated().map { i, stroke in
+            InkStroke(id: StrokeID(nextID + i), tool: .pen, colour: colour, width: stroke.width,
+                      points: stroke.points.map(\.onInkGrid))
+        }
+        let typed = texts.filter { !$0.text.isEmpty }.enumerated().map { i, text in
+            TextBox(id: TextBoxID(nextTextID + i), origin: text.origin.onInkGrid, size: text.size,
+                    fontSize: text.fontSize, colour: colour, text: text.text)
+        }
+        guard !drawn.isEmpty || !typed.isEmpty else { return .empty }
+        perform(.place(strokes: drawn, texts: typed, joiningLast: joiningLast))
+        return CanvasSelection(strokes: drawn.map(\.id), texts: typed.map(\.id))
+    }
+
     public mutating func undo() {
         guard canUndo else { return }
         perform(.undo)
@@ -930,6 +958,26 @@ public struct InkSession: Hashable, Sendable {
             record(.changeSheet(before: before, after: after, markups: markups, motion: change.motion))
             selectionAfterLastChange = CanvasSelection(sheet: after.id)
             return placeSheet(after, with: markups.moved(by: change.motion))
+        case .place(let strokes, let texts, let joining):
+            guard !strokes.isEmpty || !texts.isEmpty,
+                  strokes.allSatisfy({ !$0.points.isEmpty && $0.id.value >= nextID }),
+                  texts.allSatisfy({ !$0.text.isEmpty && $0.id.value >= nextTextID }) else { return .none }
+            let placed = Pieces(strokes: strokes.sorted { $0.id < $1.id }, texts: texts.sorted { $0.id < $1.id })
+            if let last = placed.strokes.last { nextID = last.id.value + 1 }
+            if let last = placed.texts.last { nextTextID = last.id.value + 1 }
+            insert(placed)
+            if joining, case .place(var earlier)? = undoStack.last {
+                clearRedo()
+                // Grow the placement's step in place, as an eraser sweep grows its own.
+                undoStack.removeLast()
+                earlier.strokes += placed.strokes
+                earlier.texts += placed.texts
+                undoStack.append(.place(earlier))
+                sweepHasEntry = false
+            } else {
+                record(.place(placed))
+            }
+            return placed.addition
         case .correctStroke(let after):
             guard !after.points.isEmpty, let index = ink.index(of: after.id), ink.strokes[index] != after else {
                 return .none
@@ -995,6 +1043,9 @@ public struct InkSession: Hashable, Sendable {
         case .correctStroke(let before, _):
             ink.replace([before])
             return InkChange(added: [before], removed: [before.id])
+        case .place(let placed):
+            take(placed.selection)
+            return placed.removal
         }
     }
 
@@ -1038,6 +1089,9 @@ public struct InkSession: Hashable, Sendable {
         case .correctStroke(_, let after):
             ink.replace([after])
             return InkChange(added: [after], removed: [after.id])
+        case .place(let placed):
+            insert(placed)
+            return placed.addition
         }
     }
 
@@ -1155,7 +1209,7 @@ public struct InkSession: Hashable, Sendable {
         case (.erase(let strokes), true): points(strokes)
         case (.delete(let pieces), true), (.transform(let pieces, _), true): points(pieces.strokes)
         case (.changeSheet(_, _, let pieces, _), true): points(pieces.strokes)
-        case (.duplicate(let pieces, _), false): points(pieces.strokes)
+        case (.duplicate(let pieces, _), false), (.place(let pieces), false): points(pieces.strokes)
         case (.draw(let stroke), false): stroke.points.count
         case (.correctStroke(let before, _), true): before.points.count
         case (.correctStroke(_, let after), false): after.points.count

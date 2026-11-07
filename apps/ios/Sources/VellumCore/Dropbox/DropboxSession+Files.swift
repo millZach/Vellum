@@ -135,6 +135,48 @@ extension DropboxSession {
         return DropboxTree(entries: entries, cursor: page.cursor)
     }
 
+    /// Every file directly inside `path` with its size, content hash and revision (`files/list_folder`, following its
+    /// paging), for the symbol library's sync (#41); nil when nothing is at `path`.
+    public func files(in path: String) async throws(DropboxError) -> [DropboxFile]? {
+        let started = generation
+        guard isSignedIn else { throw .notSignedIn }
+        var response = try await authorizedJSON(DropboxEndpoint.listFolder, [
+            "path": path, "recursive": false, "include_deleted": false,
+        ], started: started, acceptingConflict: true)
+        if response.status == 409 {
+            guard Self.summary(response).contains("not_found") else { throw .unexpectedReply }
+            return nil
+        }
+        var files: [DropboxFile] = []
+        while true {
+            struct Reply: Decodable {
+                struct Entry: Decodable {
+                    let tag: String
+                    let id: String?
+                    let name: String
+                    let path_display: String?
+                    let size: Int?
+                    let content_hash: String?
+                    let rev: String?
+                    enum CodingKeys: String, CodingKey { case tag = ".tag", id, name, path_display, size, content_hash, rev }
+                }
+                let entries: [Entry]
+                let cursor: String
+                let has_more: Bool
+            }
+            guard let reply = try? JSONDecoder().decode(Reply.self, from: response.body) else { throw .unexpectedReply }
+            for entry in reply.entries where entry.tag == "file" {
+                guard let size = entry.size else { continue }
+                let filePath = entry.path_display ?? "\(path)/\(entry.name)"
+                files.append(DropboxFile(id: entry.id ?? filePath, name: entry.name, path: filePath, size: size,
+                                         contentHash: entry.content_hash ?? "", rev: entry.rev ?? ""))
+            }
+            guard reply.has_more else { return files }
+            response = try await authorizedJSON(DropboxEndpoint.listFolderContinue, ["cursor": reply.cursor],
+                                                started: started)
+        }
+    }
+
     /// What changed under the listed folder since `cursor` (`files/list_folder/continue`, following its paging), in
     /// Dropbox's order, deletions included; nil when Dropbox can't say (the cursor was reset, or the folder is gone),
     /// so the folder has to be listed again (#37).

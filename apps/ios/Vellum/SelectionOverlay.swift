@@ -28,8 +28,9 @@ final class SelectionOverlay {
     /// The dashed box on screen, when there is a selection.
     private(set) var box: CGRect?
 
-    init(duplicate: @escaping @MainActor () -> Void, delete: @escaping @MainActor () -> Void) {
-        menu = SelectionMenu(duplicate: duplicate, delete: delete)
+    init(duplicate: @escaping @MainActor () -> Void, delete: @escaping @MainActor () -> Void,
+         saveSymbol: @escaping @MainActor () -> Void) {
+        menu = SelectionMenu(duplicate: duplicate, delete: delete, saveSymbol: saveSymbol)
         for shape in [loopLayer, boxLayer] {
             shape.actions = noAnimations
             shape.fillColor = nil
@@ -87,8 +88,9 @@ final class SelectionOverlay {
         CATransaction.commit()
     }
 
-    /// Shows the selection around `ink` (its bounds on screen), or nothing; the menu only when `showsMenu`.
-    func show(ink: CGRect?, count: Int, showsMenu: Bool, in bounds: CGRect) {
+    /// Shows the selection around `ink` (its bounds on screen), or nothing; the menu only when `showsMenu`, with Save as
+    /// symbol when `canSaveSymbol` (ink or text selected, #41).
+    func show(ink: CGRect?, count: Int, showsMenu: Bool, canSaveSymbol: Bool = false, in bounds: CGRect) {
         // Nothing selected and nothing shown: a pan or a pinch without a selection touches no layer.
         if ink == nil || count == 0, box == nil { return }
         CATransaction.begin()
@@ -111,6 +113,7 @@ final class SelectionOverlay {
         menu.isHidden = !showsMenu
         guard showsMenu else { return }
         menu.count = count
+        menu.canSaveSymbol = canSaveSymbol
         let size = menu.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         let chrome = CanvasEditor.chromeInsets
         let (top, left, bottom, right) = (CGFloat(chrome.top), CGFloat(chrome.left), CGFloat(chrome.bottom),
@@ -185,21 +188,30 @@ final class SelectionOverlay {
     }
 }
 
-/// The selection's menu: how many things are selected, Duplicate and Delete. Dark, as the prototype's pop-up is, and a
-/// lighter grey on the dark canvas so it stands off it.
+/// The selection's menu: how many things are selected, Duplicate and Delete, and since #41 Save as symbol when ink or
+/// text is selected. Dark, as the prototype's pop-up is, and a lighter grey on the dark canvas so it stands off it.
 @MainActor
 final class SelectionMenu: UIView {
     private let countLabel = UILabel()
     private let duplicateAction: @MainActor () -> Void
     private let deleteAction: @MainActor () -> Void
+    private let saveSymbolAction: @MainActor () -> Void
+    private var saveSymbolButton: UIButton!
 
     var count = 0 {
         didSet { countLabel.text = "\(count) selected" }
     }
 
-    init(duplicate: @escaping @MainActor () -> Void, delete: @escaping @MainActor () -> Void) {
+    /// Whether Save as symbol shows: ink or text is selected, not a sheet (#41).
+    var canSaveSymbol = false {
+        didSet { if canSaveSymbol != oldValue { saveSymbolButton.isHidden = !canSaveSymbol } }
+    }
+
+    init(duplicate: @escaping @MainActor () -> Void, delete: @escaping @MainActor () -> Void,
+         saveSymbol: @escaping @MainActor () -> Void) {
         duplicateAction = duplicate
         deleteAction = delete
+        saveSymbolAction = saveSymbol
         super.init(frame: .zero)
         backgroundColor = UIColor { traits in
             traits.userInterfaceStyle == .dark ? UIColor(hex: 0x3A3B40) : UIColor(hex: 0x1D1D1F)
@@ -216,6 +228,10 @@ final class SelectionMenu: UIView {
             button("Duplicate", hint: "Copies the selection beside it", action: #selector(duplicateTapped(_:))),
             button("Delete", hint: "Deletes the selection", action: #selector(deleteTapped(_:))),
         ])
+        saveSymbolButton = button("Save as symbol", hint: "Keeps the selected ink in the symbol library, for every canvas",
+                                  action: #selector(saveSymbolTapped(_:)))
+        saveSymbolButton.isHidden = true
+        stack.addArrangedSubview(saveSymbolButton)
         stack.axis = .horizontal
         stack.spacing = 4
         stack.alignment = .center
@@ -254,6 +270,7 @@ final class SelectionMenu: UIView {
 
     @objc private func duplicateTapped(_ sender: UIButton) { duplicateAction() }
     @objc private func deleteTapped(_ sender: UIButton) { deleteAction() }
+    @objc private func saveSymbolTapped(_ sender: UIButton) { saveSymbolAction() }
 }
 
 /// What sits under the top bar while a sheet is selected (#44), as the prototype at `prototype/sheet-rotate` has it: the

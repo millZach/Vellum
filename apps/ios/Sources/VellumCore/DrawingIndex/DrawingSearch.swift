@@ -193,6 +193,13 @@ public struct DrawingSearchIndex: Sendable {
         return DrawingSearchResult(query: query, matches: keys.map { inOrder[Int($0 & 0xFFFF_FFFF)] }, scanned: scanned)
     }
 
+    /// One keystroke's search, as the app makes it and the timings measure it: when `query` adds to the last one
+    /// (`narrows`), only the last matches are looked at; otherwise every entry.
+    public func keystroke(_ query: String, after last: DrawingSearchResult?) -> DrawingSearchResult {
+        if let last, Self.narrows(query, from: last.query) { return search(query, within: last.matches) }
+        return search(query)
+    }
+
     /// Whether `query`'s matches are all among `previous`'s: true when it is `previous` with more typed on the end,
     /// so every word of `previous` is a word of `query` or the start of one.
     public static func narrows(_ query: String, from previous: String) -> Bool {

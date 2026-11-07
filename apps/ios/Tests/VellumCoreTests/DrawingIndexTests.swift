@@ -312,6 +312,33 @@ final class DrawingIndexTests: XCTestCase {
         XCTAssertEqual(copy?.entries.count, 10)
     }
 
+    /// A new generation whose shard is named right but can't be read keeps the copy: nothing is swapped in.
+    func testAShardThatCannotBeReadIsNeverSwappedIn() async throws {
+        let dropbox = dropboxWithFixture()
+        let keeper = makeKeeper(dropbox, temporaryFolder())
+        _ = await keeper.refresh()
+        for (bytes, expected) in [
+            (Array(#"{"format":1,"drawings":"not a list"}"#.utf8), DrawingIndexRefresh.unreadableShard(generation: 2)),
+            (Array(#"{"format":2,"drawings":[]}"#.utf8), DrawingIndexRefresh.newerFormat(2)),
+        ] {
+            let file = "shards/\(DrawingIndexFormat.contentName(of: bytes)).json"
+            var manifest = IndexFixture.manifest
+            manifest.generation = 2
+            manifest.shards[2].file = file
+            manifest.shards[2].bytes = bytes.count
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            dropbox.changeOnTheLaptop("/Vellum/Index/" + file, to: bytes)
+            dropbox.changeOnTheLaptop("/Vellum/Index/index.json", to: [UInt8](try encoder.encode(manifest)))
+            let result = await keeper.refresh()
+            XCTAssertEqual(result, expected)
+            let copy = await keeper.load()
+            XCTAssertEqual(copy?.manifest.generation, 1)
+            XCTAssertEqual(copy?.entries.count, 10)
+            XCTAssertEqual(copy?.entries.filter { $0.project == "Made-up School Addition" }.count, 3)
+        }
+    }
+
     func testNoIndexInDropboxYet() async {
         let dropbox = MadeUpDropbox()
         let keeper = makeKeeper(dropbox, temporaryFolder())
@@ -401,20 +428,23 @@ final class DrawingIndexTests: XCTestCase {
         XCTAssertEqual(markers(pump, online: false, onDuo: [IndexFixture.entry("E-211").pdf!.contentHash!]), [.notOnThisDuo])
     }
 
-    func testAnUnreadEntryIsAQuietRowByNameAndFolder() {
-        // A DWG online-only on the laptop and not downloaded yet: no layout, no fields.
+    func testAnUnreadEntryIsAQuietRowByNameAndPath() {
+        // A DWG online-only on the laptop and not downloaded yet. The indexer fills its number in from the file name
+        // (fieldsFrom "name"); the row is still the quiet one, by name and path, because the file is unread.
         let unread = DrawingEntry(id: "0123456789abcdef", path: "/Projects/Made-up Plant Upgrade/Electrical/E-299.dwg",
                                   name: "E-299.dwg", folder: "/Projects/Made-up Plant Upgrade/Electrical",
                                   project: "Made-up Plant Upgrade", projectPath: "/Projects/Made-up Plant Upgrade",
+                                  number: "E-299", fieldsFrom: "name",
                                   dwg: DrawingEntry.DWG(path: "/Projects/Made-up Plant Upgrade/Electrical/E-299.dwg",
                                                         size: 900, read: false))
         XCTAssertEqual(DrawingMarker.of(unread, online: true, pdfsOnThisDuo: []), [.noPDFYet, .notReadYet])
-        let row = DrawingRowText(unread)
-        XCTAssertTrue(row.quiet)
-        XCTAssertNil(row.number)
-        XCTAssertEqual(row.title, "E-299.dwg")
-        XCTAssertNil(row.details)
-        XCTAssertEqual(row.place, "/Projects/Made-up Plant Upgrade/Electrical")
+        XCTAssertEqual(DrawingRowText(unread), DrawingRowText(
+            number: nil, title: "E-299.dwg", details: nil,
+            place: "/Projects/Made-up Plant Upgrade/Electrical/E-299.dwg", quiet: true))
+        // The fixture's I-302: its DWG is read, its PDF is not, so it is quiet too, as the format's table says.
+        XCTAssertEqual(DrawingRowText(IndexFixture.entry("I-302")), DrawingRowText(
+            number: nil, title: "I-302.dwg", details: nil,
+            place: "/Projects/Made-up Plant Upgrade/Instrumentation/I-302.dwg", quiet: true))
         XCTAssertEqual(DrawingMarker.allCases.map(\.text), ["No PDF yet", "PDF only · no DWG", "Not read yet", "Not on this Duo"])
     }
 
@@ -482,6 +512,20 @@ final class DrawingIndexTests: XCTestCase {
         XCTAssertNil(index.rank(of: 4, for: "E-2"))
         // Natural order within a rank: E-2, E-9, E-10, not E-10 first.
         XCTAssertEqual(numbers("E", in: entries), ["E-2", "E-9", "E-10", "E-20", "E-201", "X-1"])
+    }
+
+    /// The one keystroke policy the app and the timings share: narrow to the last matches when the query adds to the
+    /// last one, else search everything.
+    func testAKeystrokeNarrowsOnlyWhenItAddsToTheLastQuery() {
+        let index = DrawingSearchIndex(IndexFixture.entries)
+        let first = index.keystroke("E", after: nil)
+        XCTAssertEqual(first.scanned, 10)
+        let typedOn = index.keystroke("E-2", after: first)
+        XCTAssertEqual(typedOn.scanned, first.matches.count)
+        XCTAssertEqual(typedOn.matches, index.search("E-2").matches)
+        let backspaced = index.keystroke("E", after: typedOn)
+        XCTAssertEqual(backspaced.scanned, 10)
+        XCTAssertEqual(backspaced.matches, first.matches)
     }
 
     func testTypingOnNarrowsTheLastMatches() {

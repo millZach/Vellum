@@ -4,7 +4,8 @@ import VellumCore
 
 /// The Drawings tab's search (#68): the Duo's copy of the drawing index, kept fresh with `DrawingIndexKeeper`, and the
 /// search over it. Nothing heavy runs on the main thread: reading the copy, building the search and every keystroke's
-/// search run off it, and the main thread only takes the answer, at most `shown` rows of it.
+/// search run off it, and the main thread only takes the answer. Every match is reachable: the list shows `page` rows
+/// and shows the next page as it is scrolled to the end.
 ///
 /// The copy is refreshed on launch, when the app comes back to the screen, when the connection returns, when Zach
 /// signs in to Dropbox and on a pull to refresh; one refresh runs at a time, and one asked for meanwhile runs after it.
@@ -19,9 +20,21 @@ final class DrawingIndexModel {
         case ready
     }
 
-    /// The most rows shown at once: a query that matches more says how many and asks for more letters.
-    static let shown = 300
+    /// Rows added to the list at a time: the first page as a search's answer comes in, the next as the list reaches its
+    /// end, so a keystroke's update stays small however many entries match.
+    static let page = 200
+
+    /// The copy's entries with the search's latest answer over them, published as one value, so a row never reads an
+    /// answer's offset into another generation's entries.
+    struct Listing {
+        let entries: [DrawingEntry]
+        let index: DrawingSearchIndex
+        let result: DrawingSearchResult
+        let generation: Int
+        let updated: Date?
+    }
     private static let toldFormatKey = "drawingIndexToldFormat"
+    private static let toldUnreadableKey = "drawingIndexToldUnreadable"
 
     private(set) var copyState = CopyState.loading
     /// What the last refresh found; nil until one has finished.
@@ -36,25 +49,16 @@ final class DrawingIndexModel {
     var query = "" {
         didSet { if query != oldValue { search() } }
     }
-    /// The rows shown for `resultQuery`, best first, as indexes into the copy's entries.
-    private(set) var results: [Int32] = []
-    private(set) var resultQuery = ""
-    /// How many entries match `resultQuery`, shown or not.
-    private(set) var matchCount = 0
-    /// Entries in the copy.
-    private(set) var total = 0
-    /// When the laptop wrote the copy's generation.
-    private(set) var updated: Date?
-    /// Goes up each time a new copy is read, so rows reload.
-    private(set) var generation = 0
+    /// The copy and the latest search's answer; nil until a copy is read.
+    private(set) var listing: Listing?
+    /// How many of the matches the list shows now.
+    private(set) var limit = DrawingIndexModel.page
     /// Content hashes of the PDFs kept on the Duo (`SheetPDFs`), for "Not on this Duo".
     private(set) var pdfsOnThisDuo: Set<String> = []
     /// The row picked on the unfolded screen.
     var selection: String?
 
-    @ObservationIgnored private var entries: [DrawingEntry] = []
-    @ObservationIgnored private var index: DrawingSearchIndex?
-    @ObservationIgnored private var lastResult: DrawingSearchResult?
+    @ObservationIgnored private var generation = 0
     @ObservationIgnored private var searching: Task<Void, Never>?
     @ObservationIgnored private(set) var keeper: DrawingIndexKeeper?
     @ObservationIgnored private var connection: ConnectionWatcher?
@@ -65,11 +69,31 @@ final class DrawingIndexModel {
 
     init() {}
 
-    func entry(_ index: Int32) -> DrawingEntry { entries[Int(index)] }
+    /// Every match of the latest search, best first, as offsets into `listing`'s entries.
+    var matches: [Int32] { listing?.result.matches ?? [] }
+    /// The query the answer is for.
+    var resultQuery: String { listing?.result.query ?? "" }
+    var matchCount: Int { matches.count }
+    /// Entries in the copy.
+    var total: Int { listing?.entries.count ?? 0 }
+    /// When the laptop wrote the copy's generation.
+    var updated: Date? { listing?.updated }
+
+    /// The rows the list shows now: the matches up to `limit`, each with its entry from the same listing.
+    var rows: [(offset: Int32, entry: DrawingEntry)] {
+        guard let listing else { return [] }
+        return listing.result.matches.prefix(limit).map { ($0, listing.entries[Int($0)]) }
+    }
+
+    /// The list reached its end: show the next page of matches.
+    func showMore() {
+        guard limit < matchCount else { return }
+        limit += Self.page
+    }
 
     var selectedEntry: DrawingEntry? {
         guard let selection else { return nil }
-        return entries.first { $0.id == selection }
+        return listing?.entries.first { $0.id == selection }
     }
 
     // MARK: Starting and refreshing
@@ -113,6 +137,7 @@ final class DrawingIndexModel {
             switch outcome {
             case .updated: await reload()
             case .newerFormat(let format): tell(format)
+            case .unreadableShard(let generation): tellUnreadable(generation)
             default: break
             }
         } while again
@@ -126,9 +151,9 @@ final class DrawingIndexModel {
         Task { await notePDFsOnThisDuo() }
     }
 
-    /// Zach signed in to Dropbox (or out): a refresh that found no sign-in runs again.
+    /// Zach signed in to Dropbox: every sign-in refreshes the copy, as signing out keeps it.
     func signInChanged(signedIn: Bool) {
-        guard signedIn, lastRefresh == nil || lastRefresh == .notSignedIn else { return }
+        guard signedIn else { return }
         Task { await refresh() }
     }
 
@@ -139,27 +164,30 @@ final class DrawingIndexModel {
         Task { await notePDFsOnThisDuo() }
     }
 
-    /// Reads the copy and builds its search off the main thread, then searches it again for what is typed.
+    /// Reads the copy, builds its search and searches it for what is typed, all off the main thread, then shows the
+    /// entries and the answer together.
     private func reload() async {
         guard let keeper else { return }
-        let loaded = await Task.detached(priority: .userInitiated) { () -> (DrawingIndexCopy, DrawingSearchIndex)? in
+        let query = self.query
+        typealias Loaded = (DrawingIndexCopy, DrawingSearchIndex, DrawingSearchResult)
+        let loaded = await Task.detached(priority: .userInitiated) { () -> Loaded? in
             guard let copy = await keeper.load() else { return nil }
-            return (copy, DrawingSearchIndex(copy.entries))
+            let index = DrawingSearchIndex(copy.entries)
+            return (copy, index, index.keystroke(query, after: nil))
         }.value
         guard let loaded else {
             if copyState != .ready { copyState = .none }
             return
         }
-        let (copy, index) = loaded
-        entries = copy.entries
-        self.index = index
-        lastResult = nil
-        total = copy.entries.count
-        updated = copy.manifest.updatedDate
+        let (copy, index, result) = loaded
         generation += 1
+        listing = Listing(entries: copy.entries, index: index, result: result, generation: generation,
+                          updated: copy.manifest.updatedDate)
+        limit = Self.page
         copyState = .ready
-        if let selection, !entries.contains(where: { $0.id == selection }) { self.selection = nil }
-        search()
+        if let selection, !copy.entries.contains(where: { $0.id == selection }) { self.selection = nil }
+        // Typed while it was loading: search again for what is typed now.
+        if query != self.query { search() }
     }
 
     /// Says once per format that the laptop wrote one this Vellum can't read.
@@ -169,6 +197,16 @@ final class DrawingIndexModel {
         UserDefaults.standard.set(format, forKey: Self.toldFormatKey)
         notice = copyState == .ready
             ? "The laptop now writes the drawing index in format \(format), newer than this Vellum reads. You're searching the copy on this Duo; install the latest Vellum to see what changed."
+            : nil
+    }
+
+    /// Says once per manifest generation that the laptop wrote a shard this Vellum can't read; the copy is kept.
+    private func tellUnreadable(_ generation: Int) {
+        let told = UserDefaults.standard.integer(forKey: Self.toldUnreadableKey)
+        guard told != generation else { return }
+        UserDefaults.standard.set(generation, forKey: Self.toldUnreadableKey)
+        notice = copyState == .ready
+            ? "The laptop's latest drawing index has a part this Vellum can't read, so you're searching the copy on this Duo from before it. It updates once the laptop writes the index again."
             : nil
     }
 
@@ -184,25 +222,24 @@ final class DrawingIndexModel {
 
     // MARK: Searching
 
-    /// Searches off the main thread; a keystroke that adds to the last query looks only at its matches. Only the
-    /// latest query's answer is shown.
+    /// Searches off the main thread with the same keystroke policy the timings measure (`DrawingSearchIndex.keystroke`):
+    /// a keystroke that adds to the last query looks only at its matches. Only the latest query's answer is shown, and
+    /// only over the entries it was searched in.
     private func search() {
-        guard let index else { return }
+        guard let listing else { return }
         let query = self.query
-        let last = lastResult
+        let index = listing.index
+        let last = listing.result
         searching?.cancel()
         searching = Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) { () -> DrawingSearchResult in
-                if let last, DrawingSearchIndex.narrows(query, from: last.query) {
-                    return index.search(query, within: last.matches)
-                }
-                return index.search(query)
+                index.keystroke(query, after: last)
             }.value
-            guard let self, !Task.isCancelled, query == self.query else { return }
-            lastResult = result
-            results = Array(result.matches.prefix(Self.shown))
-            matchCount = result.matches.count
-            resultQuery = query
+            guard let self, !Task.isCancelled, query == self.query,
+                  let current = self.listing, current.generation == listing.generation else { return }
+            self.listing = Listing(entries: current.entries, index: current.index, result: result,
+                                   generation: current.generation, updated: current.updated)
+            limit = Self.page
         }
     }
 
@@ -213,8 +250,8 @@ final class DrawingIndexModel {
         Task { await notePDFsOnThisDuo() }
     }
 
-    func debugThumbnailNames() -> [String] { entries.compactMap(\.thumbnail) }
+    func debugThumbnailNames() -> [String] { listing?.entries.compactMap(\.thumbnail) ?? [] }
 
-    func debugSelect(number: String) { selection = entries.first { $0.number == number }?.id }
+    func debugSelect(number: String) { selection = listing?.entries.first { $0.number == number }?.id }
     #endif
 }

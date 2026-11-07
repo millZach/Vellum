@@ -37,8 +37,8 @@ public enum DrawingMarker: String, CaseIterable, Sendable, Hashable {
 }
 
 /// What a row of the Drawings tab says about an entry (#68): its number and title, then rev, scale and date, then its
-/// project. An entry with no title block fields yet (its file unread on the laptop, or nothing found) is a quiet row:
-/// its file name, then the folder it is in.
+/// project. An entry whose DWG or PDF the laptop has not read yet (`read: false`, an online-only file waiting for its
+/// download) is a quiet row: its file name, then its path, and none of its fields, even a number taken from its name.
 public struct DrawingRowText: Equatable, Sendable {
     /// The drawing number, or nil.
     public var number: String?
@@ -46,9 +46,9 @@ public struct DrawingRowText: Equatable, Sendable {
     public var title: String
     /// `Rev A · 1/4" = 1'-0" · 2026-10-02`, with only the parts the entry has; nil when it has none.
     public var details: String?
-    /// The project, else the folder.
+    /// The project, else the folder; for a quiet row, the path.
     public var place: String
-    /// No title block fields: shown quietly, by file name and folder.
+    /// Its DWG or PDF not read yet: shown quietly, by file name and path.
     public var quiet: Bool
 
     public init(number: String?, title: String, details: String?, place: String, quiet: Bool) {
@@ -60,7 +60,14 @@ public struct DrawingRowText: Equatable, Sendable {
     }
 
     public init(_ entry: DrawingEntry) {
-        quiet = entry.number == nil && entry.title == nil
+        quiet = entry.dwg?.read == false || entry.pdf?.read == false
+        if quiet {
+            number = nil
+            title = entry.name
+            details = nil
+            place = entry.path
+            return
+        }
         number = entry.number
         title = entry.title ?? entry.name
         var parts: [String] = []
@@ -69,6 +76,6 @@ public struct DrawingRowText: Equatable, Sendable {
         if let date = entry.date { parts.append(date) }
         details = parts.isEmpty ? nil : parts.joined(separator: " · ")
         let folder = entry.folder ?? String(entry.path.prefix(upTo: entry.path.lastIndex(of: "/") ?? entry.path.endIndex))
-        place = quiet ? (folder.isEmpty ? "/" : folder) : (entry.project ?? (folder.isEmpty ? "/" : folder))
+        place = entry.project ?? (folder.isEmpty ? "/" : folder)
     }
 }

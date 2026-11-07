@@ -31,6 +31,9 @@ public enum DrawingIndexRefresh: Equatable, Sendable {
     case offline
     /// Dropbox did not answer, or sent something that is not the index; the copy is kept as it was.
     case failed
+    /// The new generation names a shard that is not the index's shape; nothing was swapped in, and the copy is kept as
+    /// it was (ADR-0017). `generation` is the manifest's that named it.
+    case unreadableShard(generation: Int)
     /// Another refresh is running.
     case busy
 }
@@ -162,6 +165,21 @@ public actor DrawingIndexKeeper {
                         try DurableFile.writeAtomically(shard, to: root.appendingPathComponent(file))
                     }
                 case .swap(let delete):
+                    guard case .success(let manifest) = read else { return .failed }
+                    // Every shard of the new generation is read before it is promoted: one the Duo can't read (named
+                    // right, but damaged at the laptop, or a newer format) would leave drawings out of the copy.
+                    for shard in manifest.shards {
+                        do {
+                            guard let bytes = try? DurableFile.read(root.appendingPathComponent(shard.file)) else {
+                                return .failed
+                            }
+                            _ = try DrawingIndexFormat.shard(from: bytes)
+                        } catch .newerFormat(let format) {
+                            return .newerFormat(format)
+                        } catch {
+                            return .unreadableShard(generation: manifest.generation)
+                        }
+                    }
                     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
                     try DurableFile.writeAtomically(bytes, to: manifestURL)
                     for file in delete { try? FileManager.default.removeItem(at: root.appendingPathComponent(file)) }

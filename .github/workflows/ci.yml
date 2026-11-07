@@ -43,6 +43,14 @@ jobs:
       - name: Compare the drawing search timings with the baseline
         if: always()
         run: python3 apps/ios/Scripts/perf-compare.py drawing-index "$RUNNER_TEMP/drawing-index.json"
+      - name: Keep the drawing search timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: drawing-search-timings
+          path: ${{ runner.temp }}/drawing-index.json
+          if-no-files-found: warn
+          retention-days: 14
 
   simulator-build:
     name: iOS simulator build (macOS)

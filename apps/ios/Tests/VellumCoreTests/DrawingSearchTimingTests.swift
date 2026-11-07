@@ -84,13 +84,10 @@ final class DrawingSearchTimingTests: XCTestCase {
         (1...text.count).map { String(text.prefix($0)) }
     }
 
-    /// One keystroke's search, narrowed to the last matches when it adds to the last query, as the app does.
+    /// One keystroke's search, as the app makes it (`DrawingSearchIndex.keystroke`).
     static func search(_ index: DrawingSearchIndex, _ query: String, after last: DrawingSearchResult?)
         -> DrawingSearchResult {
-        if let last, DrawingSearchIndex.narrows(query, from: last.query) {
-            return index.search(query, within: last.matches)
-        }
-        return index.search(query)
+        index.keystroke(query, after: last)
     }
 
     static func slug(_ text: String) -> String {

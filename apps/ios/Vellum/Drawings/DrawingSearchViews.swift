@@ -47,7 +47,7 @@ struct DrawingSearchView: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    if model.results.isEmpty, !model.resultQuery.isEmpty {
+                    if model.matches.isEmpty, !model.resultQuery.isEmpty {
                         Text("No drawing matches “\(model.resultQuery)”.\nTry a number like E-2, a word from the title, or the project.")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
@@ -55,21 +55,16 @@ struct DrawingSearchView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 28)
                     } else {
+                        // Every match is reachable: the next page of rows comes as the last one shown appears.
+                        let rows = model.rows
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(model.results.enumerated()), id: \.element) { offset, index in
-                                DrawingRow(model: model, entry: model.entry(index), unfolded: unfolded,
-                                           separator: offset > 0)
+                            ForEach(Array(rows.enumerated()), id: \.element.offset) { place, row in
+                                DrawingRow(model: model, entry: row.entry, unfolded: unfolded, separator: place > 0)
+                                    .onAppear { if place == rows.count - 1 { model.showMore() } }
                             }
                         }
                         .background(Color(uiColor: .secondarySystemGroupedBackground),
                                     in: RoundedRectangle(cornerRadius: 12))
-                        if model.matchCount > model.results.count {
-                            Text("Showing the first \(model.results.count) of \(model.matchCount). Type more to narrow it down.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 4)
-                                .padding(.top, 8)
-                        }
                     }
                     DrawingLegend().padding(.top, 12)
                     NavigationLink {
@@ -302,6 +297,8 @@ struct DrawingThumbnailView: View {
     let height: CGFloat
     @Environment(\.colorScheme) private var colorScheme
     @State private var image: UIImage?
+    /// The thumbnail `image` is, so a row given another drawing never shows the last one's.
+    @State private var shownName: String?
 
     var body: some View {
         ZStack {
@@ -317,12 +314,17 @@ struct DrawingThumbnailView: View {
         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color(uiColor: .separator)))
         .accessibilityHidden(true)
         .task(id: "\(name ?? "")-\(model.online)") {
+            if shownName != name {
+                image = nil
+                shownName = name
+            }
             guard let name, let keeper = model.keeper else { return }
             if let cached = DrawingThumbnails.shared.cached(name) {
                 image = cached
                 return
             }
-            image = await DrawingThumbnails.shared.load(name, keeper: keeper, online: model.online)
+            let loaded = await DrawingThumbnails.shared.load(name, keeper: keeper, online: model.online)
+            if !Task.isCancelled, shownName == name, let loaded { image = loaded }
         }
     }
 }

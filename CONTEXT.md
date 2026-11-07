@@ -252,6 +252,14 @@ _Avoid_: index file, header, catalog
 One project's drawings in the drawing index, a file in `Vellum/Index/shards` named by the hash of its bytes, so an unchanged project keeps its name and the Duo downloads only shards it has not got.
 _Avoid_: page, chunk, part (a log part is the ink log's)
 
+**Index copy**:
+The Duo's copy of the drawing index, in the app's Application Support folder: the index manifest it was last swapped in with, the index shards it names and the thumbnails rows have shown. It is searched on the Drawings tab, offline too, and refreshed with the minimum download; a refresh swaps a new generation in only once every shard it names is on the Duo (ADR-0010's #68 amendment).
+_Avoid_: cache (the system may clear Caches; the copy is not there), local index, mirror
+
+**Drawing marker**:
+A short label on a row of the Drawings tab's search saying what opening that drawing will meet: "No PDF yet" (a DWG with no plot), "PDF only · no DWG", "Not read yet" (its file is an online-only file the laptop indexer has not read yet; a row with no title block fields shows its file name and folder instead) and, offline, "Not on this Duo" (its PDF has never been downloaded to the Duo).
+_Avoid_: badge, tag (a tag is the number shown while drawing), status
+
 **Plot**:
 The PDF a drawing's DWG was plotted to, which the drawing index pairs with it: by the PDF's plot metadata naming the DWG, by the same name nearby, or by the same drawing number in the same project. A drawing with none has no PDF yet; a PDF with no DWG is "PDF only, no DWG".
 _Avoid_: print, export, sheet (a sheet is a placed PDF page)

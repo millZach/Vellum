@@ -33,6 +33,24 @@ jobs:
           swift --version
       - name: Run the VellumCore tests
         run: swift test --package-path apps/ios
+      # The drawing search on a made-up 20,000-drawing index (#68): load, keystroke and full-scan times and resident
+      # memory, in an optimised build as the app runs, compared with docs/perf/baselines/drawing-index.json. Timings
+      # never fail the build; the search's counts are budgets in the run above.
+      - name: Time the drawing search on a made-up 20,000-drawing index (Release)
+        run: |
+          VELLUM_PERF_OUT="$RUNNER_TEMP/drawing-index.json" swift test -c release -Xswiftc -enable-testing \
+            --package-path apps/ios --filter DrawingSearchTimingTests
+      - name: Compare the drawing search timings with the baseline
+        if: always()
+        run: python3 apps/ios/Scripts/perf-compare.py drawing-index "$RUNNER_TEMP/drawing-index.json"
+      - name: Keep the drawing search timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: drawing-search-timings
+          path: ${{ runner.temp }}/drawing-index.json
+          if-no-files-found: warn
+          retention-days: 14
 
   simulator-build:
     name: iOS simulator build (macOS)
@@ -94,7 +112,7 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Capture every tab and the Home Screen unfolded, in light and dark
+      - name: Capture every tab and the Home Screen unfolded, in light and dark, and the drawing search folded too
         run: PART=captures sh apps/ios/Scripts/capture-duo.sh .build-captures
       # Timings are recorded and compared with docs/perf/baselines (docs/perf/README.md); they never fail the build.
       - name: Compare canvas frame timings with the baseline

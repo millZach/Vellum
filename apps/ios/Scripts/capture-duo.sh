@@ -1,5 +1,5 @@
 #!/bin/sh
-# Captures the canvas screen, the Canvases list, a kill-and-reopen of a canvas being drawn, Draw with finger, snap, lasso and text boxes, measure, dimension, frame and window, placing sheets, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
+# Captures the canvas screen, the Canvases list, the Drawings tab's search unfolded and folded, a kill-and-reopen of a canvas being drawn, Draw with finger, snap, lasso and text boxes, measure, dimension, frame and window, placing sheets, and every other tab of Vellum on a headless iPhone Duo simulator, unfolded, in light and dark, without the Simulator
 # app. The fold is moved by Scripts/duo/posture.m, a simulator-side tool that calls SpringBoard's display tool service,
 # the way Sotto captured its Duo layouts (Sotto tag prototype/iphone-duo-layout).
 # usage: capture-duo.sh [output folder]   (default .build-captures)
@@ -270,6 +270,38 @@ for appearance in light dark; do
     sips -g pixelWidth -g pixelHeight "$file" | tail -2 | tr '\n' ' '; echo
   done
 done
+
+# The drawing index's search on the Drawings tab (#68), unfolded and folded, in light and dark. The Debug-only
+# `--ui-index` (Vellum/Drawings/DrawingIndexSetup.swift) serves the laptop indexer's made-up index
+# (laptop/tests/fixtures/drawing-index, copied into the app's Documents folder here) from a made-up Dropbox: the copy
+# refreshed online, then the Duo offline with "plant" typed and E-210 picked, so every marker shows; Dropbox with no
+# index yet; and offline with no copy on the Duo. Folded is the cover screen, display 1.
+index_capture() {
+  posture=$1; name=$2; shift 2
+  if [ "$posture" = folded ]; then position=closed; screen=1; else position=open; screen=$display; fi
+  xcrun simctl spawn "$udid" "$tool" -position=$position -duration=0.3 -wait >/dev/null
+  sleep 1
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  xcrun simctl launch "$udid" "$bundle" --ui-tab drawings --ui-dropbox folders "$@" >/dev/null
+  sleep "${WAIT:-6}"
+  file="$out/$posture-$name-$appearance.png"
+  xcrun simctl io "$udid" screenshot --display=$screen "$file"
+  printf '%s ' "$file"; sips -g pixelWidth -g pixelHeight "$file" | tail -2 | tr '\n' ' '; echo
+}
+data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+rm -rf "$data/Documents/capture-index"
+mkdir -p "$data/Documents"
+cp -R ../../laptop/tests/fixtures/drawing-index "$data/Documents/capture-index"
+for appearance in light dark; do
+  xcrun simctl ui "$udid" appearance "$appearance"
+  for posture in unfolded folded; do
+    index_capture "$posture" drawings-search --ui-index fixture-offline --ui-search plant --ui-select E-210
+    index_capture "$posture" drawings-no-index --ui-index none
+    index_capture "$posture" drawings-offline-no-copy --ui-index offline
+  done
+done
+xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+sleep 1
 
 # Draw with finger (#24), in light and dark. The Debug-only `--ui-draw-with-finger` turns the switch on for that
 # launch only (a registered default, never saved). The Settings sheet with the switch on, and a new canvas where the

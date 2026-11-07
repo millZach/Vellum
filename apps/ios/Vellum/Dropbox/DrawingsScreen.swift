@@ -3,17 +3,18 @@ import SwiftUI
 import UIKit
 import VellumCore
 
-/// The Drawings tab. Until the drawing index exists (ADR-0007) it shows Zach's Dropbox: Connect Dropbox while signed
-/// out, then the top-level folders, which proves Vellum's full Dropbox access. Settings, with Sign Out, opens from the
-/// toolbar. Browsing deeper and placing PDFs is #11.
+/// The Drawings tab: the search over the Duo's copy of the drawing index (#68, `DrawingSearchView`), or, while
+/// Vellum isn't signed in to Dropbox, Connect Dropbox. Browsing Zach's Dropbox folders opens from under the search.
+/// Settings, with Sign Out, opens from the toolbar.
 struct DrawingsScreen: View {
+    let index: DrawingIndexModel
     @State private var dropbox = DropboxConnection.app
     /// Debug builds accept `--ui-settings` to open with the Settings sheet up, for the captures.
     @State private var showsSettings = DrawingsScreen.launchesWithSettings
 
     var body: some View {
         NavigationStack {
-            DropboxFoldersView(dropbox: dropbox)
+            content
                 .navigationTitle("Drawings")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -21,6 +22,20 @@ struct DrawingsScreen: View {
                     }
                 }
                 .sheet(isPresented: $showsSettings) { SettingsSheet(dropbox: dropbox) }
+        }
+        .task { await dropbox.appeared() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch dropbox.phase {
+        case .notSetUp, .signedOut, .signingIn:
+            DropboxFoldersView(dropbox: dropbox)
+        case .checkingSignIn:
+            // Only a moment, reading the Keychain; a copy already read shows meanwhile.
+            if index.copyState == .ready { DrawingSearchView(model: index, dropbox: dropbox) } else { Color.clear }
+        case .loadingFolders, .signedIn:
+            DrawingSearchView(model: index, dropbox: dropbox)
         }
     }
 }
@@ -230,5 +245,5 @@ extension DrawingsScreen {
 }
 
 #Preview(traits: .fixedLayout(width: 951, height: 669)) {
-    DrawingsScreen()
+    DrawingsScreen(index: DrawingIndexModel())
 }

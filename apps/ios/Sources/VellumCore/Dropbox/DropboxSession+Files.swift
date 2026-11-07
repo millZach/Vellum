@@ -177,6 +177,26 @@ extension DropboxSession {
         }
     }
 
+    /// The file at `path` as it is now (`files/download`, one request), for the drawing index's shards and thumbnails
+    /// (#68), whose names are the hash of their bytes, so the caller checks what came down by its name; nil when
+    /// nothing is at `path`.
+    public func download(path: String) async throws(DropboxError) -> Data? {
+        let started = generation
+        guard isSignedIn else { throw .notSignedIn }
+        guard let header = Self.apiArgument(["path": path]) else { throw .unexpectedReply }
+        let response = try await authorized(started: started, acceptingConflict: true) { tokens in
+            DropboxHTTPRequest(url: DropboxEndpoint.download, headers: [
+                "Authorization": "Bearer \(tokens.accessToken)",
+                "Dropbox-API-Arg": header,
+            ])
+        }
+        if response.status == 409 {
+            guard Self.summary(response).contains("not_found") else { throw .unexpectedReply }
+            return nil
+        }
+        return response.body
+    }
+
     /// What changed under the listed folder since `cursor` (`files/list_folder/continue`, following its paging), in
     /// Dropbox's order, deletions included; nil when Dropbox can't say (the cursor was reset, or the folder is gone),
     /// so the folder has to be listed again (#37).

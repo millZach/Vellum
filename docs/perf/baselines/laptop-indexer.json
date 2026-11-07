@@ -1,0 +1,23 @@
+{
+  "area": "laptop-indexer",
+  "entries": [
+    { "metric": "files_read_rescan_no_change", "kind": "count", "value": 0, "unit": "files", "tolerance": 0,
+      "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
+      "note": "A rescan with nothing changed reads no DWG or PDF: size, modified time and online-only state from the listing match the state file." },
+    { "metric": "files_read_rescan_one_pdf_changed", "kind": "count", "value": 1, "unit": "files", "tolerance": 0,
+      "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
+      "note": "One PDF saved again with new content: that PDF is read and nothing else, its DWG included (its fields are kept from the last read)." },
+    { "metric": "index_files_written_rescan_no_change", "kind": "count", "value": 0, "unit": "files", "tolerance": 0,
+      "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
+      "note": "Nothing is written to Dropbox/Vellum/Index when nothing changed: not the manifest, not a shard, not a thumbnail, so Dropbox uploads nothing and the Duo downloads nothing." },
+    { "metric": "index_files_written_one_pdf_changed", "kind": "count", "value": 3, "unit": "files", "tolerance": 0,
+      "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
+      "note": "One PDF changed: its project's shard, its new thumbnail and the manifest. Other projects' shards and every other thumbnail stay as they are." },
+    { "metric": "thumbnails_made_rescan_no_change", "kind": "count", "value": 0, "unit": "thumbnails", "tolerance": 0,
+      "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox",
+      "note": "Thumbnails are made only when a PDF or DWG is read, so once per file version." },
+    { "metric": "index_updates_for_a_folder_copy", "kind": "count", "value": 1, "unit": "updates", "tolerance": 0,
+      "measured": "PR #66 2026-11-07 laptop/tests made-up Dropbox, 40 files copied",
+      "note": "Copying a folder of drawings in is one debounced update of the index, not one per file." }
+  ]
+}

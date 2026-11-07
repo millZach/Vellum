@@ -223,7 +223,12 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
             _requests.append("download \(path)")
             let file = path.hasPrefix("rev:") ? files.values.first { "rev:" + $0.rev == path } : files[path.lowercased()]
             guard let file else { return Self.conflict("path/not_found/") }
-            return DropboxHTTPResponse(status: 200, body: Data(file.bytes))
+            // As Dropbox does, the file's metadata rides in a header beside its bytes.
+            let result = ["path_display": file.path, "rev": file.rev, "size": file.bytes.count,
+                          "content_hash": DropboxContentHash.of(file.bytes)] as [String: Any]
+            let header = (try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            return DropboxHTTPResponse(status: 200, body: Data(file.bytes), headers: ["dropbox-api-result": header])
         case "/2/files/list_folder/continue":
             guard let body = request.body,
                   let argument = try? JSONSerialization.jsonObject(with: body) as? [String: Any],

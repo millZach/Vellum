@@ -38,6 +38,14 @@ final class AddSheetModel {
     @ObservationIgnored var onPlace: ((CanvasEditor.PendingSheet) -> Void)?
     /// Closes Add sheet, from any step.
     @ObservationIgnored var close: (() -> Void)?
+    /// When the drawing viewer asks for a drawing's scale (#69): the page it opens on, with no Dropbox browser before it.
+    private(set) var confirmOnly: (file: DropboxFile, page: Int)?
+    /// The confirm step's place button: Place sheet, or from the viewer where the sheet goes.
+    private(set) var placeLabel = "Place sheet"
+    /// The confirm step asks for the scale whatever the title block says: the drawing index's scale needs asking.
+    private(set) var mustAsk = false
+    /// The sheet number a page is placed with when none is read off it: the drawing index's.
+    @ObservationIgnored private var fallbackNumber: String?
 
     init(dropbox: DropboxConnection, units: CanvasUnits, covers: @escaping (Sheet) -> String) {
         self.dropbox = dropbox
@@ -98,11 +106,26 @@ final class AddSheetModel {
     func place(_ file: DropboxFile, page: Int, info: SheetPDFReader.PageInfo, scale: Sheet.Scale) async {
         guard let reader = readers[file.id], let url = urls[file.id] else { return }
         let invertsBadly = await reader.invertsBadly(page: page)
-        let sheet = Sheet(paper: info.paper, scale: scale,
-                          page: SheetPage(file: file.keptName, name: file.name, path: file.path, index: page,
-                                          number: info.reading.sheetNumber),
-                          areas: info.reading.areas(placedAt: scale), invertsBadly: invertsBadly)
+        let sheet = info.reading.sheet(
+            placedAt: scale,
+            page: SheetPage(file: file.keptName, name: file.name, path: file.path, index: page,
+                            number: info.reading.sheetNumber ?? fallbackNumber),
+            invertsBadly: invertsBadly)
         onPlace?(CanvasEditor.PendingSheet(sheet: sheet, pdf: url, keptName: file.keptName))
+    }
+
+    /// Opens straight on the confirm step for a page of a drawing's PDF already on the Duo, to ask its scale before it
+    /// is placed (#69: an AS NOTED drawing, or one whose index scale Vellum can't read), with today's question; Place
+    /// hands the sheet on as Add sheet's does.
+    func confirm(_ pdf: DrawingOpening.PDF, kept: KeptPDF, page: Int, number: String?, placeLabel: String) {
+        let file = DropboxFile(id: "kept:" + kept.keptName, name: pdf.name, path: pdf.path, size: pdf.size ?? 0,
+                               contentHash: kept.keptName, rev: "")
+        readers[file.id] = SheetPDFReader(url: kept.url)
+        urls[file.id] = kept.url
+        fallbackNumber = number
+        self.placeLabel = placeLabel
+        mustAsk = true
+        confirmOnly = (file, page)
     }
 
     /// The scales the confirm step offers to pick: the ones written on the sheet's details first, then the common
@@ -132,7 +155,7 @@ struct AddSheetFlow: View {
 
     var body: some View {
         NavigationStack(path: $model.path) {
-            DropboxFolderList(model: model, folder: "")
+            root
                 .navigationDestination(for: AddSheetModel.Step.self) { step in
                     switch step {
                     case .folder(let folder): DropboxFolderList(model: model, folder: folder)
@@ -142,6 +165,15 @@ struct AddSheetFlow: View {
                 }
         }
         .tint(Chrome.accent)
+    }
+
+    @ViewBuilder
+    private var root: some View {
+        if let only = model.confirmOnly {
+            ConfirmSheet(model: model, file: only.file, page: only.page)
+        } else {
+            DropboxFolderList(model: model, folder: "")
+        }
     }
 }
 
@@ -384,7 +416,7 @@ private struct ConfirmSheet: View {
     }
 
     /// Whether Zach picks or types the scale: Vellum can't tell, or he asked to change it.
-    private func asks(_ info: SheetPDFReader.PageInfo) -> Bool { info.reading.asksForScale || changing }
+    private func asks(_ info: SheetPDFReader.PageInfo) -> Bool { info.reading.asksForScale || changing || model.mustAsk }
 
     private func chosen(_ info: SheetPDFReader.PageInfo) -> Sheet.Scale? {
         asks(info) ? picked : info.reading.suggestedScale
@@ -413,7 +445,7 @@ private struct ConfirmSheet: View {
         case .scale, .notToScale:
             Text("This sheet has several scales. Pick the scale the sheet goes on at; details at other scales become scale areas.")
         }
-        if changing, !reading.asksForScale { Text("Pick the scale to use instead:").font(.callout) }
+        if changing || model.mustAsk, !reading.asksForScale { Text("Pick the scale to use instead:").font(.callout) }
     }
 
     private func picker(_ info: SheetPDFReader.PageInfo) -> some View {
@@ -449,7 +481,7 @@ private struct ConfirmSheet: View {
         HStack(spacing: 10) {
             Button("Cancel") { model.close?() }
                 .buttonStyle(.bordered)
-            if !info.reading.asksForScale, !changing, info.reading.suggestedScale != nil {
+            if !asks(info), info.reading.suggestedScale != nil {
                 Button("Change scale") { changing = true }
                     .buttonStyle(.bordered)
             }
@@ -458,7 +490,7 @@ private struct ConfirmSheet: View {
                 placing = true
                 Task { await model.place(file, page: page, info: info, scale: scale) }
             } label: {
-                if placing { ProgressView() } else { Text("Place sheet").bold() }
+                if placing { ProgressView() } else { Text(model.placeLabel).bold() }
             }
             .buttonStyle(ChromePrimaryButtonStyle())
             .disabled(chosen(info) == nil || placing)

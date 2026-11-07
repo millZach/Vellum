@@ -201,6 +201,41 @@ final class CanvasesModel {
         }
     }
 
+    // MARK: From the drawing viewer (#69)
+
+    /// Place on a canvas: opens the canvas picked (closing the one open, if another), where the sheet waits as a
+    /// true-size outline for a tap, exactly as Add sheet's last step leaves it.
+    func place(_ pending: CanvasEditor.PendingSheet, on id: UUID) async {
+        testEditor = nil
+        if openEditor?.canvasID != id {
+            if openEditor != nil { closeCanvas() }
+            await open(id)
+        }
+        guard let editor = openEditor, editor.canvasID == id else { return }
+        editor.cancelPlacing()
+        editor.beginPlacing(pending)
+    }
+
+    /// Open in a new canvas: makes a canvas named after the drawing and opens it with the sheet placed in its middle,
+    /// at its scale, as one step; the view starts on the sheet.
+    func openNewCanvas(named name: String, with pending: CanvasEditor.PendingSheet) async {
+        guard let library else { return }
+        testEditor = nil
+        if openEditor != nil { closeCanvas() }
+        do {
+            let made = try await Task.detached { try library.create(name: name) }.value
+            await refresh()
+            selection = made.id
+            let size = pending.sheet.size
+            let room = CanvasRect(origin: CanvasPoint(x: -size.width / 2, y: -size.height / 2), size: size)
+            await open(made.id, startingView: .region(room))
+            guard let editor = openEditor, editor.canvasID == made.id else { return }
+            _ = await editor.place(pending, centredAt: .origin)
+        } catch {
+            problem = "The new canvas could not be made: \(error.localizedDescription)"
+        }
+    }
+
     /// Opens the test canvas, built off the main thread, over whatever canvas is open, or closes it and goes back to
     /// that canvas.
     func toggleTestCanvas() {

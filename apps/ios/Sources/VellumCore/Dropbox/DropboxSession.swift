@@ -414,16 +414,17 @@ public actor DropboxSession {
 
     /// An authorized call to Dropbox, the request made from the tokens by `make`, renewed as `authorizedJSON` says.
     func authorized(started: Int, acceptingConflict: Bool = false,
-                            _ make: (DropboxTokens) -> DropboxHTTPRequest) async throws(DropboxError)
+                    progress: (@Sendable (Double) -> Void)? = nil,
+                    _ make: (DropboxTokens) -> DropboxHTTPRequest) async throws(DropboxError)
         -> DropboxHTTPResponse {
         try still(started)
         guard var tokens = tokens() else { throw .notSignedIn }
         if tokens.needsRefresh(at: now()) { tokens = try await refresh(tokens, started: started) }
-        var response = try await send(make(tokens))
+        var response = try await send(make(tokens), progress: progress)
         try still(started)
         if response.status == 401 {
             tokens = try await refresh(tokens, started: started)
-            response = try await send(make(tokens))
+            response = try await send(make(tokens), progress: progress)
             try still(started)
             if response.status == 401 {
                 forgetSignIn()
@@ -514,8 +515,11 @@ public actor DropboxSession {
         forgetListings()
     }
 
-    private nonisolated func send(_ request: DropboxHTTPRequest) async throws(DropboxError) -> DropboxHTTPResponse {
+    private nonisolated func send(_ request: DropboxHTTPRequest,
+                                  progress: (@Sendable (Double) -> Void)? = nil) async throws(DropboxError)
+        -> DropboxHTTPResponse {
         do {
+            if let progress { return try await transport.send(request, progress: progress) }
             return try await transport.send(request)
         } catch let error as DropboxError {
             throw error

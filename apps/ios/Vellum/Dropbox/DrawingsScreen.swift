@@ -8,6 +8,8 @@ import VellumCore
 /// Settings, with Sign Out, opens from the toolbar.
 struct DrawingsScreen: View {
     let index: DrawingIndexModel
+    /// Where the drawing viewer hands a sheet to the Canvases tab (#69); nil in previews.
+    var handoff: DrawingHandoff?
     @State private var dropbox = DropboxConnection.app
     /// Debug builds accept `--ui-settings` to open with the Settings sheet up, for the captures.
     @State private var showsSettings = DrawingsScreen.launchesWithSettings
@@ -33,9 +35,9 @@ struct DrawingsScreen: View {
             DropboxFoldersView(dropbox: dropbox)
         case .checkingSignIn:
             // Only a moment, reading the Keychain; a copy already read shows meanwhile.
-            if index.copyState == .ready { DrawingSearchView(model: index, dropbox: dropbox) } else { Color.clear }
+            if index.copyState == .ready { DrawingSearchView(model: index, dropbox: dropbox, handoff: handoff) } else { Color.clear }
         case .loadingFolders, .signedIn:
-            DrawingSearchView(model: index, dropbox: dropbox)
+            DrawingSearchView(model: index, dropbox: dropbox, handoff: handoff)
         }
     }
 }

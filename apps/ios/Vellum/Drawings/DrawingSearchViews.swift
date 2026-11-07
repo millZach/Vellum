@@ -4,24 +4,36 @@ import VellumCore
 
 /// The Drawings tab's search (#68), as variant B of prototype/drawing-search has it: the search field, a line saying
 /// what is searched, and the rows; unfolded, the list on the left and the picked drawing on the right; folded, the list
-/// alone. Opening a drawing (the viewer, Place on a canvas, Open in a new canvas) is #69: until then a tap on the
-/// unfolded screen picks the row and shows what the index says about it, and a tap folded does nothing.
+/// alone. A tap on a row opens the drawing viewer (#69, `DrawingViewerView`): unfolded beside the list, and filling the
+/// screen when asked; folded, filling the screen.
 struct DrawingSearchView: View {
     @Bindable var model: DrawingIndexModel
     let dropbox: DropboxConnection
+    /// Where Place on a canvas and Open in a new canvas hand the sheet; nil in previews.
+    var handoff: DrawingHandoff?
 
     var body: some View {
         GeometryReader { proxy in
             let unfolded = proxy.size.width >= 700
             Group {
-                if model.copyState == .ready {
+                if model.copyState == .ready, let viewer = model.viewer, !unfolded || model.viewerFull {
+                    viewerView(viewer, full: true, folded: !unfolded)
+                        .padding(unfolded ? EdgeInsets(top: 8, leading: 8, bottom: 14, trailing: 8) : EdgeInsets())
+                        .toolbar(.hidden, for: .navigationBar)
+                } else if model.copyState == .ready {
                     if unfolded {
                         HStack(alignment: .top, spacing: 0) {
                             column(unfolded: true)
                                 .frame(width: 372)
                                 .padding(.leading, 16)
-                            DrawingDetailPane(model: model)
-                                .padding(EdgeInsets(top: 4, leading: 12, bottom: 14, trailing: 8))
+                            Group {
+                                if let viewer = model.viewer {
+                                    viewerView(viewer, full: false, folded: false)
+                                } else {
+                                    DrawingDetailPane(model: model)
+                                }
+                            }
+                            .padding(EdgeInsets(top: 4, leading: 12, bottom: 14, trailing: 8))
                         }
                     } else {
                         column(unfolded: false).padding(.horizontal, 14)
@@ -35,6 +47,13 @@ struct DrawingSearchView: View {
         .background(Color(uiColor: .systemGroupedBackground))
     }
 
+    private func viewerView(_ viewer: DrawingViewerModel, full: Bool, folded: Bool) -> some View {
+        DrawingViewerView(model: viewer, index: model, handoff: handoff, full: full, folded: folded,
+                          back: { model.closeViewer() },
+                          toggleFull: { model.viewerFull.toggle() })
+            .id(ObjectIdentifier(viewer))
+    }
+
     private func column(unfolded: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             DrawingSearchField(text: $model.query)
@@ -44,6 +63,11 @@ struct DrawingSearchView: View {
             if let notice = model.notice {
                 DrawingNotice(text: notice) { model.notice = nil }
                     .padding(.bottom, 10)
+            }
+            if let problem = model.openProblem {
+                DrawingNotice(text: problem, icon: "icloud.slash") { model.openProblem = nil }
+                    .padding(.bottom, 10)
+                    .accessibilityIdentifier("drawing-open-problem")
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -152,14 +176,15 @@ struct DrawingIndexLine: View {
     }()
 }
 
-/// A newer format the laptop wrote, said once.
+/// A newer format the laptop wrote, said once; or why a tapped drawing didn't open.
 private struct DrawingNotice: View {
     let text: String
+    var icon = "info.circle"
     let dismiss: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "info.circle").foregroundStyle(DrawingIndexColors.plot)
+            Image(systemName: icon).foregroundStyle(DrawingIndexColors.plot)
             Text(text).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             Button("OK", action: dismiss).font(.system(size: 12, weight: .semibold))
@@ -180,7 +205,7 @@ struct DrawingRow: View {
     var body: some View {
         let text = DrawingRowText(entry)
         let query = model.resultQuery
-        let selected = unfolded && model.selection == entry.id
+        let selected = unfolded && (model.viewer?.entry.id ?? model.selection) == entry.id
         let markers = DrawingMarker.of(entry, online: model.online, pdfsOnThisDuo: model.pdfsOnThisDuo)
         let content = HStack(alignment: .center, spacing: 12) {
             DrawingThumbnailView(model: model, name: entry.thumbnail, width: unfolded ? 56 : 62, height: unfolded ? 38 : 42)
@@ -214,13 +239,10 @@ struct DrawingRow: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
 
-        if unfolded {
-            Button { model.selection = entry.id } label: { content }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-        } else {
-            content
-        }
+        Button { model.open(entry) } label: { content }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityHint(entry.pdf == nil ? "No PDF yet" : "Opens the drawing's PDF")
     }
 
     private func headline(_ text: DrawingRowText, _ query: String) -> Text {
@@ -329,12 +351,6 @@ struct DrawingThumbnailView: View {
     }
 }
 
-private struct DarkInvert: ViewModifier {
-    let dark: Bool
-    func body(content: Content) -> some View {
-        if dark { content.colorInvert() } else { content }
-    }
-}
 
 /// Decoded thumbnails, kept while memory allows.
 @MainActor
@@ -378,7 +394,7 @@ struct DrawingDetailPane: View {
                 VStack(spacing: 8) {
                     Image(systemName: "doc.text.magnifyingglass").font(.system(size: 30))
                     Text("Pick a drawing to see it here").fontWeight(.semibold)
-                    Text("Its number, title, scale and where its files are.").font(.system(size: 13))
+                    Text("Pages, zoom, then place it on a canvas or open it in a new one.").font(.system(size: 13))
                 }
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

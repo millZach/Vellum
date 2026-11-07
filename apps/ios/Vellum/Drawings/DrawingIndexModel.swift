@@ -57,6 +57,14 @@ final class DrawingIndexModel {
     private(set) var pdfsOnThisDuo: Set<String> = []
     /// The row picked on the unfolded screen.
     var selection: String?
+    /// The drawing open in the viewer (#69); nil when none is.
+    private(set) var viewer: DrawingViewerModel?
+    /// The viewer fills the screen: always folded, and unfolded when Zach asks.
+    var viewerFull = false
+    /// Why a tapped drawing didn't open, until it is read.
+    var openProblem: String?
+    /// The Dropbox session the copy is refreshed on, which the viewer downloads PDFs through.
+    @ObservationIgnored private(set) var session: DropboxSession?
 
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var searching: Task<Void, Never>?
@@ -110,6 +118,7 @@ final class DrawingIndexModel {
         }
         let keeper = DrawingIndexKeeper(session: session, root: root)
         self.keeper = keeper
+        self.session = session
         await reload()
         await notePDFsOnThisDuo()
         if followsConnection {
@@ -186,6 +195,7 @@ final class DrawingIndexModel {
         limit = Self.page
         copyState = .ready
         if let selection, !copy.entries.contains(where: { $0.id == selection }) { self.selection = nil }
+        // A viewer stays on the drawing it opened, even if a refresh dropped it from the index.
         // Typed while it was loading: search again for what is typed now.
         if query != self.query { search() }
     }
@@ -218,6 +228,36 @@ final class DrawingIndexModel {
             return Set(names.filter { $0.hasSuffix(".pdf") }.map { String($0.dropLast(4)) })
         }.value
         if hashes != pdfsOnThisDuo { pdfsOnThisDuo = hashes }
+    }
+
+    // MARK: Opening a drawing (#69)
+
+    /// A tap on a row: opens the drawing in the viewer, from the Duo when its PDF is kept here, else downloading it once;
+    /// offline with its PDF never opened on this Duo, the viewer doesn't open and the tab says why.
+    func open(_ entry: DrawingEntry) {
+        selection = entry.id
+        openProblem = nil
+        if case .notOnThisDuo = DrawingOpening.decide(entry, online: online, pdfsOnThisDuo: pdfsOnThisDuo) {
+            openProblem = DrawingOpening.notOnThisDuoText(number: entry.number ?? entry.name)
+            closeViewer()
+            return
+        }
+        if let viewer, viewer.entry.id == entry.id, viewer.entry == entry {
+            if case .failed = viewer.state {} else { return }
+        }
+        let viewer = DrawingViewerModel(entry: entry)
+        self.viewer = viewer
+        let session = self.session
+        Task {
+            await viewer.open(session: session)
+            await notePDFsOnThisDuo()
+        }
+    }
+
+    /// Back to the list.
+    func closeViewer() {
+        viewer = nil
+        viewerFull = false
     }
 
     // MARK: Searching
@@ -253,5 +293,11 @@ final class DrawingIndexModel {
     func debugThumbnailNames() -> [String] { listing?.entries.compactMap(\.thumbnail) ?? [] }
 
     func debugSelect(number: String) { selection = listing?.entries.first { $0.number == number }?.id }
+
+    /// For the captures: opens a drawing as a tap on its row does.
+    func debugOpen(number: String) {
+        guard let entry = listing?.entries.first(where: { $0.number == number }) else { return }
+        open(entry)
+    }
     #endif
 }

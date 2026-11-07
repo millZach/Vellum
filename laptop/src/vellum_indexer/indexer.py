@@ -87,7 +87,10 @@ class Indexer:
         self.counters = Counters()
         self.downloader = downloader
         if downloader is not None:
-            downloader.clean()  # a copy a crash left behind
+            downloader.dropbox_root = root  # a scratch folder inside Dropbox is refused
+            downloader.clean()  # copies and work folders a crash left behind
+        if hasattr(self.dwg_reader, "clean"):
+            self.dwg_reader.clean()
 
     # --- Reading ---
 
@@ -114,6 +117,14 @@ class Indexer:
         unread when it can't be downloaded now."""
         kind = files.kind_of(facts.path)
         key = files.key(facts.path)
+        if not facts.online_only:
+            # It may have been made online-only since it was listed: look again, from its folder's listing (no
+            # stat, no open), right before opening it, so a placeholder is never opened.
+            found, _ = files.look_up(self.root, [facts.path], self.attributes)
+            now = found.get(facts.path, facts)
+            if now is None:
+                return  # gone since: its deletion comes as its own change
+            facts = now
         old = self.state.get(key)
         if (old is not None and old.path == facts.path and old.reader == self._reader_id(kind)
                 and (old.size, old.mtime_ns) == (facts.size, facts.mtime_ns)):
@@ -123,6 +134,7 @@ class Indexer:
                                        old.facts))
             return
         copy = None
+        work = None
         if facts.online_only:
             if self.downloader is None:
                 self._unread(key, facts, kind)
@@ -138,22 +150,26 @@ class Indexer:
                 return
             self.counters.downloaded += 1
             local = copy
+            work = self.downloader.work  # AutoCAD's copy stays on the scratch drive too
         else:
             local = files.local_path(self.root, facts.path)
         try:
-            read = self._read(kind, local)
-        except OSError as error:
-            # Locked or vanished part way (AutoCAD saving it, Dropbox syncing it): keep what was known and try
-            # again with the next change or scan.
-            log.info("Could not open %s yet: %s", local, error)
-            return
+            try:
+                read = self._read(kind, local, work)
+            except OSError as error:
+                # Locked or vanished part way (AutoCAD saving it, Dropbox syncing it): keep what was known and try
+                # again with the next change or scan.
+                log.info("Could not open %s yet: %s", local, error)
+                return
+            reader = self._reader_id(kind)
+            if kind == "dwg" and "error" in read:
+                reader += "-failed"  # read again at the next full scan, in case AutoCAD failed for a moment
+            self.state.put(key, Record(facts.path, kind, facts.size, facts.mtime_ns, facts.online_only, reader, read))
+            if copy is not None:
+                self.state.commit()  # saved before the copy goes, so a crash never downloads it again
         finally:
             if copy is not None:
                 Downloader.done(copy)
-        reader = self._reader_id(kind)
-        if kind == "dwg" and "error" in read:
-            reader += "-failed"  # read again at the next full scan, in case AutoCAD failed for a moment
-        self.state.put(key, Record(facts.path, kind, facts.size, facts.mtime_ns, facts.online_only, reader, read))
 
     def _unread(self, key: str, facts: files.FileFacts, kind: str) -> None:
         self.counters.online_only_listed += 1
@@ -164,7 +180,7 @@ class Indexer:
             return
         self.state.put(key, Record(facts.path, kind, facts.size, facts.mtime_ns, True, UNREAD, {}))
 
-    def _read(self, kind: str, local: Path) -> dict:
+    def _read(self, kind: str, local: Path, work: Path | None = None) -> dict:
         if kind == "pdf":
             self.counters.pdfs_read += 1
             try:
@@ -189,7 +205,7 @@ class Indexer:
             raise FileNotFoundError(local)
         out: dict = {"thumbnail": self._keep_thumbnail(self.read_preview(local))}
         try:
-            inserts = self.dwg_reader.read(local)
+            inserts = self.dwg_reader.read(local, work=work) if work else self.dwg_reader.read(local)
             out["sheets"] = [sheet.as_dict() for sheet in fields.sheets_from_attributes(inserts, self.tags)]
         except Exception as error:  # noqa: BLE001 - AutoCAD failing on one drawing never stops the scan
             log.warning("Could not read the title block of %s: %s", local, error)
@@ -210,7 +226,7 @@ class Indexer:
     def scan(self) -> None:
         """Rescan all of Dropbox: list it, read what changed, drop what is gone, publish."""
         started = time.monotonic()
-        to_read = self._gather({"/"}, set())
+        to_read, _ = self._gather({"/"}, set())
         log.info("Listed %d drawings and PDFs in %.1f s; %d to read", self.counters.stat_files,
                  time.monotonic() - started, len(to_read))
         self._work(to_read)
@@ -220,7 +236,7 @@ class Indexer:
     def update(self, paths: Iterable[str], folders: Iterable[str] = ()) -> set[str]:
         """What the watcher saw: Dropbox paths of files changed, made or deleted, and of folders made, moved in or
         deleted. Reads only those, then publishes. Returns the keys of the files it read."""
-        read = self._work(self._gather(set(folders), set(paths)))
+        read = self._work(self._gather(set(folders), set(paths))[0])
         self.publish()
         return read
 
@@ -231,11 +247,12 @@ class Indexer:
         waiting = {r.path for _, r in self.state.records() if r.reader == UNREAD}
         return self.update(waiting) if waiting else set()
 
-    def _gather(self, folders: set[str], paths: set[str]) -> dict[str, files.FileFacts]:
+    def _gather(self, folders: set[str], paths: set[str]) -> tuple[dict[str, files.FileFacts], set[str]]:
         """The one collector for the scan and the watcher: walk the folders, look up the paths, drop from the state
         file what is gone, and return what to read, one entry per path (a path met twice in a batch, as a folder copy
         reports it, is read once). Nothing under a folder that could not be listed is dropped."""
         to_read: dict[str, files.FileFacts] = {}
+        gone: set[str] = set()
         unlisted: list[str] = []
 
         def failed(path: Path, error: OSError) -> None:
@@ -264,6 +281,7 @@ class Indexer:
             for k in [k for k in self.state.all_keys() if k.startswith(prefix) and k not in present and not kept(k)]:
                 self.state.delete(k)
                 to_read.pop(k, None)
+                gone.add(k)
                 self.counters.removed += 1
         wanted = sorted(p for p in paths if self.rules.indexes(p))
         found, _ = files.look_up(self.root, wanted, self.attributes)
@@ -271,13 +289,14 @@ class Indexer:
             k = files.key(path)
             if facts is None:
                 to_read.pop(k, None)
+                gone.add(k)
                 if self.state.delete(k):
                     self.counters.removed += 1
             elif self.needs_read(facts):
                 to_read[k] = facts
             else:
                 to_read.pop(k, None)
-        return to_read
+        return to_read, gone
 
     @staticmethod
     def _ordered(batch: dict[str, files.FileFacts]) -> list[files.FileFacts]:
@@ -297,8 +316,9 @@ class Indexer:
             if self.poll_changes is not None:
                 fresh_batch = self.poll_changes()
                 if fresh_batch is not None:
-                    fresh = self._gather(set(fresh_batch[1]), set(fresh_batch[0]))
-                    queue = deque(f for f in queue if files.key(f.path) not in fresh)
+                    fresh, gone = self._gather(set(fresh_batch[1]), set(fresh_batch[0]))
+                    # a newer change to a queued path replaces it; a deletion drops it, so it never comes back
+                    queue = deque(f for f in queue if files.key(f.path) not in fresh and files.key(f.path) not in gone)
                     queue.extendleft(reversed(self._ordered(fresh)))
                     total += len(fresh)
                     urgent = len(fresh)

@@ -22,9 +22,10 @@ A wrong pair is worse than none, because a redline would go to the wrong DWG:
   PDF's drawing number; when it can't tell them apart, the PDF is left unpaired ("PDF only, no DWG").
 
 A DWG with several layouts has a title block (a sheet) per layout, and a PDF pairs with one sheet: the layout its
-title or name names after the DWG's name (AutoCAD's ``Power-E-202``), else the sheet with its drawing number, else the
-DWG's first sheet. A sheet with several PDFs (reissues) shows the most recently modified one; the others are paired
-with it and so are not listed again as PDFs without a DWG.
+title, else its file name, names after the DWG's name (AutoCAD's ``Power-E-202``), else the sheet with its drawing
+number. When none of those picks one, the PDF pairs with the DWG itself and takes no layout's fields: a guessed layout
+would bring a wrong scale. A sheet with several PDFs (reissues) shows the most recently modified one; the others are
+paired with it and so are not listed again as PDFs without a DWG.
 """
 
 from __future__ import annotations
@@ -156,29 +157,46 @@ def _best(pdf: Candidate, name: str, by_stem: dict, rule: str) -> Pairing | None
             tied = [kept for kept in tied if n and any(norm_number(sh.number) == n for sh in kept)]
             if len(tied) != 1:
                 return AMBIGUOUS
-        return Pairing(_sheet_for(pdf, name, s, tied[0]).key, rule)
+        chosen = _sheet_for(pdf, name, s, tied[0])
+        return Pairing(chosen if isinstance(chosen, str) else chosen.key, rule)
     return None
 
 
-def _sheet_for(pdf: Candidate, name: str, dwg_stem: str, sheets: list[Candidate]) -> Candidate:
-    """Which of a DWG's sheets the PDF was plotted from: the layout its name or title names after the DWG's name
-    (``Power-E-202`` is layout ``E-202``), else the sheet with its number, else the first."""
-    if len(sheets) == 1:
-        return sheets[0]
+def whole_dwg(dwg_key: str) -> str:
+    """The key for "this DWG, no particular layout": a PDF paired with it gets no layout's fields."""
+    return f"{dwg_key}#*"
+
+
+def _rest_after(name: str, dwg_stem: str) -> str | None:
+    """What a name holds after the DWG's name and a separator (``power-e-202`` after ``power`` is ``e-202``)."""
+    if not name.startswith(dwg_stem):
+        return None
     rest = name[len(dwg_stem):]
     for sep in SEPARATORS:
         if rest.startswith(sep):
-            rest = rest[len(sep):]
-            break
-    rest = rest.strip()
-    for sheet in sheets:
-        if sheet.layout and sheet.layout.lower().strip() == rest:
-            return sheet
+            return rest[len(sep):].strip()
+    return rest.strip()
+
+
+def _sheet_for(pdf: Candidate, name: str, dwg_stem: str, sheets: list[Candidate]) -> Candidate | str:
+    """Which of a DWG's sheets the PDF was plotted from: the layout its metadata title, else its file name, names
+    after the DWG's name (``Power-E-202`` is layout ``E-202``, or the sheet numbered ``E-202``), else the sheet with
+    the PDF's title block number. When none of those picks one of several sheets, the whole DWG's key: the PDF pairs
+    with the DWG but takes no layout's fields, since a guessed layout would bring a wrong scale."""
+    if len(sheets) == 1:
+        return sheets[0]
+    for given in (name, stem(pdf.path)):
+        rest = _rest_after(given, dwg_stem)
+        if not rest:
+            continue
+        for sheet in sheets:
+            if sheet.layout and sheet.layout.lower().strip() == rest:
+                return sheet
+        for sheet in sheets:
+            if norm_number(sheet.number) and norm_number(sheet.number) == norm_number(rest):
+                return sheet
     n = norm_number(pdf.number)
     for sheet in sheets:
         if n and norm_number(sheet.number) == n:
             return sheet
-    for sheet in sheets:
-        if norm_number(sheet.number) and norm_number(sheet.number) == norm_number(rest):
-            return sheet
-    return sheets[0]
+    return whole_dwg(sheets[0].dwg or sheets[0].key)

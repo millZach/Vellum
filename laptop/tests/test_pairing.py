@@ -131,8 +131,8 @@ def test_a_pdf_pairs_with_the_layout_it_was_plotted_from():
         by_text.key: (e202.key, "name"),
         by_number_only.key: (e201.key, "number"),
     }
-    neither = c(f"{P}/PDF/Power.pdf")  # names no layout and has no number: the DWG's first sheet
-    assert pairs([neither], [e201, e202]) == {neither.key: (e201.key, "name")}
+    neither = c(f"{P}/PDF/Power.pdf")  # names no layout and has no number: the DWG, but no layout's fields
+    assert pairs([neither], [e201, e202]) == {neither.key: (f"{P}/CAD/Power.dwg".lower() + "#*", "name")}
 
 
 def test_same_drawing_number_in_the_same_project_when_only_one_dwg_has_it():
@@ -153,3 +153,14 @@ def test_names_compare_without_case():
     dwg = c(f"{P}/e-201.DWG")
     pdf = c(f"{P}/E-201.PDF")
     assert pair([pdf], [dwg]) == {pdf.key: Pairing(dwg.key, "name")}
+
+
+def test_a_title_naming_no_layout_falls_back_to_the_file_name_and_never_guesses_a_layout():
+    e201, e202 = sheet(f"{P}/CAD/Power.dwg", "E-201", "E-201"), sheet(f"{P}/CAD/Power.dwg", "E-202", "E-202")
+    by_file_name = c(f"{P}/PDF/Power-E-202.pdf", title="Power")  # the title names the DWG only; no number read
+    assert pairs([by_file_name], [e201, e202]) == {by_file_name.key: (e202.key, "metadata")}
+    by_number = c(f"{P}/PDF/Power.pdf", title="Power", number="E-202")
+    assert pairs([by_number], [e201, e202]) == {by_number.key: (e202.key, "metadata")}
+    nothing = c(f"{P}/PDF/Power issued.pdf", title="Power")  # no layout named anywhere, no number
+    dwg_only = f"{P}/CAD/Power.dwg".lower() + "#*"
+    assert pairs([nothing], [e201, e202]) == {nothing.key: (dwg_only, "metadata")}  # the DWG, no layout's fields

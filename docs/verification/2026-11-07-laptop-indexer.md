@@ -59,6 +59,19 @@ The PR's final run proves this round on `windows-latest`. Locally on Forge (Linu
 - **Lost state:** losing the state file carries on from the manifest's generation, writing nothing unchanged.
 - **New budgets:** downloads on a rescan with nothing changed 0; downloads when one online-only file changed 1; files left in scratch after a scan 0.
 
+### The third round: the scratch folder made safe
+
+The PR's final run proves this round on `windows-latest`. Locally on Forge: 151 passed and 1 skipped (Windows Credential Manager, CI only). Each fix has an exact test, written first:
+
+- **AutoCAD on the scratch drive.** A downloaded DWG is worked on in the indexer's subfolder on the scratch drive, while a local DWG keeps `%LOCALAPPDATA%`. The console reader uses the work folder it is given. Leftover work folders on both drives are cleared at start.
+- **Kept apart from Dropbox.** A scratch folder inside Dropbox, or reached through a symlink (a junction on Windows) into it, is refused, and the log says so. Cleanup leaves a look-alike `vellum-dl-*` file outside its subfolder alone, and a subfolder without its marker too, and never cleans inside Dropbox.
+- **No guessed layout.** A metadata title naming no layout falls back to the file name, then the number. If still unsure, the PDF pairs with the DWG with no layout's scale: `Power` / `Power-E-202.pdf` gets E-202 and 1:50, and `Power issued.pdf` gets the DWG with no scale.
+- **Interrupted downloads.** An `IncompleteRead` or a connection reset mid-body is retried with backoff and leaves nothing behind. If it never comes through, the file stays `read: false`.
+- **Deletions mid-queue.** A file deleted while it waits in the queue is not read or recreated.
+- **Sign-out.** A Credential Manager that won't remove the token makes sign-out say so and exit non-zero.
+- **Save before delete.** The result is in the state file before the copy is deleted.
+- **Made online-only before its read.** A file freed up between its event and its read is downloaded, never opened.
+
 ## Hand test on the laptop
 
 CI cannot run AutoCAD or Dropbox, so these steps need the laptop. Each says what to look for. The log is `%LOCALAPPDATA%\Vellum\indexer\indexer.log`; `Get-Content -Wait` follows it.
@@ -71,8 +84,9 @@ CI cannot run AutoCAD or Dropbox, so these steps need the laptop. Each says what
 - [ ] **No writes in project folders.** In a project folder the indexer has read, no new `.dwl`, `.dwl2`, `.bak` or other file has appeared, and Dropbox's recent activity shows only `Vellum/Index` changes from the laptop.
 - [ ] **Save a changed PDF and see the index update within seconds.** Plot a drawing again over its PDF (or save any PDF in a project folder). Within a few seconds the log has "Updated 1 files and 0 folders in … s" and "Published generation g+1", and that project's shard has a new name in `index.json`; every other shard's name is unchanged.
 - [ ] **Copy a folder in.** Copy a folder of several drawings into a project. The log shows one "Updated N files" line for the copy, not one per file.
-- [ ] **An online-only file is read from D: and the Dropbox folder's copy stays online-only.** In File Explorer, make a project's PDF folder online-only (Dropbox → Make online-only; the files show a cloud). The log has an update and downloads nothing: they were read before, and only their attributes changed. Then on dropbox.com (or another computer) upload a new version of one of those PDFs, say with a new revision. Within seconds `D:\Vellum indexer\scratch` holds a `vellum-dl-….pdf` for a moment and is empty again, and its entry in the shard has the new revision and `"read": true`. In Explorer the PDF still shows the cloud (not a green tick): the Dropbox folder's copy was not downloaded. An online-only folder the first scan met is read the same way.
+- [ ] **An online-only file is read from D: and the Dropbox folder's copy stays online-only.** In File Explorer, make a project's PDF folder online-only (Dropbox → Make online-only; the files show a cloud). The log has an update and downloads nothing: they were read before, and only their attributes changed. Then on dropbox.com (or another computer) upload a new version of one of those PDFs, say with a new revision. Within seconds `D:\Vellum indexer\scratch\Vellum indexer copies` holds a `vellum-dl-….pdf` for a moment and is empty again (but for its marker file), and its entry in the shard has the new revision and `"read": true`. In Explorer the PDF still shows the cloud (not a green tick): the Dropbox folder's copy was not downloaded. An online-only folder the first scan met is read the same way.
 - [ ] **Unplug D:.** Eject the external drive and upload a new version of another online-only PDF on dropbox.com. The log says once "Online-only files stay unread for now: the scratch drive D:\ is not there", and that PDF's entry has `"read": false`. Plug the drive back in: within ten minutes the log has an update and the entry reads `true`, and the scratch folder is empty.
 - [ ] **AutoCAD's SECURELOAD left alone.** With AutoCAD's `SECURELOAD` at its usual 1, the log shows DWGs read ("Read i of M") and no title block errors; AutoCAD's options are unchanged.
 - [ ] **A two-layout DWG.** For a DWG whose layouts are separate sheets, the shard has one entry per layout, each with its own number, scale and PDF.
+- [ ] **Scratch inside Dropbox is refused.** Set `scratch_folder` in `settings.toml` to a folder inside Dropbox and restart the task: the log says the scratch folder is inside the Dropbox folder, nothing is downloaded or deleted there. Set it back.
 - [ ] **Uninstall.** `laptop\scripts\uninstall.ps1`. It prints "Removed the task" and "Deleted …\venv"; Task Scheduler no longer lists the task, no `pythonw.exe` runs, and `Dropbox\Vellum\Index` is still there. Install again to keep it running.

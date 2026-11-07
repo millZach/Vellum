@@ -134,7 +134,11 @@ def set_up(dropbox: Path, tmp_path: Path, signed_in: bool = True):
 
 
 def scratch_files(scratch: Path) -> list[str]:
-    return sorted(p.name for p in scratch.iterdir()) if scratch.exists() else []
+    """Files the indexer left on the scratch drive: anything in its own subfolder but its marker."""
+    from vellum_indexer.scratch import MARKER, OWN_FOLDER
+
+    own = scratch / OWN_FOLDER
+    return sorted(p.name for p in own.rglob("*") if p.is_file() and p.name != MARKER) if own.exists() else []
 
 
 def test_an_online_only_file_is_downloaded_to_scratch_read_and_its_copy_deleted(dropbox, tmp_path, make_indexer):
@@ -154,7 +158,7 @@ def test_an_online_only_file_is_downloaded_to_scratch_read_and_its_copy_deleted(
     for path in handed:
         if path.name in ONLINE:
             raise AssertionError(f"the placeholder {path} was opened")
-    copies = [p for p in handed if p.parent == scratch]
+    copies = [p for p in handed if p.parent == downloader.own]
     assert len(copies) == 4  # two PDFs, and a DWG's preview and title block
     assert scratch_files(scratch) == []  # each copy deleted once read
     _, entries = read_index(dropbox / "Vellum" / "Index")
@@ -191,11 +195,13 @@ def test_an_unchanged_online_only_file_is_not_downloaded_again_and_a_changed_one
 
 def test_a_copy_left_by_a_crash_is_deleted_at_start_and_nothing_else(dropbox, tmp_path, make_indexer):
     _, _, _, scratch, downloader, online = set_up(dropbox, tmp_path)
-    scratch.mkdir(parents=True)
-    (scratch / "vellum-dl-0a1b2c3d4e5f.pdf").write_bytes(b"half a made-up download")
+    downloader.dropbox_root = dropbox
+    assert downloader.available()  # makes its own subfolder, with its marker
+    (downloader.own / "vellum-dl-0a1b2c3d4e5f.pdf").write_bytes(b"half a made-up download")
     (scratch / "not ours.txt").write_text("made up")
     make_indexer(attributes=online, downloader=downloader)
-    assert scratch_files(scratch) == ["not ours.txt"]
+    assert scratch_files(scratch) == []
+    assert (scratch / "not ours.txt").exists()
 
 
 def test_with_no_drive_or_no_sign_in_files_stay_unread_and_are_read_when_they_come_back(
@@ -242,7 +248,7 @@ def test_a_failed_download_leaves_nothing_in_scratch_and_is_tried_again(dropbox,
 
 def test_a_download_cut_short_or_not_matching_its_hash_is_not_kept(dropbox, tmp_path):
     server, _, _, scratch, downloader, _ = set_up(dropbox, tmp_path)
-    scratch.mkdir(parents=True)
+    downloader.dropbox_root = dropbox
     real = server.__call__
 
     def corrupt(url, headers, body):
@@ -269,7 +275,7 @@ def test_busy_and_expired_answers_are_retried(dropbox, tmp_path):
     downloader.client.sleep = waits.append
     server.fail = [429, 503]
     copy = downloader.fetch(f"/{PLANT}/Vendor/V-12 Pump skid GA.pdf", 100)
-    assert copy.parent == scratch and copy.read_bytes() == server.files[f"/{PLANT}/Vendor/V-12 Pump skid GA.pdf"]
+    assert copy.parent == downloader.own and copy.read_bytes() == server.files[f"/{PLANT}/Vendor/V-12 Pump skid GA.pdf"]
     assert waits == [1.0, 2.0]  # Retry-After, then backoff
     Downloader.done(copy)
     server.issued.append("made-up-access-token-someone-else")  # the laptop's access token has lapsed

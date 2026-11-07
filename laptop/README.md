@@ -50,7 +50,7 @@ laptop`, then `vellum-indexer where` (prints where everything is), `vellum-index
 | Log | `%LOCALAPPDATA%\Vellum\indexer\indexer.log` (5 MB, three old logs kept) |
 | Settings | `%LOCALAPPDATA%\Vellum\indexer\settings.toml` (optional) |
 | Work copies of DWGs for AutoCAD | `%LOCALAPPDATA%\Vellum\indexer\work\` (emptied after each drawing) |
-| Online-only files being read | `D:\Vellum indexer\scratch\` (`scratch_folder`), one `vellum-dl-*` copy at a time, deleted once read |
+| Online-only files being read | `D:\Vellum indexer\scratch\Vellum indexer copies\` (in `scratch_folder`), one `vellum-dl-*` copy at a time, deleted once what was read is saved; AutoCAD's work copy of such a DWG stays there too |
 | Dropbox sign-in | the refresh token in Windows Credential Manager ("Vellum laptop indexer"); never in a file, the state file or the log |
 | Dropbox app key | `dropbox_app_key` in `settings.toml`, on the laptop only, never in this repository |
 
@@ -93,24 +93,36 @@ them to the external drive, read them, and delete the copy.
 - The indexer reads each file's attributes from the directory listing, which downloads nothing, and **never opens the
   placeholder**. A change the watcher reports is looked up in its folder's listing too, not with `os.stat`, which on
   Windows opens a handle to the file.
-- It downloads the file through the Dropbox API (`files/download`) straight into the scratch folder,
-  `D:\Vellum indexer\scratch` by default, never through the Dropbox folder on C:. The copy is checked against
-  Dropbox's size and content hash, read like any local file (title block, pairing, thumbnail), and **deleted at
-  once**. Nothing is ever deleted from Dropbox or the Dropbox folder, and the placeholder stays online-only.
-- One file at a time, so the scratch folder holds one copy at most. A `vellum-dl-*` copy left by a crash is deleted at
-  the next start; nothing else in the folder is touched. When the drive has less than `scratch_min_free_gb` free
-  (5 GB) beyond the file, it waits instead of filling it.
+- Right before opening a local file it looks at the file's attributes again, from a fresh listing of its folder, so a
+  file made online-only since its change was noticed is downloaded rather than opened.
+- It downloads the file through the Dropbox API (`files/download`) straight into its own subfolder of the scratch
+  folder, `D:\Vellum indexer\scratch\Vellum indexer copies` by default, never through the Dropbox folder on C:. The
+  copy is checked against Dropbox's size and content hash and read like any local file (title block, pairing,
+  thumbnail). For a DWG, AutoCAD's work copy goes in that subfolder too, never to C:. What was read is saved to the
+  state file first and **then the copy is deleted**, so a crash never downloads it again. Nothing is ever deleted
+  from Dropbox or the Dropbox folder, and the placeholder stays online-only.
+- **The scratch folder is kept apart from Dropbox.** A scratch folder inside the Dropbox folder, or one that reaches
+  it through a junction or symlink (both resolved first), is refused, and the log says so; online-only files then
+  stay unread. The indexer deletes only inside the subfolder it made, which carries its marker file
+  (`.created-by-vellum-indexer`), never by a name pattern alone: a folder of that name it did not make, and anything
+  beside it, is left alone.
+- One file at a time, so the subfolder holds one copy at most. Copies and AutoCAD work folders a crash left (in the
+  subfolder, and in `%LOCALAPPDATA%\Vellum\indexer\work` for local DWGs) are deleted at the next start. When the
+  drive has less than `scratch_min_free_gb` free (5 GB) beyond the file, it waits instead of filling it.
 - An online-only file that has not changed (same size and modified time on its placeholder) is never downloaded
   again. One that changes, or is added later, goes the same way.
-- Busy answers (429, 5xx) are retried with backoff, honouring `Retry-After`; a failed download leaves nothing in the
-  scratch folder and is tried again within `retry_unread_minutes`. The first scan's downloads are resumable through
+- Busy answers (429, 5xx) are retried with backoff, honouring `Retry-After`, and so is a download that breaks off part
+  way (a reset connection, an incomplete read); a failed download leaves nothing in the scratch folder, keeps the
+  file `"read": false`, and is tried again within `retry_unread_minutes`. A file deleted while it waits in the queue
+  is dropped from the queue, so it never comes back. The first scan's downloads are resumable through
   the state file.
 - **Signing in.** The laptop signs in to Vellum's own Dropbox app (docs/dropbox.md: full Dropbox, `files.content.read`)
   once, with PKCE and no app secret, as the Duo does (ADR-0013): `install.ps1 -DropboxAppKey` or `vellum-indexer
   sign-in` prints Dropbox's page and asks for the code it shows. The refresh token goes to Windows Credential Manager
   through `keyring`; the access token lives only in memory; neither is ever written to a file, the state file or the
   log. The app key lives in `settings.toml` on the laptop, never in this repository. `vellum-indexer sign-out` (and
-  `uninstall.ps1 -Purge`) removes the token and asks Dropbox to end the sign-in.
+  `uninstall.ps1 -Purge`) removes the token and asks Dropbox to end the sign-in; if Credential Manager won't let go
+  of the token, it says so and exits with an error, after asking Dropbox to end the sign-in anyway.
 - **When D: isn't there** (the drive unplugged), the laptop isn't signed in, or the drive is short of space:
   online-only files stay listed by path and name with `"read": false` and their fields unread (a drawing number can
   still come from the file name, and they can still pair by name). The log says why once, not once per file. Local
@@ -165,8 +177,9 @@ than none, since a redline would go to the wrong DWG:
 - The longest matching stem wins, then the nearest DWG. Two DWGs equally near are told apart by the PDF's drawing
   number; when it can't tell them apart, the PDF stays unpaired, "PDF only, no DWG".
 
-Within a DWG with several layouts, a PDF pairs with the layout its title or name names after the DWG's name
-(AutoCAD's `Power-E-202`), else the layout with its drawing number, else the DWG's first layout. A layout with several
+Within a DWG with several layouts, a PDF pairs with the layout its metadata title, else its file name, names after
+the DWG's name (AutoCAD's `Power-E-202`), else the layout with its drawing number. When none of those picks one, the
+PDF pairs with the DWG itself and takes no layout's fields, so no wrong scale: a guessed layout would bring one. A layout with several
 PDFs shows the newest; the rest are in its entry's `otherPdfs`. A PDF with no DWG is listed as "PDF only, no DWG"; a
 DWG layout with no PDF as having none yet.
 

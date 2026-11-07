@@ -261,7 +261,7 @@ A Dropbox file the laptop keeps only in the cloud, a placeholder until it is ope
 _Avoid_: cloud file, smart sync file, placeholder (alone)
 
 **Scratch folder**:
-The folder on Zach's external drive (`D:\Vellum indexer\scratch`) where the laptop indexer downloads an online-only file to read it, one at a time, deleting each copy once read. Nothing in it is ever Zach's.
+The folder on Zach's external drive (`D:\Vellum indexer\scratch`) where the laptop indexer downloads an online-only file to read it, one at a time, deleting each copy once what was read is saved. The indexer works only in its own marked subfolder of it, `Vellum indexer copies`, and refuses a scratch folder inside the Dropbox folder.
 _Avoid_: cache, temp folder, download folder
 
 ## Meetings

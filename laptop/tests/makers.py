@@ -111,7 +111,7 @@ class DxfReader:
     def __init__(self):
         self.read_paths: list[Path] = []
 
-    def read(self, path: Path) -> list[BlockInsert]:
+    def read(self, path: Path, work: Path | None = None) -> list[BlockInsert]:
         self.read_paths.append(path)
         try:
             doc = ezdxf.readfile(path)

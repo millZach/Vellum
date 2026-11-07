@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import http.client
 import json
 import logging
 import secrets
@@ -96,10 +97,14 @@ class KeyringTokenStore:
         keyring.set_password(KEYRING_SERVICE, self.user, token)
 
     def delete(self) -> None:
+        """Remove the token; raises if Credential Manager still holds it afterwards."""
         import keyring
 
-        with contextlib.suppress(Exception):  # already gone
+        with contextlib.suppress(Exception):  # "not found" is fine; a token left behind is checked below
             keyring.delete_password(KEYRING_SERVICE, self.user)
+        if self.get():
+            raise DropboxError('Windows Credential Manager still holds the Dropbox token: remove "Vellum laptop '
+                               'indexer" from Windows Credentials by hand')
 
 
 class MemoryTokenStore:
@@ -167,9 +172,14 @@ class DropboxClient:
         self._remember(reply)
 
     def sign_out(self) -> None:
-        """Forget the token on the laptop first, then ask Dropbox to end the sign-in."""
+        """Forget the token on the laptop first, then ask Dropbox to end the sign-in. Raises when the laptop still
+        holds the token, after asking Dropbox to end the sign-in anyway, so the token left behind is dead."""
         refresh = self.tokens.get()
-        self.tokens.delete()
+        kept: DropboxError | None = None
+        try:
+            self.tokens.delete()
+        except DropboxError as error:
+            kept = error
         if refresh:
             try:
                 self._refresh(refresh)
@@ -177,6 +187,8 @@ class DropboxClient:
             except DropboxError:
                 log.info("Signed out on the laptop; Dropbox was not told (offline or refused)")
         self._access = None
+        if kept is not None:
+            raise kept
 
     # --- Tokens ---
 
@@ -227,7 +239,15 @@ class DropboxClient:
                 self.sleep(min(60.0, 2.0**attempt))
                 continue
             if reply.status == 200:
-                return self._save(reply, dest)
+                try:
+                    return self._save(reply, dest)
+                except (OSError, http.client.HTTPException) as error:
+                    # The connection dropped part way (a reset, IncompleteRead): _save deleted the partial copy.
+                    if attempt == ATTEMPTS - 1:
+                        raise DropboxError(f"the download of {db_path} kept breaking off "
+                                           f"({type(error).__name__})") from None
+                    self.sleep(min(60.0, 2.0**attempt))
+                    continue
             reply.read_all()
             if reply.status == 401 and not renewed:
                 self._access, renewed = None, True

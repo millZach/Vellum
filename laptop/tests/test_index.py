@@ -177,3 +177,24 @@ def test_a_dwg_with_two_layouts_gives_two_drawings_each_with_its_own_scale_and_p
     assert e["E-202"]["pdf"]["path"].endswith("/Power-E-202.pdf") and e["E-202"]["otherPdfs"] == []
     assert e["E-201"]["dwg"]["path"] == e["E-202"]["dwg"]["path"] == "/Projects/Made-up Pump House/CAD/Power.dwg"
     assert e["E-201"]["id"] != e["E-202"]["id"]
+
+
+def test_a_pdf_whose_layout_cant_be_told_pairs_with_the_dwg_without_a_layouts_scale(dropbox: Path, make_indexer):
+    from makers import make_dxf, make_pdf, touch
+
+    job = dropbox / "Projects" / "Made-up Pump House"
+    make_dxf(job / "CAD" / "Power.dwg", [
+        ("E-201", {"DWG_NO": "E-201", "TITLE": "Pump house power plan", "SCALE": "1:20"}),
+        ("E-202", {"DWG_NO": "E-202", "TITLE": "Pump house lighting plan", "SCALE": "1:50"}),
+    ])
+    make_pdf(job / "PDF" / "Power-E-202.pdf", title="Power", mark=2)  # title names no layout; no title block text
+    make_pdf(job / "PDF" / "Power issued.pdf", title="Power", mark=3)
+    touch(job / "PDF" / "Power issued.pdf", 1_790_000_000)
+    make_indexer().scan()
+    entries = read_index(dropbox / "Vellum" / "Index")[1]
+    e = {(x["layout"], x["pdf"]["path"].rsplit("/", 1)[1] if x["pdf"] else None): x for x in entries}
+    assert set(e) == {("E-201", None), ("E-202", "Power-E-202.pdf"), (None, "Power issued.pdf")}
+    assert e[("E-202", "Power-E-202.pdf")]["scale"] == "1:50"
+    unsure = e[(None, "Power issued.pdf")]
+    assert unsure["dwg"]["path"].endswith("/Power.dwg") and unsure["pairedBy"] == "metadata"
+    assert (unsure["number"], unsure["scale"], unsure["title"]) == (None, None, None)  # no layout's fields guessed

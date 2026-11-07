@@ -104,6 +104,13 @@ def build_entries(records: dict[str, Record], projects: ProjectFinder) -> list[d
         pdf_key, rule = plotted[0] if plotted else (None, None)
         others = [records[k].path for k, _ in plotted[1:]]
         entries.append(_entry(records, project_of, dwg_key, sheet, pdf_key, rule, others))
+    # PDFs paired with a several-layout DWG whose layout couldn't be told: one entry for the DWG itself, with the
+    # PDF's own fields and no layout's (a guessed layout would bring a wrong scale).
+    for whole_key in sorted(k for k in plots if k.endswith("#*")):
+        dwg_key = whole_key[:-2]
+        plotted = sorted(plots[whole_key], key=lambda kp: (-records[kp[0]].mtime_ns, records[kp[0]].path.lower()))
+        others = [records[k].path for k, _ in plotted[1:]]
+        entries.append(_entry(records, project_of, dwg_key, None, plotted[0][0], plotted[0][1], others))
     for pdf_key in pdfs:
         if pdf_key not in pairs:
             entries.append(_entry(records, project_of, None, None, pdf_key, None, []))

@@ -128,7 +128,11 @@ def sign_out(home: Path) -> int:
     if client is None or not client.signed_in():
         print("Not signed in.")
         return 0
-    client.sign_out()
+    try:
+        client.sign_out()
+    except DropboxError as error:
+        print(f"Not signed out on this laptop: {error}")
+        return 1
     print("Signed out: the token is removed from Windows Credential Manager.")
     return 0
 

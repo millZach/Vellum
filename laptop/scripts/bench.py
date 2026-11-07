@@ -95,7 +95,7 @@ def online_only_pass(tmp: Path, results: dict) -> None:
     indexer.scan()
     results["online_only_first_read_200_s"] = time.perf_counter() - t0
     first = len(server.downloads)
-    left = len(list(scratch.iterdir()))
+    left = len([p for p in downloader.own.rglob("*") if p.is_file() and p.name != ".created-by-vellum-indexer"])
     t0 = time.perf_counter()
     indexer.scan()
     results["online_only_rescan_200_s"] = time.perf_counter() - t0

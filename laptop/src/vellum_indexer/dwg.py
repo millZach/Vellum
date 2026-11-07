@@ -39,7 +39,7 @@ class TitleBlockReader(Protocol):
     # Changing what a reader reads changes its id, so drawings read by an older one are read again.
     id: str
 
-    def read(self, path: Path) -> list[BlockInsert]: ...
+    def read(self, path: Path, work: Path | None = None) -> list[BlockInsert]: ...
 
 
 class NoReader:
@@ -47,7 +47,7 @@ class NoReader:
 
     id = "none"
 
-    def read(self, path: Path) -> list[BlockInsert]:
+    def read(self, path: Path, work: Path | None = None) -> list[BlockInsert]:
         return []
 
 
@@ -143,8 +143,17 @@ class AccoreconsoleReader:
         self.work = work
         self.timeout = timeout
 
-    def read(self, path: Path) -> list[BlockInsert]:
-        job = self.work / uuid.uuid4().hex[:12]
+    def clean(self) -> None:
+        """Delete work folders a stop left behind."""
+        if self.work.is_dir():
+            for entry in os.scandir(self.work):
+                if entry.is_dir(follow_symlinks=False):
+                    shutil.rmtree(entry.path, ignore_errors=True)
+
+    def read(self, path: Path, work: Path | None = None) -> list[BlockInsert]:
+        """``work`` puts the copy somewhere else: a DWG downloaded to the scratch drive is worked on there, never
+        copied to C:."""
+        job = (work or self.work) / uuid.uuid4().hex[:12]
         job.mkdir(parents=True, exist_ok=True)
         try:
             copy = job / "drawing.dwg"

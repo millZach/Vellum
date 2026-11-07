@@ -201,7 +201,7 @@ Zach's Windows laptop, where AutoCAD, Dropbox and Sotto run, and where agent wor
 _Avoid_: PC, desktop, computer (in Sotto, a computer is any machine with a host)
 
 **Project folder**:
-The Dropbox folder of the job a sheet's PDF came from, such as a client project's folder. A job's thread runs there.
+The Dropbox folder of the job a sheet's PDF came from, such as a client project's folder. A job's thread runs there. For the drawing index, a drawing's project folder is the top folder under a projects root (`/Projects` unless the laptop indexer's settings name others), or elsewhere the folder holding its discipline and format folders (`Electrical`, `CAD`, `PDF`, `Issued`).
 _Avoid_: workspace, repo, directory
 
 ## Agent work
@@ -241,8 +241,24 @@ The searchable list of every drawing in Zach's Dropbox: where it is, its project
 _Avoid_: catalog, database, register
 
 **Laptop indexer**:
-The tool on the laptop that keeps the drawing index up to date and plots a drawing to PDF when Vellum asks for one that has none.
+The tool on the laptop (`laptop/`) that keeps the drawing index up to date and plots a drawing to PDF when Vellum asks for one that has none. It starts at logon, scans all of Dropbox, reads only files whose size, modified time or online-only state changed, and watches Dropbox so a saved PDF is in the index within seconds.
 _Avoid_: agent (agents run jobs), sync, service
+
+**Index manifest**:
+`Dropbox/Vellum/Index/index.json`: the drawing index's format number, its generation and one line per project's index shard. It is rewritten only when a shard changed, so the Duo learns from one small read whether anything did (ADR-0017).
+_Avoid_: index file, header, catalog
+
+**Index shard**:
+One project's drawings in the drawing index, a file in `Vellum/Index/shards` named by the hash of its bytes, so an unchanged project keeps its name and the Duo downloads only shards it has not got.
+_Avoid_: page, chunk, part (a log part is the ink log's)
+
+**Plot**:
+The PDF a drawing's DWG was plotted to, which the drawing index pairs with it: by the PDF's plot metadata naming the DWG, by the same name nearby, or by the same drawing number in the same project. A drawing with none has no PDF yet; a PDF with no DWG is "PDF only, no DWG".
+_Avoid_: print, export, sheet (a sheet is a placed PDF page)
+
+**Online-only file**:
+A Dropbox file the laptop keeps only in the cloud, a placeholder until it is opened. The laptop indexer lists it by its path and name, unread, and never opens it, because opening it downloads it; it is read once it is local.
+_Avoid_: cloud file, smart sync file, placeholder (alone)
 
 ## Meetings
 

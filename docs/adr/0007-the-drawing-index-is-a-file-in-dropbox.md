@@ -14,3 +14,7 @@ A drawing with no PDF is plotted when Zach first opens it in Vellum, with AutoCA
 - The laptop indexer's code lives in this public repository, under `laptop/`. The index, thumbnails and plotted PDFs never do: they are client data and live only in Dropbox.
 - Vellum asks for a plot by writing a request to `Dropbox/Vellum`, which the laptop indexer answers. That is mechanical work, so it does not start a Sotto thread.
 - Building a full index of every drawing is a project of its own. The first version is the part Vellum needs to search and open drawings.
+
+## Amendment (#66): the laptop indexer and the index's format
+
+The laptop indexer is built (`laptop/`, its README says how it works). The index is not one file but the folder `Dropbox/Vellum/Index`: a small manifest, one content-named shard per project and content-named thumbnails, so a refresh on the Duo downloads only what changed (ADR-0017, `docs/drawing-index-format.md`). The indexer reads DWG title block attributes with the same `accoreconsole` this ADR plots with, on a copy of the DWG outside Dropbox, so project folders stay as Zach keeps them. It scans all of Dropbox, never opens an online-only file (opening one downloads it), and keeps its own state on the laptop, not in Dropbox.

@@ -210,7 +210,6 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         let point: CanvasPoint
         let pick: SelectTap.Pick?
         let target: Target
-        let onSelection: Bool
         /// A drag from where nothing moves: it waits for the lift, which does nothing either.
         var draggedNothing = false
     }
@@ -1367,10 +1366,10 @@ extension InkCanvasUIView {
     private func beginSelect(at location: CGPoint, point: CanvasPoint) {
         if case .hint = editor.toolStep { editor.toolStep = .start }
         var corner: Int?
-        var onSelection = false
+        var inBox = false
         if editor.selection.sheet == nil, !editor.selection.isEmpty, editor.selectionBounds != nil {
             corner = selectionOverlay.handle(at: location)
-            onSelection = selectionOverlay.contains(location)
+            inBox = selectionOverlay.contains(location)
         }
         let pick = corner == nil ? editor.selectPick(at: point) : nil
         let target: SelectPress.Target
@@ -1378,14 +1377,15 @@ extension InkCanvasUIView {
             target = .handle(corner)
         } else if let sheet = editor.selectedSheet, sheet.contains(point) {
             target = .selectedSheet
-        } else if onSelection {
+        } else if inBox {
+            // A drag from inside the dashed box moves the selection; a tap there is a tap like any other.
             target = .selection
         } else if let pick {
             if case .sheet = pick { target = .nothing(onSheet: true) } else { target = .thing(pick) }
         } else {
             target = .nothing(onSheet: false)
         }
-        selectPress = SelectPress(location: location, point: point, pick: pick, target: target, onSelection: onSelection)
+        selectPress = SelectPress(location: location, point: point, pick: pick, target: target)
     }
 
     /// The Pencil moved with Select: once it is `sheetTapReach` points from where it touched down, the press becomes the
@@ -1429,19 +1429,15 @@ extension InkCanvasUIView {
         guard let press = selectPress else { return }
         selectPress = nil
         guard keep, !press.draggedNothing else { return }
-        switch press.target {
-        case .handle: return
-        case .selectedSheet:
-            // On the selected sheet's bare paper, the sheet stays selected, as a lasso tap keeps it.
-            if case .sheet? = press.pick { return }
-        default: break
-        }
-        applySelectTap(press.pick, onSelection: press.onSelection)
+        // A tap on a corner handle does nothing, as the prototype's; anywhere else, inside the dashed box or on the
+        // selected sheet too, it picks what lay under it: on another sheet's paper over the selected one, that sheet.
+        if case .handle = press.target { return }
+        applySelectTap(press.pick)
     }
 
     /// A tap with Select picked this, or nothing (`SelectTap.selection`): the selection follows, and VoiceOver hears.
-    fileprivate func applySelectTap(_ pick: SelectTap.Pick?, onSelection: Bool) {
-        let after = SelectTap.selection(after: pick, given: editor.selection, onSelection: onSelection)
+    fileprivate func applySelectTap(_ pick: SelectTap.Pick?) {
+        let after = SelectTap.selection(after: pick, given: editor.selection)
         guard after != editor.selection else { return }
         editor.select(after)
         if let sheet = editor.selectedSheet {
@@ -1455,11 +1451,7 @@ extension InkCanvasUIView {
 
     /// A finger's tap with Select, with Draw with finger off: the same as the Pencil's.
     fileprivate func selectTap(at location: CGPoint) {
-        let point = canvasPoint(location)
-        let pick = editor.selectPick(at: point)
-        if let sheet = editor.selectedSheet, sheet.contains(point), case .sheet? = pick { return }
-        let onSelection = editor.selection.sheet == nil && !editor.selection.isEmpty && selectionOverlay.contains(location)
-        applySelectTap(pick, onSelection: onSelection)
+        applySelectTap(editor.selectPick(at: canvasPoint(location)))
     }
 
     /// Shows a word in the status bar for a moment, unless something else has taken its place by then.

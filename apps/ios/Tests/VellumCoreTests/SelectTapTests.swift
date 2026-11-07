@@ -157,13 +157,44 @@ final class SelectTapTests: XCTestCase {
         XCTAssertEqual(SelectTap.selection(after: .sheet(SheetID(1)), given: sheet), CanvasSelection(sheet: SheetID(1)))
     }
 
-    /// Inside the selection's dashed box a tap on nothing, or on a sheet's paper under it, is a tap on the selection.
-    func testATapInsideTheSelectionsBoxKeepsIt() {
-        let selected = CanvasSelection(strokes: [StrokeID(1)], frames: [FrameID(1)])
-        XCTAssertEqual(SelectTap.selection(after: nil, given: selected, onSelection: true), selected)
-        XCTAssertEqual(SelectTap.selection(after: .sheet(SheetID(1)), given: selected, onSelection: true), selected)
-        XCTAssertEqual(SelectTap.selection(after: .stroke(StrokeID(2)), given: selected, onSelection: true),
-                       CanvasSelection(strokes: [StrokeID(1), StrokeID(2)], frames: [FrameID(1)]), "another thing is added")
+    /// Inside the selection's dashed box a tap goes through the same tap test as anywhere else, as the prototype's does:
+    /// on nothing it lets go, on a sheet's bare paper it picks the sheet, on what is selected it keeps the selection, and
+    /// on another thing it adds it. (A drag from inside the box still moves the selection; that is the canvas view's.)
+    func testATapInsideTheSelectionsBoxIsATapLikeAnyOther() {
+        var session = InkSession()
+        // Two strokes on the lower sheet, far apart: their dashed box spans the blank paper between them.
+        let left = stroke(&session, from: p(220, 100), to: p(240, 100))
+        let right = stroke(&session, from: p(560, 100), to: p(580, 100))
+        let middle = stroke(&session, from: p(390, 140), to: p(410, 140))
+        let canvas = Scene(ink: InkIndex(session.ink), sheets: SheetIndex([under]))
+        let both = CanvasSelection(strokes: [left, right])
+        func tap(_ point: CanvasPoint) -> CanvasSelection {
+            SelectTap.selection(after: pick(point, in: canvas), given: both)
+        }
+        XCTAssertEqual(tap(p(400, 100)), CanvasSelection(sheet: SheetID(1)), "the sheet's bare paper between them")
+        XCTAssertEqual(tap(p(230, 100)), both, "what is selected stays, to be dragged")
+        XCTAssertEqual(tap(p(400, 140)), CanvasSelection(strokes: [left, right, middle]), "another thing is added")
+        // The same two strokes on empty canvas: a tap on the blank between them lets go of everything.
+        var bare = InkSession()
+        let a = stroke(&bare, from: p(-600, -100), to: p(-580, -100))
+        let b = stroke(&bare, from: p(-260, -100), to: p(-240, -100))
+        let empty = Scene(ink: InkIndex(bare.ink), sheets: SheetIndex([under]))
+        XCTAssertEqual(SelectTap.selection(after: pick(p(-420, -100), in: empty), given: CanvasSelection(strokes: [a, b])),
+                       .empty)
+    }
+
+    /// With the lower of two overlapping sheets selected, a tap on the upper one's bare paper picks the upper one: the
+    /// topmost sheet under the tap, whichever is selected.
+    func testATapPicksTheTopmostSheetWhicheverIsSelected() {
+        let canvas = Scene(sheets: SheetIndex([under, over]))
+        let lower = CanvasSelection(sheet: SheetID(1))
+        XCTAssertEqual(pick(p(500, 400), in: canvas), .sheet(SheetID(2)), "where they overlap")
+        XCTAssertEqual(SelectTap.selection(after: pick(p(500, 400), in: canvas), given: lower),
+                       CanvasSelection(sheet: SheetID(2)), "the upper sheet alone")
+        XCTAssertEqual(SelectTap.selection(after: pick(p(300, 400), in: canvas), given: lower), lower,
+                       "the lower sheet's own paper keeps it")
+        XCTAssertEqual(SelectTap.selection(after: .sheet(SheetID(2)), given: lower), CanvasSelection(sheet: SheetID(2)))
+        XCTAssertEqual(SelectTap.selection(after: .sheet(SheetID(1)), given: lower), lower)
     }
 
     /// The taps the prototype walks through, one after another, through both halves.

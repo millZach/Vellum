@@ -64,16 +64,10 @@ public enum SelectTap {
     /// - on another one, the selection with it added; but a sheet is selected alone, so with a sheet selected the tap
     ///   lets go of it and selects the thing alone.
     ///
-    /// `onSelection` says the tap landed inside the selection's dashed box: there a tap on nothing, or on the paper of a
-    /// sheet under it, is a tap on the selection and keeps it.
-    public static func selection(after pick: Pick?, given current: CanvasSelection,
-                                 onSelection: Bool = false) -> CanvasSelection {
-        if onSelection, current.sheet == nil, !current.isEmpty {
-            switch pick {
-            case nil, .sheet?: return current
-            default: break
-            }
-        }
+    /// A tap inside the selection's dashed box is no different: on the blank between two strokes it lets go, on a sheet's
+    /// bare paper it picks the sheet (#64, as the prototype's tap does). Only a drag from inside the box moves the
+    /// selection, which is the canvas view's to tell.
+    public static func selection(after pick: Pick?, given current: CanvasSelection) -> CanvasSelection {
         guard let pick else { return .empty }
         if case .sheet(let id) = pick { return CanvasSelection(sheet: id) }
         if current.sheet != nil { return CanvasSelection(pick) }

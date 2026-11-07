@@ -196,7 +196,16 @@ jobs:
         working-directory: laptop
         run: python scripts/bench.py --files 5000 --out "$env:RUNNER_TEMP/laptop-indexer.json"
       - name: Compare the timings with the baseline
+        if: always()
         run: python apps/ios/Scripts/perf-compare.py laptop-indexer "$env:RUNNER_TEMP/laptop-indexer.json"
+      - name: Keep the timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: laptop-indexer-timings
+          path: ${{ runner.temp }}/laptop-indexer.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Install, run and uninstall on a made-up Dropbox
         run: |
           $dropbox = Join-Path $env:RUNNER_TEMP 'Made-up Dropbox'

@@ -12,11 +12,19 @@ A PDF is paired with at most one DWG, by the first of these rules that finds one
 
 "Nearby" means the PDF's and the DWG's folders meet at most two folders up from each, inside the same project
 folder: the same folder, a ``PDF`` or ``Plots`` folder beside or under the DWG's, or ``CAD/Mechanical`` beside
-``PDF/Mechanical``. Within a rule the longest matching stem wins, then the nearest DWG, then the first by path, so
-the result never depends on the order files were found. Names compare without regard to case.
+``PDF/Mechanical``. Names compare without regard to case.
 
-A DWG can have several PDFs (one per layout, or reissues). Its entry shows the most recently modified one; the
-others are paired with it and so are not listed again as PDFs without a DWG.
+A wrong pair is worse than none, because a redline would go to the wrong DWG:
+
+- A name or title match whose title block numbers contradict (the PDF's text says ``E-201-1``, every one of the DWG's
+  title blocks says otherwise) is not a match.
+- Within a rule the longest matching stem wins, then the nearest DWG. Two DWGs equally near are told apart by the
+  PDF's drawing number; when it can't tell them apart, the PDF is left unpaired ("PDF only, no DWG").
+
+A DWG with several layouts has a title block (a sheet) per layout, and a PDF pairs with one sheet: the layout its
+title or name names after the DWG's name (AutoCAD's ``Power-E-202``), else the sheet with its drawing number, else the
+DWG's first sheet. A sheet with several PDFs (reissues) shows the most recently modified one; the others are paired
+with it and so are not listed again as PDFs without a DWG.
 """
 
 from __future__ import annotations
@@ -31,11 +39,13 @@ NEAR = 2
 
 @dataclass
 class Candidate:
-    key: str
+    key: str  # a PDF's key, or a DWG sheet's key
     path: str  # Dropbox path
     project: str | None  # the project folder's Dropbox path
-    number: str | None = None  # from the title block (DWG attributes, or the PDF's text)
+    number: str | None = None  # from the title block (a DWG sheet's attributes, or the PDF's text)
     meta_title: str | None = None  # PDFs only
+    dwg: str | None = None  # a sheet's DWG key; a DWG's sheets share it
+    layout: str | None = None  # a sheet's layout name
 
 
 def stem(path: str) -> str:
@@ -75,8 +85,11 @@ def norm_number(number: str | None) -> str | None:
 
 @dataclass
 class Pairing:
-    dwg_key: str
+    dwg_key: str  # the sheet's key
     rule: str  # "metadata" | "name" | "number"
+
+
+AMBIGUOUS = Pairing("", "ambiguous")
 
 
 def stems_named_by(name: str) -> list[str]:
@@ -89,15 +102,21 @@ def stems_named_by(name: str) -> list[str]:
     return sorted(found, key=len, reverse=True)
 
 
-def pair(pdfs: list[Candidate], dwgs: list[Candidate]) -> dict[str, Pairing]:
-    """PDF key -> the DWG it was plotted from, for the PDFs that have one."""
-    by_stem: dict[tuple[str | None, str], list[Candidate]] = defaultdict(list)
+def contradicts(pdf: Candidate, sheet: Candidate) -> bool:
+    a, b = norm_number(pdf.number), norm_number(sheet.number)
+    return a is not None and b is not None and a != b
+
+
+def pair(pdfs: list[Candidate], sheets: list[Candidate]) -> dict[str, Pairing]:
+    """PDF key -> the DWG sheet it was plotted from, for the PDFs that have one. ``sheets`` are the DWGs' title
+    blocks, one per layout (a DWG with none read is one sheet with no number)."""
+    by_stem: dict[tuple[str | None, str], dict[str, list[Candidate]]] = defaultdict(lambda: defaultdict(list))
     numbers: dict[tuple[str | None, str], list[Candidate]] = defaultdict(list)
-    for dwg in dwgs:
-        by_stem[(dwg.project, stem(dwg.path))].append(dwg)
-        n = norm_number(dwg.number)
+    for sheet in sheets:
+        by_stem[(sheet.project, stem(sheet.path))][sheet.dwg or sheet.key].append(sheet)
+        n = norm_number(sheet.number)
         if n:
-            numbers[(dwg.project, n)].append(dwg)
+            numbers[(sheet.project, n)].append(sheet)
     result: dict[str, Pairing] = {}
     for pdf in pdfs:
         found = None
@@ -108,21 +127,58 @@ def pair(pdfs: list[Candidate], dwgs: list[Candidate]) -> dict[str, Pairing]:
         if found is None:
             n = norm_number(pdf.number)
             matches = numbers.get((pdf.project, n), []) if n else []
-            if len(matches) == 1:
+            if len({m.dwg or m.key for m in matches}) == 1:
                 found = Pairing(matches[0].key, "number")
-        if found is not None:
+        if found is not None and found is not AMBIGUOUS:
             result[pdf.key] = found
     return result
 
 
 def _best(pdf: Candidate, name: str, by_stem: dict, rule: str) -> Pairing | None:
-    """The longest stem first, then the nearest DWG, then the first by path."""
+    """The longest stem first, then the nearest DWG. A DWG whose every sheet's number contradicts the PDF's is no
+    match. When two DWGs are equally near, the PDF's number decides; if it can't, the PDF stays unpaired (AMBIGUOUS):
+    a wrong pair would send a redline to the wrong DWG."""
     for s in stems_named_by(name) if name else []:
-        nearby = []
-        for dwg in by_stem.get((pdf.project, s), []):
-            d = distance(pdf, dwg)
+        nearby: list[tuple[int, list[Candidate]]] = []
+        for dwg_sheets in by_stem.get((pdf.project, s), {}).values():
+            kept = [sh for sh in dwg_sheets if not contradicts(pdf, sh)]
+            if not kept:
+                continue
+            d = distance(pdf, kept[0])
             if d is not None:
-                nearby.append((d, dwg.path.lower(), dwg))
-        if nearby:
-            return Pairing(min(nearby, key=lambda m: m[:2])[2].key, rule)
+                nearby.append((d, kept))
+        if not nearby:
+            continue
+        nearest = min(d for d, _ in nearby)
+        tied = [kept for d, kept in nearby if d == nearest]
+        if len(tied) > 1:
+            n = norm_number(pdf.number)
+            tied = [kept for kept in tied if n and any(norm_number(sh.number) == n for sh in kept)]
+            if len(tied) != 1:
+                return AMBIGUOUS
+        return Pairing(_sheet_for(pdf, name, s, tied[0]).key, rule)
     return None
+
+
+def _sheet_for(pdf: Candidate, name: str, dwg_stem: str, sheets: list[Candidate]) -> Candidate:
+    """Which of a DWG's sheets the PDF was plotted from: the layout its name or title names after the DWG's name
+    (``Power-E-202`` is layout ``E-202``), else the sheet with its number, else the first."""
+    if len(sheets) == 1:
+        return sheets[0]
+    rest = name[len(dwg_stem):]
+    for sep in SEPARATORS:
+        if rest.startswith(sep):
+            rest = rest[len(sep):]
+            break
+    rest = rest.strip()
+    for sheet in sheets:
+        if sheet.layout and sheet.layout.lower().strip() == rest:
+            return sheet
+    n = norm_number(pdf.number)
+    for sheet in sheets:
+        if n and norm_number(sheet.number) == n:
+            return sheet
+    for sheet in sheets:
+        if norm_number(sheet.number) and norm_number(sheet.number) == norm_number(rest):
+            return sheet
+    return sheets[0]

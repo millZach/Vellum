@@ -68,10 +68,7 @@ def read_pdf(path: Path) -> PdfFacts:
         if pages:
             page = doc[0]
             try:
-                width, height = page.get_size()
-                rotation = page.get_rotation()
-                if rotation in (90, 270):
-                    width, height = height, width
+                width, height = page.get_size()  # PDFium's size already takes /Rotate into account
                 paper = (round(width / 72, 3), round(height / 72, 3))
                 textpage = page.get_textpage()
                 try:

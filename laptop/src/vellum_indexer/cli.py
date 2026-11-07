@@ -17,8 +17,10 @@ from pathlib import Path
 
 from vellum_indexer import __version__, dwg, fields, files
 from vellum_indexer.config import ConfigError, Settings, find_dropbox, indexer_home, load_settings
+from vellum_indexer.dropbox_api import DropboxClient, DropboxError, KeyringTokenStore, pkce_pair
 from vellum_indexer.indexer import Indexer
 from vellum_indexer.projects import ProjectFinder
+from vellum_indexer.scratch import Downloader
 from vellum_indexer.state import State
 
 log = logging.getLogger("vellum_indexer")
@@ -73,6 +75,17 @@ class SingleInstance:
             raise ConfigError("Another laptop indexer is already running.") from error
 
 
+def dropbox_client(settings: Settings) -> DropboxClient | None:
+    if not settings.dropbox_app_key:
+        return None
+    return DropboxClient(settings.dropbox_app_key, KeyringTokenStore(settings.dropbox_app_key))
+
+
+def make_downloader(settings: Settings) -> Downloader:
+    return Downloader(settings.scratch_folder, dropbox_client(settings),
+                      min_free_bytes=int(settings.scratch_min_free_gb * 1024**3))
+
+
 def make_indexer(home: Path, dropbox: Path | None) -> tuple[Indexer, str, Settings]:
     settings = load_settings(home)
     root = find_dropbox(settings, dropbox)
@@ -86,24 +99,62 @@ def make_indexer(home: Path, dropbox: Path | None) -> tuple[Indexer, str, Settin
         projects=ProjectFinder(settings.projects_roots),
         dwg_reader=reader,
         tags=fields.TagMap(settings.title_block_tags),
+        downloader=make_downloader(settings),
     )
     return indexer, described, settings
 
 
+def sign_in(home: Path) -> int:
+    """PKCE with no redirect URI: Dropbox shows a code, pasted here. The refresh token goes to Windows Credential
+    Manager; nothing about it is printed or logged."""
+    settings = load_settings(home)
+    client = dropbox_client(settings)
+    if client is None:
+        raise ConfigError("Set dropbox_app_key in settings.toml first (install.ps1 -DropboxAppKey does it).")
+    verifier, challenge = pkce_pair()
+    print("Open this page, allow Vellum, and paste the code Dropbox shows:")
+    print(client.sign_in_url(challenge))
+    code = input("Code: ").strip()
+    if not code:
+        print("No code; not signed in.")
+        return 1
+    client.finish_sign_in(code, verifier)
+    print("Signed in. The laptop indexer can now download online-only files to read them.")
+    return 0
+
+
+def sign_out(home: Path) -> int:
+    client = dropbox_client(load_settings(home))
+    if client is None or not client.signed_in():
+        print("Not signed in.")
+        return 0
+    client.sign_out()
+    print("Signed out: the token is removed from Windows Credential Manager.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vellum-indexer", description="Vellum's laptop indexer.")
-    parser.add_argument("command", choices=["run", "scan", "where"])
+    parser.add_argument("command", choices=["run", "scan", "where", "sign-in", "sign-out"])
     parser.add_argument("--dropbox", type=Path, help="the Dropbox folder, instead of Dropbox's info.json")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
     home = indexer_home()
     try:
+        if args.command == "sign-in":
+            return sign_in(home)
+        if args.command == "sign-out":
+            return sign_out(home)
         if args.command == "where":
             indexer, reader, settings = make_indexer(home, args.dropbox)
             print(f"Dropbox folder: {indexer.root}")
             print(f"Index folder:   {indexer.index_folder}")
             print(f"Indexer folder: {home} (state.sqlite, indexer.log, settings.toml)")
             print(f"DWG reader:     {reader}")
+            d = indexer.downloader
+            d.available()
+            print(f"Online-only:    downloaded to {d.scratch}, read, deleted" if d.reason is None
+                  else f"Online-only:    listed unread ({d.reason})")
             return 0
         log_path = set_up_logging(home, args.verbose)
         lock = SingleInstance(home / "indexer.lock")  # noqa: F841 - held until exit
@@ -116,9 +167,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         from vellum_indexer.watch import watch
 
-        watch(indexer, settings.debounce_seconds, settings.debounce_max_seconds, settings.rescan_hours)
+        watch(indexer, settings.debounce_seconds, settings.debounce_max_seconds, settings.rescan_hours,
+              retry_minutes=settings.retry_unread_minutes)
         return 0
-    except ConfigError as error:
+    except (ConfigError, DropboxError) as error:
         log.error("%s", error)
         return 2
     except KeyboardInterrupt:

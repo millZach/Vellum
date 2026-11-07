@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from vellum_indexer.fields import TitleBlock, number_from_file_name
+from vellum_indexer.fields import Sheet, TitleBlock, number_from_file_name
 from vellum_indexer.pairing import Candidate, pair
 from vellum_indexer.pdf import THUMBNAIL_BOX
 from vellum_indexer.projects import ProjectFinder
@@ -43,8 +43,9 @@ def iso(mtime_ns: int) -> str:
     return datetime.fromtimestamp(mtime_ns / 1e9, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def entry_id(primary_path: str) -> str:
-    return hashlib.sha256(primary_path.lower().encode("utf-8")).hexdigest()[:16]
+def entry_id(primary_path: str, layout: str | None = None) -> str:
+    key = primary_path.lower() + (f"#{layout.lower()}" if layout else "")
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
 def _file(record: Record) -> dict:
@@ -62,22 +63,32 @@ def _file(record: Record) -> dict:
     return out
 
 
+def sheets_of(record: Record) -> list[Sheet]:
+    """A DWG's title blocks, one per layout; a DWG with none read is one sheet with no layout and no fields."""
+    sheets = [Sheet.from_dict(d) for d in record.facts.get("sheets") or []]
+    return sheets or [Sheet("", TitleBlock())]
+
+
 def build_entries(records: dict[str, Record], projects: ProjectFinder) -> list[dict]:
-    """Every drawing: each DWG with the PDF plotted from it if any, then each PDF with no DWG."""
+    """Every drawing: each DWG layout's title block (a sheet) with the PDF plotted from it if any, then each PDF
+    with no DWG."""
     project_of = {k: projects.project_of(r.path) for k, r in records.items()}
     dwgs = [k for k, r in records.items() if r.kind == "dwg"]
     pdfs = [k for k, r in records.items() if r.kind == "pdf"]
 
-    def fields(record: Record, name: str) -> TitleBlock:
-        return TitleBlock.from_dict(record.facts.get(name))
-
+    sheets: dict[str, tuple[str, Sheet]] = {}  # sheet key -> (DWG key, sheet)
+    for k in dwgs:
+        for sheet in sheets_of(records[k]):
+            sheets[f"{k}#{sheet.layout.lower()}"] = (k, sheet)
     candidates_dwg = [
-        Candidate(k, records[k].path, project_of[k].path, number=fields(records[k], "attributes").number) for k in dwgs
+        Candidate(sk, records[k].path, project_of[k].path, number=sh.block.number, dwg=k, layout=sh.layout or None)
+        for sk, (k, sh) in sheets.items()
     ]
     candidates_pdf = [
         Candidate(
             k, records[k].path, project_of[k].path,
-            number=fields(records[k], "text").number, meta_title=records[k].facts.get("metaTitle"),
+            number=TitleBlock.from_dict(records[k].facts.get("text")).number,
+            meta_title=records[k].facts.get("metaTitle"),
         )
         for k in pdfs
     ]
@@ -87,24 +98,25 @@ def build_entries(records: dict[str, Record], projects: ProjectFinder) -> list[d
         plots.setdefault(p.dwg_key, []).append((pdf_key, p.rule))
 
     entries = []
-    for dwg_key in dwgs:
-        plotted = sorted(plots.get(dwg_key, []), key=lambda kp: (-records[kp[0]].mtime_ns, records[kp[0]].path.lower()))
+    for sheet_key, (dwg_key, sheet) in sheets.items():
+        plotted = sorted(plots.get(sheet_key, []),
+                         key=lambda kp: (-records[kp[0]].mtime_ns, records[kp[0]].path.lower()))
         pdf_key, rule = plotted[0] if plotted else (None, None)
         others = [records[k].path for k, _ in plotted[1:]]
-        entries.append(_entry(records, project_of, dwg_key, pdf_key, rule, others))
+        entries.append(_entry(records, project_of, dwg_key, sheet, pdf_key, rule, others))
     for pdf_key in pdfs:
         if pdf_key not in pairs:
-            entries.append(_entry(records, project_of, None, pdf_key, None, []))
-    entries.sort(key=lambda e: e["path"].lower())
+            entries.append(_entry(records, project_of, None, None, pdf_key, None, []))
+    entries.sort(key=lambda e: (e["path"].lower(), (e["layout"] or "").lower()))
     return entries
 
 
-def _entry(records, project_of, dwg_key, pdf_key, rule, others) -> dict:
+def _entry(records, project_of, dwg_key, sheet, pdf_key, rule, others) -> dict:
     dwg = records[dwg_key] if dwg_key else None
     pdf = records[pdf_key] if pdf_key else None
     primary = dwg or pdf
     project = project_of[dwg_key or pdf_key]
-    from_dwg = TitleBlock.from_dict(dwg.facts.get("attributes")) if dwg else TitleBlock()
+    from_dwg = sheet.block if sheet else TitleBlock()
     from_pdf = TitleBlock.from_dict(pdf.facts.get("text")) if pdf else TitleBlock()
     block = from_dwg.filled_from(from_pdf)
     source = "dwg" if from_dwg.any() else "pdf" if from_pdf.any() else None
@@ -112,12 +124,14 @@ def _entry(records, project_of, dwg_key, pdf_key, rule, others) -> dict:
         block.number = number_from_file_name(PurePosixPath(primary.path).stem)
         if block.number and source is None:
             source = "name"
+    layout = (sheet.layout or None) if sheet else None
     # A DWG's own preview stands in only when it has no PDF.
     thumbnail = (pdf.facts.get("thumbnail") if pdf else None) or (dwg.facts.get("thumbnail") if dwg else None)
     entry = {
-        "id": entry_id(primary.path),
+        "id": entry_id(primary.path, layout),
         "path": primary.path,
         "name": PurePosixPath(primary.path).name,
+        "layout": layout,
         "folder": str(PurePosixPath(primary.path).parent),
         "project": project.name,
         "projectPath": project.path,

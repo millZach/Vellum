@@ -27,6 +27,7 @@ def make_pdf(
     inches: tuple[float, float] = (36, 24),
     pages: int = 1,
     mark: int = 0,
+    rotate: int = 0,
 ) -> Path:
     """A PDF with text at (x, y) in points and a border; ``mark`` changes the drawing so the picture changes."""
     w, h = inches[0] * 72, inches[1] * 72
@@ -41,7 +42,8 @@ def make_pdf(
     for i in range(pages):
         page_no = 4 + 2 * i
         objects.append(
-            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w} {h}] /Resources << /Font << /F1 3 0 R >> >> "
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w} {h}] /Rotate {rotate} "
+            f"/Resources << /Font << /F1 3 0 R >> >> "
             f"/Contents {page_no + 1} 0 R >>".encode()
         )
         objects.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
@@ -177,3 +179,75 @@ def small_tree(root: Path) -> None:
     (root / SCHOOL / "notes.txt").write_text("made up")
     for i, p in enumerate(sorted(q for q in root.rglob("*") if q.is_file())):
         touch(p, 1_790_000_000 + i * 60)
+
+
+class ScriptedDropbox:
+    """A made-up Dropbox server for the Dropbox client's transport: issues made-up tokens, serves made-up files from a
+    snapshot of the made-up Dropbox folder taken when it is made (the server's copy, not the laptop's), and fails on
+    cue. No network."""
+
+    APP_KEY = "madeupappkey0000"
+    REFRESH = "made-up-refresh-token-7c1f"
+    CODE = "made-up-code-0042"
+
+    def __init__(self, root: Path):
+        import hashlib
+
+        self.files = {}
+        for p in root.rglob("*"):
+            if p.is_file() and "Vellum" not in p.relative_to(root).parts[:1]:
+                self.files["/" + p.relative_to(root).as_posix()] = p.read_bytes()
+        self.hashlib = hashlib
+        self.issued: list[str] = []
+        self.downloads: list[str] = []
+        self.fail: list[int] = []  # statuses the next downloads answer with
+        self.revoked = 0
+        self.calls = 0
+
+    def update(self, db_path: str, data: bytes) -> None:
+        self.files[db_path] = data
+
+    def content_hash(self, data: bytes) -> str:
+        h = self.hashlib
+        blocks = b"".join(h.sha256(data[i:i + 4 * 1024 * 1024]).digest() for i in range(0, len(data), 4 * 1024 * 1024))
+        return h.sha256(blocks).hexdigest()
+
+    def __call__(self, url, headers, body):
+        import json
+        import urllib.parse
+
+        from vellum_indexer.dropbox_api import DOWNLOAD_URL, REVOKE_URL, TOKEN_URL, Response
+
+        self.calls += 1
+        if url == TOKEN_URL:
+            form = dict(urllib.parse.parse_qsl(body.decode()))
+            ok = form.get("client_id") == self.APP_KEY and (
+                (form.get("grant_type") == "refresh_token" and form.get("refresh_token") == self.REFRESH)
+                or (form.get("grant_type") == "authorization_code" and form.get("code") == self.CODE
+                    and form.get("code_verifier")))
+            if not ok:
+                return Response(400, {}, io.BytesIO(b'{"error": "invalid_grant"}'))
+            access = f"made-up-access-token-{len(self.issued):04}"
+            self.issued.append(access)
+            reply = {"access_token": access, "expires_in": 14400, "token_type": "bearer"}
+            if form["grant_type"] == "authorization_code":
+                reply["refresh_token"] = self.REFRESH
+            return Response(200, {}, io.BytesIO(json.dumps(reply).encode()))
+        if url == REVOKE_URL:
+            self.revoked += 1
+            return Response(200, {}, io.BytesIO(b"null"))
+        if url == DOWNLOAD_URL:
+            token = headers.get("Authorization", "").removeprefix("Bearer ")
+            if token not in self.issued[-1:]:
+                return Response(401, {}, io.BytesIO(b'{"error": "expired_access_token"}'))
+            if self.fail:
+                status = self.fail.pop(0)
+                return Response(status, {"retry-after": "1"} if status == 429 else {}, io.BytesIO(b"{}"))
+            path = json.loads(headers["Dropbox-API-Arg"])["path"]
+            data = self.files.get(path)
+            if data is None:
+                return Response(409, {}, io.BytesIO(b'{"error_summary": "path/not_found/"}'))
+            self.downloads.append(path)
+            result = {"size": len(data), "content_hash": self.content_hash(data), "path_display": path}
+            return Response(200, {"dropbox-api-result": json.dumps(result)}, io.BytesIO(data))
+        return Response(404, {}, io.BytesIO(b""))

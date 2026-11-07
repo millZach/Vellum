@@ -6,8 +6,9 @@ usage: python scripts/make_fixture_index.py [out folder]
 It builds a made-up Dropbox in a temp folder, runs the indexer over it with a stand-in DWG reader, and copies
 Dropbox/Vellum/Index out. The tree has one of each case the Duo shows: a DWG with its plot (paired by plot metadata,
 and by name), a DWG with no PDF yet (with its DWG preview as the thumbnail), a vendor PDF with no DWG, an AS NOTED
-sheet, an NTS loop drawing, a three-page PDF, a DWG with two PDFs, an online-only PDF listed unread, and a drawing
-with no project folder.
+sheet, an NTS loop drawing, a three-page PDF, a DWG with two PDFs, a DWG with two titled layouts (two drawings, each with its
+own PDF), an online-only PDF listed unread (no drive or sign-in when it was made), and a drawing with no project
+folder.
 """
 
 from __future__ import annotations
@@ -52,6 +53,11 @@ DWGS = {
     f"{PLANT}/Instrumentation/I-302.dwg": {"DWGNO": "I-302", "TITLE": "Loop diagram LT-102", "REV": "0",
                                            "SCALE": "NTS", "DATE": "2026-08-30"},
 }
+DWGS[f"{PLANT}/Electrical/Pump house.dwg"] = [  # one DWG, two titled layouts: two drawings
+    ("E-210", {"DWGNO": "E-210", "TITLE": "Pump house power plan", "REV": "A", "SCALE": "1:20", "DATE": "2026-10-20"}),
+    ("E-211", {"DWGNO": "E-211", "TITLE": "Pump house lighting plan", "REV": "A", "SCALE": "1:50",
+               "DATE": "2026-10-20"}),
+]
 # PDF -> (title block text fields, plot metadata title, paper inches, pages)
 PDFS = {
     f"{SCHOOL}/Mechanical/PDF/Issued set 2026-10-12.pdf": (
@@ -71,6 +77,12 @@ PDFS = {
         None, (17, 11), 1),
     f"{PLANT}/Instrumentation/PDF/I-302.pdf": (dict(), None, (17, 11), 1),  # online-only on the laptop
     "Made-up loose sketch.pdf": (dict(title="Made-up loose sketch"), None, (11, 8.5), 1),
+    f"{PLANT}/Electrical/PDF/Pump house-E-210.pdf": (
+        dict(number="E-210", title="Pump house power plan", rev="A", scale="1:20", date="2026-10-20"),
+        "Pump house-E-210", (36, 24), 1),
+    f"{PLANT}/Electrical/PDF/Pump house-E-211.pdf": (
+        dict(number="E-211", title="Pump house lighting plan", rev="A", scale="1:50", date="2026-10-20"),
+        "Pump house-E-211", (36, 24), 1),
 }
 ONLINE_ONLY = {"I-302.pdf"}
 
@@ -82,7 +94,10 @@ class FixtureReader:
         self.root = root
 
     def read(self, path: Path) -> list[BlockInsert]:
-        return [BlockInsert("Layout1", "TITLEBLOCK", DWGS[files.dropbox_path(self.root, path)[1:]])]
+        blocks = DWGS[files.dropbox_path(self.root, path)[1:]]
+        if isinstance(blocks, dict):
+            blocks = [("Layout1", blocks)]
+        return [BlockInsert(layout, "TITLEBLOCK", attributes) for layout, attributes in blocks]
 
 
 def preview(seed: int) -> Image.Image:

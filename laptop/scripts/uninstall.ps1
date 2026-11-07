@@ -8,7 +8,9 @@ environment, and deletes %LOCALAPPDATA%\Vellum\indexer\venv. The state file, log
 The index in Dropbox\Vellum\Index is left as it is; delete that folder by hand if the Duo should stop seeing it.
 
 .PARAMETER Purge
-Also delete the state file, log and settings (all of %LOCALAPPDATA%\Vellum\indexer).
+Also sign out of Dropbox (the token leaves Windows Credential Manager and Dropbox is asked to end the sign-in) and
+delete the state file, log and settings (all of %LOCALAPPDATA%\Vellum\indexer). The scratch folder on D: holds
+nothing between files and is left.
 #>
 param([switch]$Purge)
 $ErrorActionPreference = 'Stop'
@@ -34,6 +36,11 @@ foreach ($p in $running) {
     Write-Host "Stopped the indexer (process $($p.ProcessId))"
 }
 Start-Sleep -Milliseconds 500
+
+$venvPython = Join-Path $venv 'Scripts\python.exe'
+if ($Purge -and (Test-Path $venvPython)) {
+    & $venvPython -m vellum_indexer sign-out
+}
 
 if (Test-Path $venv) {
     Remove-Item -Recurse -Force $venv

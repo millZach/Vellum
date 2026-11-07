@@ -5,7 +5,9 @@ usage: python scripts/bench.py [--files 5000] [--out measurements.json]
 Builds a made-up tree of N files across 50 projects (40% DWGs, 40% PDFs, 20% lock, backup and other files the scan
 skips), then times a first scan, a rescan with nothing changed, a rescan with one PDF changed, and the update the
 watcher makes for one saved PDF. DWGs are read by a stand-in reader (CI has no AutoCAD), so the first scan's time is
-the PDF reading, thumbnails, listing and publishing, not AutoCAD's. Writes {"measurements": [...]} for
+the PDF reading, thumbnails, listing and publishing, not AutoCAD's. Then 200 online-only PDFs are read through a
+scripted Dropbox (no network): downloaded to a scratch folder, read and deleted, then rescanned with nothing to
+download. Writes {"measurements": [...]} for
 apps/ios/Scripts/perf-compare.py, and prints the counts beside the times.
 """
 
@@ -65,6 +67,46 @@ def build(root: Path, total: int) -> Path:
     return changed
 
 
+def online_only_pass(tmp: Path, results: dict) -> None:
+    """200 online-only PDFs read through a scripted Dropbox (no network): downloaded to scratch, read, deleted."""
+    from vellum_indexer import files as files_module
+    from vellum_indexer.dropbox_api import DropboxClient, MemoryTokenStore
+    from vellum_indexer.scratch import Downloader
+
+    from makers import ScriptedDropbox
+
+    root = tmp / "Online Dropbox"
+    for i in range(200):
+        title_block_pdf(root / "Projects" / f"Made-up Remote {i // 50}" / "PDF" / f"R-{i:03}.pdf", number=f"R-{i:03}",
+                        title=f"Made-up remote drawing {i:03}", rev="A", inches=(36, 24), mark=i % 9)
+    server = ScriptedDropbox(root)
+    client = DropboxClient(ScriptedDropbox.APP_KEY, MemoryTokenStore(ScriptedDropbox.REFRESH), transport=server,
+                           sleep=lambda s: None)
+    scratch = tmp / "scratch"
+    downloader = Downloader(scratch, client, min_free_bytes=0)
+    state = State(tmp / "online-home" / "state.sqlite")
+
+    def online(path, st):
+        return files_module.FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+
+    indexer = Indexer(root, state, dwg_reader=StandInReader(), attributes=online, downloader=downloader,
+                      progress_seconds=3600)
+    t0 = time.perf_counter()
+    indexer.scan()
+    results["online_only_first_read_200_s"] = time.perf_counter() - t0
+    first = len(server.downloads)
+    left = len(list(scratch.iterdir()))
+    t0 = time.perf_counter()
+    indexer.scan()
+    results["online_only_rescan_200_s"] = time.perf_counter() - t0
+    again = len(server.downloads) - first
+    print(f"online_only_first_read_200_s: {results['online_only_first_read_200_s']:.3f} s, downloaded {first}, "
+          f"left in scratch {left}; online_only_rescan_200_s: {results['online_only_rescan_200_s']:.3f} s, "
+          f"downloaded {again}")
+    assert first == 200 and left == 0 and again == 0, "online-only downloads were not one each, or left copies"
+    state.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--files", type=int, default=5000)
@@ -110,6 +152,7 @@ def main() -> int:
         db = "/" + changed.relative_to(root).as_posix()
         c, w = timed("update_one_pdf_saved_s", lambda: indexer.update({db}))
         assert c.files_read == 1
+        online_only_pass(tmp, results)
         manifest = json.loads((root / "Vellum" / "Index" / "index.json").read_text())
         print(f"Index: {manifest['drawings']} drawings in {len(manifest['shards'])} shards, manifest "
               f"{(root / 'Vellum' / 'Index' / 'index.json').stat().st_size} bytes")

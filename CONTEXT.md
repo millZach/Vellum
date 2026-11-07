@@ -237,7 +237,7 @@ A CAD file (DWG) in Zach's Dropbox, with any PDF plotted from it.
 _Avoid_: sheet (a sheet is a placed PDF page), file, plan
 
 **Drawing index**:
-The searchable list of every drawing in Zach's Dropbox: where it is, its project, its title block fields, which PDF is its plot, and a thumbnail. Choosing a drawing from a search opens it in Vellum.
+The searchable list of every drawing in Zach's Dropbox: where it is, its project, its title block fields, which PDF is its plot, and a thumbnail. A DWG with several titled layouts is one entry per layout, each with its own title block and plot. Choosing a drawing from a search opens it in Vellum.
 _Avoid_: catalog, database, register
 
 **Laptop indexer**:
@@ -257,8 +257,12 @@ The PDF a drawing's DWG was plotted to, which the drawing index pairs with it: b
 _Avoid_: print, export, sheet (a sheet is a placed PDF page)
 
 **Online-only file**:
-A Dropbox file the laptop keeps only in the cloud, a placeholder until it is opened. The laptop indexer lists it by its path and name, unread, and never opens it, because opening it downloads it; it is read once it is local.
+A Dropbox file the laptop keeps only in the cloud, a placeholder until it is opened. The laptop indexer never opens the placeholder, because that downloads the file into the laptop's Dropbox folder: it downloads a copy through the Dropbox API to the scratch folder, reads it and deletes the copy. While it can't (the drive unplugged, not signed in), the file is listed unread by its path and name.
 _Avoid_: cloud file, smart sync file, placeholder (alone)
+
+**Scratch folder**:
+The folder on Zach's external drive (`D:\Vellum indexer\scratch`) where the laptop indexer downloads an online-only file to read it, one at a time, deleting each copy once read. Nothing in it is ever Zach's.
+_Avoid_: cache, temp folder, download folder
 
 ## Meetings
 

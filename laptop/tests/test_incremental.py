@@ -196,3 +196,95 @@ def test_a_folder_that_cannot_be_listed_keeps_its_drawings(dropbox: Path, make_i
     counters, _ = rescan(indexer)
     assert counters.removed == 0
     assert len(read_index(dropbox / "Vellum" / "Index")[1]) == 4
+
+
+def test_losing_the_state_file_carries_on_from_the_index_in_dropbox(dropbox: Path, make_indexer, tmp_path):
+    small_tree(dropbox)
+    first = make_indexer()
+    first.scan()
+    first.state.close()
+    (tmp_path / "home" / "state.sqlite").unlink()  # uninstall -Purge, or a new laptop
+    for leftover in (tmp_path / "home").glob("state.sqlite-*"):
+        leftover.unlink()
+    again = make_indexer()
+    again.scan()
+    assert again.counters.files_read == 6  # nothing is known, so everything is read again
+    assert again.writer.counts.files == 0  # but nothing unchanged is written: same shards, same thumbnails
+    assert read_index(dropbox / "Vellum" / "Index")[0]["generation"] == 1
+    pdf = dropbox / SCHOOL / "Mechanical" / "M-101.pdf"
+    title_block_pdf(pdf, number="M-101", rev="D", mark=7)
+    touch(pdf, 1_800_000_000)
+    again.scan()
+    assert read_index(dropbox / "Vellum" / "Index")[0]["generation"] == 2  # never back to 1
+
+
+def test_a_folder_copy_reported_as_folder_and_file_events_reads_each_file_once(dropbox: Path, make_indexer):
+    small_tree(dropbox)
+    indexer = make_indexer()
+    indexer.scan()
+    indexer.dwg_reader.read_paths.clear()
+    make_dxf(dropbox / "Projects" / "Made-up Dam" / "CAD" / "C-002.dwg", [("Layout1", {"DWG_NO": "C-002"})])
+    # Windows reports a copied-in folder as the folder, then the file made and the file modified
+    indexer.update({"/Projects/Made-up Dam/CAD/C-002.dwg"},
+                   {"/Projects/Made-up Dam", "/Projects/Made-up Dam/CAD"})
+    assert [p.name for p in indexer.dwg_reader.read_paths] == ["C-002.dwg"]
+
+
+def test_a_save_during_a_large_watched_batch_is_indexed_before_the_batch_ends(dropbox: Path, make_indexer):
+    small_tree(dropbox)
+    indexer = make_indexer()
+    indexer.scan()
+    big = dropbox / "Projects" / "Made-up Dam" / "CAD"
+    for i in range(30):
+        make_dxf(big / f"C-{i:03}.dwg", [("Layout1", {"DWG_NO": f"C-{i:03}"})])
+    saved = dropbox / PLANT / "PDF" / "E-201.pdf"
+    indexer.dwg_reader.read_paths.clear()
+    seen_at = {}
+    real = indexer.dwg_reader.read
+
+    def read(path):
+        n = len(indexer.dwg_reader.read_paths) + 1
+        if n == 10:  # the save has been in the index since the 6th file, mid-batch
+            e201 = next(e for e in read_index(dropbox / "Vellum" / "Index")[1] if e["name"] == "E-201.dwg")
+            seen_at[n] = e201["pdf"]["modified"]
+        return real(path)
+
+    indexer.dwg_reader.read = read
+    polls = []
+
+    def poll():
+        polls.append(len(indexer.dwg_reader.read_paths))
+        if len(indexer.dwg_reader.read_paths) == 5 and not seen_at.get("saved"):
+            seen_at["saved"] = True
+            title_block_pdf(saved, number="E-201", rev="B", mark=9, title_meta="E-201-Layout1")
+            touch(saved, 1_800_000_000)
+            return ({f"/{PLANT}/PDF/E-201.pdf"}, set())
+        return None
+
+    indexer.poll_changes = poll
+    indexer.update(set(), {"/Projects/Made-up Dam"})
+    assert len(indexer.dwg_reader.read_paths) == 30
+    assert seen_at[10] == "2027-01-15T08:00:00Z"  # 1_800_000_000 seconds
+
+
+def test_a_watched_file_whose_folder_cannot_be_listed_keeps_its_drawing(dropbox: Path, make_indexer, monkeypatch):
+    small_tree(dropbox)
+    indexer = make_indexer()
+    indexer.scan()
+    from vellum_indexer import files as files_module
+
+    real = files_module.os.scandir
+    school = dropbox / SCHOOL / "Mechanical"
+
+    def flaky(path):
+        if Path(path) == school:
+            raise PermissionError("made-up sharing violation")
+        return real(path)
+
+    monkeypatch.setattr(files_module.os, "scandir", flaky)
+    indexer.update({f"/{SCHOOL}/Mechanical/M-101.pdf"}, {f"/{SCHOOL}/Mechanical"})
+    assert indexer.counters.removed == 0
+    names = {e["name"] for e in read_index(dropbox / "Vellum" / "Index")[1]}
+    assert "M-101.dwg" in names and len(names) == 4
+    m101 = next(e for e in read_index(dropbox / "Vellum" / "Index")[1] if e["name"] == "M-101.dwg")
+    assert m101["pdf"] is not None

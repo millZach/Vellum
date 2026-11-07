@@ -129,36 +129,62 @@ def facts_for(
     )
 
 
-def stat_files(
+def listing(folder: Path) -> dict[str, os.DirEntry] | None:
+    """A folder's entries by lower-case name, or None when it could not be listed (gone, or refused for a moment)."""
+    try:
+        with os.scandir(folder) as entries:
+            return {entry.name.lower(): entry for entry in entries}
+    except OSError:
+        return None
+
+
+def look_up(
     root: Path, db_paths: Iterable[str], attributes: AttributeReader = default_attributes
-) -> dict[str, FileFacts | None]:
-    """Each path's facts, or None when it is gone, read from its folder's listing rather than ``os.stat``: on Windows
-    ``os.stat`` opens a handle to the file, and the listing never touches the file at all."""
-    by_folder: dict[Path, list[str]] = {}
+) -> tuple[dict[str, FileFacts | None], set[str]]:
+    """Each path's facts, or None when its folder was listed and it is not there, read from its folder's listing
+    rather than ``os.stat``: on Windows ``os.stat`` opens a handle to the file, and the listing never touches it.
+    Also the folders that could not be listed: their paths are left out, since "not listed" is not "gone"."""
+    by_folder: dict[str, list[str]] = {}
     for db in db_paths:
-        by_folder.setdefault(local_path(root, db).parent, []).append(db)
-    out: dict[str, FileFacts | None] = {}
+        by_folder.setdefault(parent_folder(db), []).append(db)
+    found: dict[str, FileFacts | None] = {}
+    unlisted: set[str] = set()
     for folder, wanted in by_folder.items():
-        listed: dict[str, os.DirEntry] = {}
-        try:
-            with os.scandir(folder) as entries:
-                for entry in entries:
-                    listed[entry.name.lower()] = entry
-        except OSError:
-            pass
+        listed = listing(local_path(root, folder))
+        if listed is None:
+            if folder_state(root, folder) == "gone":
+                found.update({db: None for db in wanted})
+            else:
+                unlisted.add(folder)
+            continue
         for db in wanted:
             entry = listed.get(PurePosixPath(db).name.lower())
-            out[db] = None
+            found[db] = None
             if entry is None:
                 continue
             try:
                 if entry.is_file(follow_symlinks=False):
                     st = entry.stat(follow_symlinks=False)
                     if stat_module.S_ISREG(st.st_mode):
-                        out[db] = facts_for(root, Path(entry.path), st, attributes)
+                        found[db] = facts_for(root, Path(entry.path), st, attributes)
             except OSError:
-                pass
-    return out
+                found.pop(db)
+                unlisted.add(folder)
+    return found, unlisted
+
+
+def folder_state(root: Path, db_folder: str) -> str:
+    """"folder", "gone" (its parent was listed and it is not there, or is not a folder), or "unknown"."""
+    if db_folder == "/":
+        return "folder"
+    parent = listing(local_path(root, parent_folder(db_folder)))
+    if parent is None:
+        return "unknown"
+    entry = parent.get(PurePosixPath(db_folder).name.lower())
+    try:
+        return "folder" if entry is not None and entry.is_dir(follow_symlinks=False) else "gone"
+    except OSError:
+        return "unknown"
 
 
 def walk(

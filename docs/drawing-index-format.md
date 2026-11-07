@@ -50,16 +50,17 @@ All JSON is UTF-8. Paths are Dropbox paths as the Duo's Dropbox client names the
   "drawings": [ <entry>, ... ] }
 ```
 
-Entries are sorted by `path`, without case. Keys are sorted and the JSON is compact, so the same drawings always give
+Entries are sorted by `path`, then `layout`, without case. Keys are sorted and the JSON is compact, so the same drawings always give
 the same bytes and the same name.
 
 ## An entry
 
 ```json
 {
- "id": "47f4134063d58e5f",
+ "id": "dd0bdad0ab9b9082",
  "path": "/Projects/Made-up Plant Upgrade/CAD/E-201.dwg",
  "name": "E-201.dwg",
+ "layout": "Layout1",
  "folder": "/Projects/Made-up Plant Upgrade/CAD",
  "project": "Made-up Plant Upgrade",
  "projectPath": "/Projects/Made-up Plant Upgrade",
@@ -83,14 +84,15 @@ the same bytes and the same name.
 
 | Key | Meaning |
 |---|---|
-| `id` | Stable while the drawing's `path` stays: the first 16 hex digits of the SHA-256 of `path` in lower case. |
+| `id` | Stable while the drawing's `path` and `layout` stay: the first 16 hex digits of the SHA-256 of `path` in lower case, followed by `#` and `layout` in lower case when there is a layout. |
 | `path`, `name`, `folder` | The drawing's file: its DWG when it has one, else its PDF. |
+| `layout` | The DWG layout whose title block this entry is, or `null` (a PDF with no DWG, or a DWG whose title blocks are not read yet). A DWG with several titled layouts has one entry per layout, all with the same `path` and `dwg`, each with its own fields and `pdf`. |
 | `project`, `projectPath` | Its project folder's name and path, or `null`. |
 | `number`, `title`, `revision`, `scale`, `date` | Title block fields as written in the title block (not parsed), each `null` when unknown. `scale` is text such as `1/4" = 1'-0"`, `1:20`, `NTS` or `AS NOTED`; the Duo parses it (an AS NOTED drawing asks for its scale before it is placed). |
 | `fieldsFrom` | Where the fields came from: `dwg` (its title block attributes, with any it lacks from the PDF), `pdf` (the PDF's first page text), `name` (only a drawing number, from the file name), or `null`. |
-| `dwg` | The DWG, or `null`. `read` is `false` while the file is online-only on the laptop. |
-| `pdf` | The PDF shown for it, or `null`. `contentHash` is Dropbox's content hash, `pages` the page count, `paperInches` the first page's width and height in inches as it is viewed; all three are `null` while `read` is `false`. |
-| `otherPdfs` | Paths of other PDFs plotted from the same DWG (older plots, other layouts), newest first after `pdf`. |
+| `dwg` | The DWG, or `null`. `read` is `false` only while the file is online-only on the laptop and has not been downloaded and read yet (the external drive unplugged, the laptop not signed in to Dropbox, or a failed download waiting to be retried). |
+| `pdf` | The PDF shown for it, or `null`. `contentHash` is Dropbox's content hash, `pages` the page count, `paperInches` the first page's width and height in inches as it is viewed (a page turned by `/Rotate` 90° reports its turned size); all three are `null` while `read` is `false`. |
+| `otherPdfs` | Paths of other PDFs plotted from the same layout (older plots), newest first after `pdf`. |
 | `pairedBy` | Why `pdf` belongs to `dwg`: `metadata`, `name` or `number` (laptop/README.md, "Pairing"), or `null`. |
 | `thumbnail` | Its file in `thumbnails/`, or `null`: the PDF's first page, else the DWG's saved preview. |
 
@@ -101,7 +103,7 @@ the same bytes and the same name.
 | No PDF yet | `dwg` and no `pdf` |
 | PDF only, no DWG | `pdf` and no `dwg` |
 | Not on this Duo | a `pdf` whose `contentHash` is not among the Duo's cached PDFs (ADR-0010), or is `null` |
-| Not read yet (online-only on the laptop) | `dwg.read` or `pdf.read` is `false` |
+| Not read yet (online-only on the laptop, not downloaded yet) | `dwg.read` or `pdf.read` is `false` |
 
 ## Refreshing on the Duo
 
@@ -115,6 +117,11 @@ the same bytes and the same name.
 
 The laptop writes shards and thumbnails before the manifest that names them, and deletes files an hour after they
 stop being named, so steps 3 and 5 find what a just-read manifest names.
+
+## When the laptop loses its state
+
+After a purge or on a new laptop the indexer carries on from the `generation` in the manifest already in Dropbox, so
+the Duo never sees the generation go back. Shards and thumbnails that come out the same keep their names.
 
 ## Changing the format
 

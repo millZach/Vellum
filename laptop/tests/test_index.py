@@ -150,3 +150,30 @@ def test_a_thumbnail_deleted_from_dropbox_is_written_again(dropbox: Path, make_i
     thumbs[0].unlink()
     indexer.publish()
     assert thumbs[0].exists()
+
+
+def test_a_dwg_with_two_layouts_gives_two_drawings_each_with_its_own_scale_and_pdf(dropbox: Path, make_indexer):
+    from makers import make_dxf, title_block_pdf, touch
+
+    job = dropbox / "Projects" / "Made-up Pump House"
+    make_dxf(job / "CAD" / "Power.dwg", [
+        ("E-201", {"DWG_NO": "E-201", "TITLE": "Pump house power plan", "REV": "A", "SCALE": "1:20"}),
+        ("E-202", {"DWG_NO": "E-202", "TITLE": "Pump house lighting plan", "REV": "B", "SCALE": "1:50"}),
+    ])
+    title_block_pdf(job / "PDF" / "Power-E-201.pdf", number="E-201", scale="1:20", title_meta="Power-E-201", mark=1)
+    title_block_pdf(job / "PDF" / "Power-E-202.pdf", number="E-202", scale="1:50", title_meta="Power-E-202", mark=2)
+    touch(job / "PDF" / "Power-E-201.pdf", 1_790_000_000)
+    touch(job / "PDF" / "Power-E-202.pdf", 1_790_000_600)  # the newer plot
+    make_indexer().scan()
+    manifest, entries = read_index(dropbox / "Vellum" / "Index")
+    assert manifest["drawings"] == 2
+    e = {x["number"]: x for x in entries}
+    assert set(e) == {"E-201", "E-202"}
+    assert (e["E-201"]["layout"], e["E-201"]["title"], e["E-201"]["scale"], e["E-201"]["revision"]) == (
+        "E-201", "Pump house power plan", "1:20", "A")
+    assert (e["E-202"]["layout"], e["E-202"]["title"], e["E-202"]["scale"], e["E-202"]["revision"]) == (
+        "E-202", "Pump house lighting plan", "1:50", "B")
+    assert e["E-201"]["pdf"]["path"].endswith("/Power-E-201.pdf") and e["E-201"]["otherPdfs"] == []
+    assert e["E-202"]["pdf"]["path"].endswith("/Power-E-202.pdf") and e["E-202"]["otherPdfs"] == []
+    assert e["E-201"]["dwg"]["path"] == e["E-202"]["dwg"]["path"] == "/Projects/Made-up Pump House/CAD/Power.dwg"
+    assert e["E-201"]["id"] != e["E-202"]["id"]

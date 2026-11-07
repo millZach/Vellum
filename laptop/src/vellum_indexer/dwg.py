@@ -57,30 +57,49 @@ class ReaderError(Exception):
 
 # AutoLISP run inside accoreconsole: every block insert with attributes, its layout, block name and each attribute's
 # tag and value, one per line, tab-separated. Core console has no ActiveX, so it is plain entget/entnext.
-DUMP_LISP = r"""
-(defun vellum-clean (s)
-  (while (vl-string-search "\t" s) (setq s (vl-string-subst " " "\t" s)))
-  (while (vl-string-search "\n" s) (setq s (vl-string-subst " " "\n" s)))
-  s)
-(defun vellum-dump (out / f ss i e ent a ae)
-  ; AutoCAD 2021 and later take an encoding; an older one errors on it and writes its ANSI code page instead.
-  (setq f (vl-catch-all-apply 'open (list out "w" "utf8")))
-  (if (or (null f) (vl-catch-all-error-p f)) (setq f (open out "w")))
-  (if (setq ss (ssget "_X" '((0 . "INSERT") (66 . 1))))
-    (progn
-      (setq i 0)
-      (repeat (sslength ss)
-        (setq e (ssname ss i) ent (entget e))
-        (write-line (strcat "INSERT\t" (vellum-clean (cdr (assoc 410 ent))) "\t" (vellum-clean (cdr (assoc 2 ent)))) f)
-        (setq a (entnext e))
-        (while (and a (= "ATTRIB" (cdr (assoc 0 (setq ae (entget a))))))
-          (write-line (strcat "ATTRIB\t" (vellum-clean (cdr (assoc 2 ae))) "\t" (vellum-clean (cdr (assoc 1 ae)))) f)
-          (setq a (entnext a)))
-        (setq i (1+ i)))))
-  (write-line "END" f)
-  (close f)
-  (princ))
-"""
+#
+# It is typed into the script itself, one form per line, rather than saved as a .lsp file and loaded: AutoCAD's
+# SECURELOAD (1 by default) asks before loading a file from a folder it does not trust, the core console cannot answer,
+# and Zach's AutoCAD security settings are his. Nothing is loaded, so SECURELOAD never asks.
+DUMP_FORMS = [
+    r"""(defun vellum-clean (s)
+      (while (vl-string-search "\t" s) (setq s (vl-string-subst " " "\t" s)))
+      (while (vl-string-search "\n" s) (setq s (vl-string-subst " " "\n" s)))
+      s)""",
+    # AutoCAD 2021 and later take an encoding; an older one errors on it and writes its ANSI code page instead.
+    r"""(defun vellum-dump (out / f ss i e ent a ae)
+      (setq f (vl-catch-all-apply 'open (list out "w" "utf8")))
+      (if (or (null f) (vl-catch-all-error-p f)) (setq f (open out "w")))
+      (if (setq ss (ssget "_X" '((0 . "INSERT") (66 . 1))))
+        (progn
+          (setq i 0)
+          (repeat (sslength ss)
+            (setq e (ssname ss i) ent (entget e))
+            (write-line (strcat "INSERT\t" (vellum-clean (cdr (assoc 410 ent))) "\t"
+                                (vellum-clean (cdr (assoc 2 ent)))) f)
+            (setq a (entnext e))
+            (while (and a (= "ATTRIB" (cdr (assoc 0 (setq ae (entget a))))))
+              (write-line (strcat "ATTRIB\t" (vellum-clean (cdr (assoc 2 ae))) "\t"
+                                  (vellum-clean (cdr (assoc 1 ae)))) f)
+              (setq a (entnext a)))
+            (setq i (1+ i)))))
+      (write-line "END" f)
+      (close f)
+      (princ))""",
+]
+
+
+def one_line(form: str) -> str:
+    """A form on one script line: in a script a line break is Enter. The forms hold no string with a run of spaces."""
+    return " ".join(form.split())
+
+
+DUMP_LISP = "\n".join(one_line(f) for f in DUMP_FORMS)
+
+
+def dump_script(out: Path) -> str:
+    """The .scr accoreconsole runs: define the dump, run it, quit without saving."""
+    return "\n".join([DUMP_LISP, f'(vellum-dump "{out.as_posix()}")', "_.QUIT", "_Y", ""])
 
 
 def parse_dump(text: str) -> list[BlockInsert]:
@@ -130,13 +149,9 @@ class AccoreconsoleReader:
         try:
             copy = job / "drawing.dwg"
             shutil.copyfile(path, copy)
-            lisp = job / "dump.lsp"
             out = job / "attributes.txt"
             script = job / "dump.scr"
-            lisp.write_text(DUMP_LISP, encoding="utf-8")
-            script.write_text(
-                f'(load "{lisp.as_posix()}")\n(vellum-dump "{out.as_posix()}")\n_.QUIT\n_Y\n', encoding="utf-8"
-            )
+            script.write_text(dump_script(out), encoding="utf-8")
             args = [*self.command, "/i", str(copy), "/s", str(script), "/l", "en-US"]
             flags = BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW if sys.platform == "win32" else 0
             try:

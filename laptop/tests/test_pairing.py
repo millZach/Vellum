@@ -75,13 +75,64 @@ def test_metadata_naming_no_nearby_dwg_falls_through_to_the_name():
     assert pairs([pdf], [dwg]) == {pdf.key: (dwg.key, "name")}
 
 
-def test_the_nearest_of_two_same_named_dwgs_wins_then_the_first_by_path():
+def test_the_nearest_of_two_same_named_dwgs_wins():
     near, far = c(f"{P}/CAD/E-201.dwg"), c(f"{P}/Old/Rev A/E-201.dwg")
     pdf = c(f"{P}/CAD/PDF/E-201.pdf")
     assert pairs([pdf], [far, near]) == {pdf.key: (near.key, "name")}
-    a, b = c(f"{P}/A/E-201.dwg"), c(f"{P}/B/E-201.dwg")
-    pdf2 = c(f"{P}/PDF/E-201.pdf")
-    assert pairs([pdf2], [b, a]) == {pdf2.key: (a.key, "name")}
+
+
+def test_two_equally_near_dwgs_are_told_apart_by_the_pdfs_number_or_not_paired():
+    a, b = c(f"{P}/A/E-201.dwg", number="E-201A"), c(f"{P}/B/E-201.dwg", number="E-201B")
+    by_number = c(f"{P}/PDF/E-201.pdf", number="E-201B")
+    assert pairs([by_number], [a, b]) == {by_number.key: (b.key, "name")}  # not A, which sorts first
+    no_number = c(f"{P}/PDF/E-201.pdf")
+    assert pairs([no_number], [a, b]) == {}  # can't tell: "PDF only", never a guess
+    neither = c(f"{P}/PDF/E-201.pdf", number="E-999")
+    assert pairs([neither], [a, b]) == {}
+    unknown = c(f"{P}/A/E-201.dwg"), c(f"{P}/B/E-201.dwg")  # neither DWG's number read
+    assert pairs([c(f"{P}/PDF/E-201.pdf", number="E-201")], list(unknown)) == {}
+
+
+def test_a_name_match_whose_numbers_contradict_is_not_a_pair():
+    dwg = c(f"{P}/E-201.dwg", number="E-201")
+    pdf = c(f"{P}/E-201-1.pdf", number="E-201-1")
+    assert pairs([pdf], [dwg]) == {}
+    titled = c(f"{P}/set.pdf", number="E-305", title="E-201-Layout1")
+    assert pairs([titled], [dwg]) == {}
+    agrees = c(f"{P}/E-201-1.pdf", number="E 201")  # same number, written differently
+    assert pairs([agrees], [dwg]) == {agrees.key: (dwg.key, "name")}
+    unknown = c(f"{P}/E-201-1.pdf")  # no number read from the PDF: nothing contradicts
+    assert pairs([unknown], [dwg]) == {unknown.key: (dwg.key, "name")}
+
+
+def test_a_contradicted_near_dwg_gives_way_to_a_farther_one_that_agrees():
+    near = c(f"{P}/CAD/E-201.dwg", number="E-201")
+    far = c(f"{P}/Old/Rev A/E-201.dwg", number="E-201X")
+    pdf = c(f"{P}/CAD/PDF/E-201.pdf", number="E-201X")
+    assert pairs([pdf], [near, far]) == {pdf.key: (far.key, "name")}
+
+
+def sheet(path, layout, number):
+    dwg_key = path.lower()
+    return Candidate(f"{dwg_key}#{layout.lower()}", path, FINDER.project_of(path).path, number=number, dwg=dwg_key,
+                     layout=layout)
+
+
+def test_a_pdf_pairs_with_the_layout_it_was_plotted_from():
+    e201, e202 = sheet(f"{P}/CAD/Power.dwg", "E-201", "E-201"), sheet(f"{P}/CAD/Power.dwg", "E-202", "E-202")
+    by_title = c(f"{P}/PDF/Plot 7.pdf", title="Power-E-202")
+    by_name = c(f"{P}/PDF/Power - E-201.pdf")
+    by_text = c(f"{P}/PDF/Power.pdf", number="E-202")
+    by_number_only = c(f"{P}/Scans/Scan 0042.pdf", number="E 201")
+    got = pairs([by_title, by_name, by_text, by_number_only], [e201, e202])
+    assert got == {
+        by_title.key: (e202.key, "metadata"),
+        by_name.key: (e201.key, "name"),
+        by_text.key: (e202.key, "name"),
+        by_number_only.key: (e201.key, "number"),
+    }
+    neither = c(f"{P}/PDF/Power.pdf")  # names no layout and has no number: the DWG's first sheet
+    assert pairs([neither], [e201, e202]) == {neither.key: (e201.key, "name")}
 
 
 def test_same_drawing_number_in_the_same_project_when_only_one_dwg_has_it():

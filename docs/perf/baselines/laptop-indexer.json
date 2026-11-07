@@ -56,6 +56,33 @@
       "note": "Copying a folder of drawings in is one debounced update of the index, not one per file."
     },
     {
+      "metric": "downloads_rescan_no_change",
+      "kind": "count",
+      "value": 0,
+      "unit": "downloads",
+      "tolerance": 0,
+      "measured": "PR #74 2026-11-07 laptop/tests made-up Dropbox and scripted Dropbox API",
+      "note": "A rescan with no online-only file changed downloads nothing: the placeholder's size and modified time match the state file."
+    },
+    {
+      "metric": "downloads_one_online_only_changed",
+      "kind": "count",
+      "value": 1,
+      "unit": "downloads",
+      "tolerance": 0,
+      "measured": "PR #74 2026-11-07 laptop/tests made-up Dropbox and scripted Dropbox API",
+      "note": "One online-only file changed in Dropbox: that file is downloaded to the scratch folder and nothing else."
+    },
+    {
+      "metric": "scratch_files_left_after_a_scan",
+      "kind": "count",
+      "value": 0,
+      "unit": "files",
+      "tolerance": 0,
+      "measured": "PR #74 2026-11-07 laptop/tests made-up Dropbox and scripted Dropbox API",
+      "note": "Every copy downloaded to the scratch folder is deleted once read, so a scan leaves the external drive as it found it."
+    },
+    {
       "metric": "first_scan_s",
       "kind": "time",
       "value": 23.63,

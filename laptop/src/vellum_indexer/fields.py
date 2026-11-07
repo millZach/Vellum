@@ -1,8 +1,9 @@
 """Title block fields (drawing number, title, revision, scale, date) from a DWG's attributes, from a PDF's text, or
 the drawing number from the file name.
 
-The DWG comes first: the title block is the insert whose attribute tags name the most fields, a paper space layout
-before Model space, the first such insert after that. A PDF's first page text is read by its labels ("DWG NO",
+The DWG comes first: each paper space layout's title block is the insert in it whose attribute tags name the most
+fields, so a DWG with several layouts has a title block (a sheet) per layout; Model space counts only when no layout
+has one. A PDF's first page text is read by its labels ("DWG NO",
 "REV", "SCALE", "DATE", "TITLE"), the value after the label on the same line or on the next. Where neither gives a
 drawing number, a file name that looks like one (``M-101``, ``E201A``) is used.
 """
@@ -90,18 +91,10 @@ def clean(value: str | None) -> str | None:
     return value
 
 
-def from_attributes(inserts: Iterable[BlockInsert], tags: TagMap | None = None) -> TitleBlock:
-    tags = tags or TagMap()
-    candidates = [i for i in inserts if tags.score(i) > 0]
-    if not candidates:
-        return TitleBlock()
-    best = max(
-        enumerate(candidates),
-        key=lambda pair: (tags.score(pair[1]), pair[1].layout.lower() != "model", -pair[0]),
-    )[1]
+def _block_of(insert: BlockInsert, tags: TagMap) -> TitleBlock:
     block = TitleBlock()
     title_lines: dict[int, str] = {}
-    for tag, raw in best.attributes.items():
+    for tag, raw in insert.attributes.items():
         value = clean(raw)
         if value is None:
             continue
@@ -115,6 +108,45 @@ def from_attributes(inserts: Iterable[BlockInsert], tags: TagMap | None = None) 
     if block.title is None and title_lines:
         block.title = " ".join(title_lines[k] for k in sorted(title_lines))
     return block
+
+
+@dataclass
+class Sheet:
+    """One layout's title block: a DWG with several layouts, each its own titled sheet, has one per layout."""
+
+    layout: str
+    block: TitleBlock
+
+    def as_dict(self) -> dict:
+        return {"layout": self.layout, **self.block.as_dict()}
+
+    @staticmethod
+    def from_dict(data: dict) -> Sheet:
+        return Sheet(data.get("layout") or "", TitleBlock.from_dict(data))
+
+
+def sheets_from_attributes(inserts: Iterable[BlockInsert], tags: TagMap | None = None) -> list[Sheet]:
+    """Each layout's title block, in the order the layouts were met: in each layout the insert whose tags name the
+    most fields (the first such). Model space counts only when no paper space layout has a title block."""
+    tags = tags or TagMap()
+    best: dict[str, tuple[int, int, BlockInsert]] = {}
+    for i, insert in enumerate(inserts):
+        score = tags.score(insert)
+        if score <= 0:
+            continue
+        held = best.get(insert.layout)
+        if held is None or score > held[0]:
+            best[insert.layout] = (score, held[1] if held else i, insert)
+    paper = {k: v for k, v in best.items() if k.lower() != "model"}
+    chosen = paper or best
+    ordered = sorted(chosen.items(), key=lambda kv: kv[1][1])
+    return [Sheet(layout, _block_of(insert, tags)) for layout, (_, _, insert) in ordered]
+
+
+def from_attributes(inserts: Iterable[BlockInsert], tags: TagMap | None = None) -> TitleBlock:
+    """The first sheet's title block (a one-layout DWG's only one)."""
+    sheets = sheets_from_attributes(inserts, tags)
+    return sheets[0].block if sheets else TitleBlock()
 
 
 # --- A PDF's text ----------------------------------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from vellum_indexer.dwg import DUMP_LISP, AccoreconsoleReader, BlockInsert, ReaderError, parse_dump
+from vellum_indexer.dwg import DUMP_LISP, AccoreconsoleReader, BlockInsert, ReaderError, dump_script, parse_dump
 from vellum_indexer.fields import from_attributes
 
 from makers import make_dxf
@@ -87,3 +87,36 @@ def test_the_lisp_never_saves():
     for command in ("QSAVE", "SAVEAS", "WBLOCK", "(COMMAND"):
         assert command not in lisp
     assert '"_X"' in DUMP_LISP and "(66 . 1)" in DUMP_LISP
+
+
+def test_the_script_loads_no_file_so_secureload_never_asks(tmp_path: Path):
+    script = dump_script(tmp_path / "attributes.txt")
+    lowered = script.lower()
+    for loader in ("(load", "appload", "(autoload", "(arxload", ".lsp", ".fas", ".vlx", "secureload", "trustedpaths"):
+        assert loader not in lowered
+    lines = script.splitlines()
+    # each form is whole on its own line (a line break in a script is Enter), and the escapes survive
+    for line in lines[:2]:
+        assert line.startswith("(defun ") and line.count("(") == line.count(")")
+    assert '"\\t"' in lines[0] and "\t" not in script.replace("\\t", "")
+    assert lines[2:] == [f'(vellum-dump "{(tmp_path / "attributes.txt").as_posix()}")', "_.QUIT", "_Y"]
+
+
+def test_the_work_folder_holds_only_the_copy_and_the_script_while_autocad_runs(tmp_path: Path):
+    dwg = project_with_a_dwg(tmp_path)
+    work = tmp_path / "work"
+    seen = []
+    import vellum_indexer.dwg as dwg_module
+
+    real_run = dwg_module.subprocess.run
+
+    def spy(args, **kwargs):
+        seen.extend(sorted(p.name for p in Path(kwargs["cwd"]).iterdir()))
+        return real_run(args, **kwargs)
+
+    dwg_module.subprocess.run = spy
+    try:
+        AccoreconsoleReader(fake_console(tmp_path), work).read(dwg)
+    finally:
+        dwg_module.subprocess.run = real_run
+    assert seen == ["drawing.dwg", "dump.scr"]

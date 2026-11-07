@@ -18,7 +18,7 @@ def strip_thumbnails(entries):
 
 def test_the_fixture_reads_as_format_1_with_every_marker_case():
     manifest, entries = read_index(FIXTURE)
-    assert manifest["format"] == 1 and manifest["drawings"] == len(entries) == 8
+    assert manifest["format"] == 1 and manifest["drawings"] == len(entries) == 10
     for e in entries:
         if e["thumbnail"]:
             assert (FIXTURE / "thumbnails" / e["thumbnail"]).is_file()
@@ -33,6 +33,12 @@ def test_the_fixture_reads_as_format_1_with_every_marker_case():
     assert next(e for e in entries if e["number"] == "I-301")["otherPdfs"] == [
         "/Projects/Made-up Plant Upgrade/Instrumentation/PDF/I-301 - Rev 0 issued.pdf"]
     assert next(e for e in entries if e["name"] == "Made-up loose sketch.pdf")["project"] is None
+    layouts = {e["number"]: e for e in entries if e["name"] == "Pump house.dwg"}
+    assert sorted(layouts) == ["E-210", "E-211"]
+    assert (layouts["E-210"]["layout"], layouts["E-210"]["scale"]) == ("E-210", "1:20")
+    assert (layouts["E-211"]["layout"], layouts["E-211"]["scale"]) == ("E-211", "1:50")
+    assert layouts["E-210"]["pdf"]["path"].endswith("Pump house-E-210.pdf")
+    assert layouts["E-211"]["pdf"]["path"].endswith("Pump house-E-211.pdf")
 
 
 def test_the_fixture_is_what_the_indexer_writes_now(tmp_path: Path):

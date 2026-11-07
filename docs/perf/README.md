@@ -48,7 +48,7 @@ A timing may also carry `"scaled_by"`, naming a `"kind": "reference"` entry (its
 - **Report numbers in the PR.** A PR that touches drawing, storage, sync or the network gives before and after for its area's metrics in its body and says which budgets tightened.
 - **Timings say where they were measured.** A new runner image, Xcode or simulator runtime moves timings; re-baseline then, and say so.
 
-The laptop indexer's counts are budgets in its pytest suite (`laptop/tests/test_incremental.py` and `test_watch.py` read the file the same way), and its timings come from `laptop/scripts/bench.py` in the **Laptop indexer tests (Windows)** job on `windows-latest`, compared with `perf-compare.py laptop-indexer`. They are measured with a stand-in DWG reader, since CI has no AutoCAD: on the laptop, a first scan's time is mostly AutoCAD's core console, a few seconds a DWG.
+The laptop indexer's counts are budgets in its pytest suite (`laptop/tests/test_incremental.py` and `test_watch.py` read the file the same way), and its timings come from `laptop/scripts/bench.py` in the **Laptop indexer tests (Windows)** job on `windows-latest`, compared with `perf-compare.py laptop-indexer`. They are measured with a stand-in DWG reader, since CI has no AutoCAD: on the laptop, a first scan's time is mostly AutoCAD's core console, a few seconds a DWG. Online-only downloads are counted and timed against a scripted Dropbox API, so they show the indexer's own work, not the network's. The job keeps its measurements as the `laptop-indexer-timings` artifact.
 
 ## Comparing timings in CI
 

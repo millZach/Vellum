@@ -88,7 +88,14 @@ class DropboxEvents:
         self.handle(event.event_type, event.src_path, getattr(event, "dest_path", None) or None, event.is_directory)
 
 
-def watch(indexer, quiet: float, max_wait: float, rescan_hours: float, stop: threading.Event | None = None) -> None:
+def watch(
+    indexer,
+    quiet: float,
+    max_wait: float,
+    rescan_hours: float,
+    stop: threading.Event | None = None,
+    retry_minutes: float = 10.0,
+) -> None:
     """Scan, then watch until ``stop`` is set, updating the index from each debounced batch of changes."""
     from watchdog.observers import Observer
 
@@ -103,6 +110,7 @@ def watch(indexer, quiet: float, max_wait: float, rescan_hours: float, stop: thr
     try:
         indexer.scan()
         next_rescan = time.monotonic() + rescan_hours * 3600
+        next_retry = time.monotonic() + retry_minutes * 60
         while not stop.wait(0.5):
             if debouncer.due():
                 paths, folders = debouncer.take()
@@ -113,6 +121,9 @@ def watch(indexer, quiet: float, max_wait: float, rescan_hours: float, stop: thr
             elif time.monotonic() >= next_rescan:
                 indexer.scan()  # in case a change notification was lost
                 next_rescan = time.monotonic() + rescan_hours * 3600
+            elif time.monotonic() >= next_retry:
+                indexer.retry_unread()  # the drive plugged back in, signed in, or Dropbox no longer busy
+                next_retry = time.monotonic() + retry_minutes * 60
             if not observer.is_alive():
                 log.error("The Dropbox watcher stopped; restarting it")
                 observer = Observer()

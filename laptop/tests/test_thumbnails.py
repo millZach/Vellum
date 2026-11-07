@@ -89,3 +89,10 @@ def test_dropbox_content_hash(tmp_path: Path):
     expected = hashlib.sha256(
         hashlib.sha256(data[: 4 * 1024 * 1024]).digest() + hashlib.sha256(b"b").digest()).hexdigest()
     assert dropbox_content_hash(two_blocks) == expected
+
+
+@pytest.mark.parametrize("rotate, paper", [(0, [36.0, 24.0]), (90, [24.0, 36.0]), (180, [36.0, 24.0]),
+                                           (270, [24.0, 36.0])])
+def test_a_rotated_page_reports_its_paper_as_it_is_viewed(tmp_path: Path, rotate, paper):
+    facts = read_pdf(make_pdf(tmp_path / f"r{rotate}.pdf", inches=(36, 24), rotate=rotate))
+    assert list(facts.paper_inches) == paper

@@ -75,6 +75,18 @@ class Settings:
     debounce_max_seconds: float = 30.0
     # A full stat-only rescan this often while watching, in case a change notification was lost.
     rescan_hours: float = 6.0
+    # Online-only files are downloaded here through the Dropbox API, read, and the copy deleted (Zach, 2026-11-07).
+    scratch_folder: Path | None = field(default_factory=lambda: default_scratch())
+    scratch_min_free_gb: float = 5.0
+    # Vellum's Dropbox app key (docs/dropbox.md). Kept on the laptop only, never in the repository.
+    dropbox_app_key: str | None = None
+    # How often online-only files left unread (drive unplugged, not signed in, a failed download) are tried again.
+    retry_unread_minutes: float = 10.0
+
+
+def default_scratch() -> Path | None:
+    """``D:\\Vellum indexer\\scratch``, on Zach's external drive."""
+    return Path("D:/Vellum indexer/scratch") if sys.platform == "win32" else None
 
 
 def load_settings(home: Path) -> Settings:
@@ -98,7 +110,12 @@ def load_settings(home: Path) -> Settings:
         settings.accoreconsole = Path(data["accoreconsole"])
     if "title_block_tags" in data:
         settings.title_block_tags = {str(k): [str(t) for t in v] for k, v in data["title_block_tags"].items()}
-    for key in ("debounce_seconds", "debounce_max_seconds", "rescan_hours"):
+    if "scratch_folder" in data:
+        settings.scratch_folder = Path(data["scratch_folder"]) if data["scratch_folder"] else None
+    if "dropbox_app_key" in data:
+        settings.dropbox_app_key = str(data["dropbox_app_key"]).strip() or None
+    for key in ("debounce_seconds", "debounce_max_seconds", "rescan_hours", "scratch_min_free_gb",
+                "retry_unread_minutes"):
         if key in data:
             setattr(settings, key, float(data[key]))
     return settings

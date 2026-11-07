@@ -14,6 +14,14 @@ and settings stay in %LOCALAPPDATA%\Vellum\indexer.
 .PARAMETER DropboxPath
 The Dropbox folder, when Dropbox's info.json should not be used. Written to settings.toml.
 
+.PARAMETER DropboxAppKey
+Vellum's Dropbox app key (docs/dropbox.md), kept in settings.toml on this laptop only. With it the installer signs
+the laptop in to Dropbox (a page to open and a code to paste), so online-only files can be downloaded to the scratch
+folder, read and deleted. The token goes to Windows Credential Manager.
+
+.PARAMETER ScratchPath
+Where online-only files are downloaded to be read, then deleted. D:\Vellum indexer\scratch by default.
+
 .PARAMETER Python
 The Python 3.12 or newer to build the environment with. By default the py launcher's newest Python 3, else python.
 
@@ -22,6 +30,8 @@ Register the task without starting it now.
 #>
 param(
     [string]$DropboxPath,
+    [string]$DropboxAppKey,
+    [string]$ScratchPath,
     [string]$Python,
     [switch]$NoStart
 )
@@ -62,19 +72,28 @@ if ($LASTEXITCODE -ne 0) { throw 'pip could not install the dependencies.' }
 if ($LASTEXITCODE -ne 0) { throw 'pip could not install the indexer.' }
 
 $settingsFile = Join-Path $indexerHome 'settings.toml'
-if ($DropboxPath) {
-    $line = "dropbox_path = '" + $DropboxPath + "'"
+# Sets one top-level key in settings.toml, keeping every other line.
+function Set-Setting([string]$Name, [string]$Value) {
+    $line = "$Name = '" + $Value + "'"
+    $kept = @()
     if (Test-Path $settingsFile) {
-        $kept = Get-Content $settingsFile | Where-Object { $_ -notmatch '^\s*dropbox_path\s*=' }
-        Set-Content -Path $settingsFile -Value (@($line) + $kept) -Encoding utf8
-    } else {
-        Set-Content -Path $settingsFile -Value $line -Encoding utf8
+        $kept = @(Get-Content $settingsFile | Where-Object { $_ -notmatch "^\s*$Name\s*=" })
     }
+    Set-Content -Path $settingsFile -Value (@($line) + $kept) -Encoding utf8
 }
+if ($DropboxPath) { Set-Setting 'dropbox_path' $DropboxPath }
+if ($DropboxAppKey) { Set-Setting 'dropbox_app_key' $DropboxAppKey }
+if ($ScratchPath) { Set-Setting 'scratch_folder' $ScratchPath }
 
 # Fails here, before the task is registered, if no Dropbox folder can be found.
 & $venvPython -m vellum_indexer where
 if ($LASTEXITCODE -ne 0) { throw 'The indexer could not find the Dropbox folder. Pass -DropboxPath.' }
+
+if ($DropboxAppKey) {
+    # PKCE with no app secret: Dropbox shows a code to paste. Nothing about the token is printed.
+    & $venvPython -m vellum_indexer sign-in
+    if ($LASTEXITCODE -ne 0) { Write-Warning 'Not signed in: online-only files stay unread until vellum-indexer sign-in.' }
+}
 
 $user = "$env:USERDOMAIN\$env:USERNAME"
 $action = New-ScheduledTaskAction -Execute $venvPythonw -Argument '-m vellum_indexer run' -WorkingDirectory $indexerHome

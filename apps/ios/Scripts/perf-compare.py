@@ -17,6 +17,8 @@ import sys
 
 
 def main() -> int:
+    # The table marks a regression with an emoji; a Windows runner's console is cp1252 and can't print it (#85).
+    sys.stdout.reconfigure(encoding="utf-8")
     if len(sys.argv) != 3:
         print(__doc__)
         return 0
@@ -74,7 +76,7 @@ def main() -> int:
     print(table)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
-        with open(summary, "a") as f:
+        with open(summary, "a", encoding="utf-8") as f:
             f.write(f"### Perf timings: {area}\n\n{table}\n\n")
     return 0
 

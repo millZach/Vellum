@@ -75,8 +75,9 @@ final class DrawingIndexModel {
     private(set) var plottedThisSession: Set<String> = []
     /// A plot that came in while Zach was elsewhere: the banner that calls him back to it.
     var plotBanner: DrawingEntry?
-    /// Whether the Drawings tab is on the screen, as the tab bar says.
-    var onDrawingsTab = false
+    /// How many drawing viewers on the screen show each entry, as the viewers say when they appear and go: a viewer
+    /// kept while Zach browses Dropbox or another tab is not on the screen, and the banner shows.
+    @ObservationIgnored private var viewersOnScreen: [String: Int] = [:]
     /// Asks the laptop for plots and waits for them, off the main thread (`PlotWatch`).
     @ObservationIgnored private(set) var plotWatch: PlotWatch?
     /// Where the plot watch keeps its requests: Application Support, or memory in the captures.
@@ -212,11 +213,16 @@ final class DrawingIndexModel {
         let query = self.query
         // Plots kept on the Duo, and failures, for entries the index may now list a PDF for (#70).
         let plotted = Set(plots.filter { !$0.value.stage.isWaiting }.keys)
-        typealias Loaded = (DrawingIndexCopy, DrawingSearchIndex, DrawingSearchResult, Set<String>)
+        typealias Loaded = (DrawingIndexCopy, DrawingSearchIndex, DrawingSearchResult, [String: String])
         let loaded = await Task.detached(priority: .userInitiated) { () -> Loaded? in
             guard let copy = await keeper.load() else { return nil }
             let index = DrawingSearchIndex(copy.entries)
-            let listed: Set<String> = plotted.isEmpty ? [] : Set(copy.entries.filter { plotted.contains($0.id) && $0.pdf != nil }.map(\.id))
+            var listed: [String: String] = [:]
+            if !plotted.isEmpty {
+                for entry in copy.entries where plotted.contains(entry.id) {
+                    if let pdf = entry.pdf { listed[entry.id] = pdf.path }
+                }
+            }
             return (copy, index, index.keystroke(query, after: nil), listed)
         }.value
         guard let loaded else {
@@ -225,7 +231,7 @@ final class DrawingIndexModel {
         }
         let (copy, index, result, listed) = loaded
         if !listed.isEmpty, let plotWatch {
-            Task { await plotWatch.indexLists(pdfsFor: listed) }
+            Task { await plotWatch.indexLists(listed) }
         }
         generation += 1
         listing = Listing(entries: copy.entries, index: index, result: result, generation: generation,
@@ -292,7 +298,7 @@ final class DrawingIndexModel {
         if let viewer, viewer.entry.id == entry.id, viewer.entry == entry {
             if case .failed = viewer.state {} else { return }
         }
-        let viewer = DrawingViewerModel(entry: entry)
+        let viewer = DrawingViewerModel(entry: entry, plot: plots[entry.id])
         self.viewer = viewer
         let session = self.session
         Task {
@@ -331,7 +337,9 @@ final class DrawingIndexModel {
         let store = plotLedger
         let ledger: any PlotLedgerStore = await Task.detached(priority: .utility) { () -> any PlotLedgerStore in
             if let store { return store }
-            return (try? PlotLedgerFile.onThisDevice()) ?? PlotLedgerMemory()
+            // A ledger that can't be opened is a failure the Duo shows (each ask says it couldn't be saved), never a
+            // quiet ledger in memory that a relaunch would lose.
+            return (try? PlotLedgerFile.onThisDevice()) ?? PlotLedgerUnavailable()
         }.value
         let watch = PlotWatch(session: session, ledger: ledger, pdfs: SheetPDFs.app, report: { [weak self] progress in
             Task { @MainActor in self?.plotsChanged(progress) }
@@ -353,7 +361,7 @@ final class DrawingIndexModel {
             if let viewer, viewer.entry.id == id {
                 viewer.plotArrived(plot, session: session)
             }
-            if !(onDrawingsTab && viewer?.entry.id == id),
+            if (viewersOnScreen[id] ?? 0) == 0,
                let entry = viewer?.entry.id == id ? viewer?.entry : listing?.entries.first(where: { $0.id == id }) {
                 plotBanner = entry
             }
@@ -362,6 +370,12 @@ final class DrawingIndexModel {
             Task { await notePDFsOnThisDuo() }
             Task { await refresh() }
         }
+    }
+
+    /// A drawing viewer showing `entry` came onto the screen, or went.
+    func viewerOnScreen(_ entry: String, _ shown: Bool) {
+        let count = max(0, (viewersOnScreen[entry] ?? 0) + (shown ? 1 : -1))
+        viewersOnScreen[entry] = count == 0 ? nil : count
     }
 
     /// View, on the banner: back to the Drawings tab's viewer, showing the plot.

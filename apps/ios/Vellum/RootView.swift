@@ -53,7 +53,6 @@ struct RootView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: drawings.plotBanner?.id)
-        .onChange(of: selection, initial: true) { _, tab in drawings.onDrawingsTab = tab == .drawings }
         .onChange(of: drawings.debugTab) { _, tab in
             if let tab { selection = tab }
         }

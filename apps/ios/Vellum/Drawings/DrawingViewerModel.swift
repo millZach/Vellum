@@ -59,7 +59,8 @@ final class DrawingViewerModel {
         self.entry = entry
         let shown = DrawingOpening.pdf(for: entry) ?? plot.flatMap(Self.plotted)
         pdf = shown
-        plotNote = entry.pdf == nil ? plot?.note : nil
+        // The plot's note stays while the PDF shown is that plot, however the drawing was opened (#70).
+        plotNote = plot?.note(forPDFAt: shown?.path)
         state = shown == nil ? .noPDFYet : .opening
     }
 
@@ -75,7 +76,7 @@ final class DrawingViewerModel {
     func plotArrived(_ plot: PlotProgress, session: DropboxSession?) {
         guard state == .noPDFYet, let pdf = Self.plotted(plot) else { return }
         self.pdf = pdf
-        plotNote = plot.note
+        plotNote = plot.note(forPDFAt: pdf.path)
         state = .opening
         Task { await open(session: session) }
     }

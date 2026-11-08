@@ -55,6 +55,8 @@ public actor PlotWatch {
     /// Something asked for a look while a pass was running: the next pass starts without waiting.
     private var poked = false
     private var lastReport: [String: PlotProgress]?
+    /// By entry id: an ask the ledger couldn't save, with why; never queued, never sent.
+    private var notKept: [String: String] = [:]
     /// Every wait between looks, for the tests.
     public private(set) var waits: [Double] = []
 
@@ -83,6 +85,9 @@ public actor PlotWatch {
     }
 
     /// Asks the laptop to plot `entry`, or gives back the request already open for it. Nil for an entry with no DWG.
+    /// An ask counts only once the plot ledger has kept it (ADR-0010: a queued request survives a crash or a
+    /// relaunch); when the ledger can't be saved, nothing is queued or sent, and the entry says why
+    /// (`PlotStage.notKept`) until Zach tries again.
     @discardableResult
     public func ask(_ entry: DrawingEntry) -> PlotProgress? {
         load()
@@ -90,9 +95,19 @@ public actor PlotWatch {
             return progress(of: open)
         }
         guard let request = PlotRequest.asking(for: entry, at: now()) else { return nil }
-        ledger.failed[entry.id] = nil
-        ledger.open.append(OpenPlot(request: request))
-        persist()
+        var asked = ledger
+        asked.failed[entry.id] = nil
+        asked.open.append(OpenPlot(request: request))
+        do {
+            try store.save(asked)
+        } catch {
+            notKept[entry.id] = "This Duo couldn't save the request to plot it, so it isn't queued and hasn't gone to "
+                + "the laptop. Try again; if it keeps happening, the Duo may be out of storage."
+            publish()
+            return lastReport?[entry.id]
+        }
+        ledger = asked
+        notKept[entry.id] = nil
         publish()
         wake()
         return lastReport?[entry.id]
@@ -124,15 +139,22 @@ public actor PlotWatch {
         wake()
     }
 
-    /// The drawing index now lists a PDF for these entries: the plots kept for them (and any old failure) are
-    /// forgotten, since the index's PDF is the drawing's from here on.
-    public func indexLists(pdfsFor entries: Set<String>) {
+    /// The drawing index now lists a PDF for these entries, by entry id, its Dropbox path. Any old failure is
+    /// forgotten. A plot the Duo kept is kept while the index lists that same PDF, so its note (missing references,
+    /// the fallback page setup) stays with it however the drawing is opened; once the index lists another PDF (a
+    /// re-plot, a PDF saved by hand), the plot and its note are forgotten.
+    public func indexLists(_ pdfs: [String: String]) {
         load()
         var changed = false
-        for id in entries where ledger.plotted[id] != nil || ledger.failed[id] != nil {
-            ledger.plotted[id] = nil
-            ledger.failed[id] = nil
-            changed = true
+        for (id, path) in pdfs {
+            if ledger.failed[id] != nil {
+                ledger.failed[id] = nil
+                changed = true
+            }
+            if let plot = ledger.plotted[id], plot.path.lowercased() != path.lowercased() {
+                ledger.plotted[id] = nil
+                changed = true
+            }
         }
         guard changed else { return }
         persist()
@@ -179,6 +201,15 @@ public actor PlotWatch {
     }
 
     private var canWork: Bool { session != nil && online && active && signedIn }
+
+    /// Thrown before a transfer once the watch may no longer work (off the screen, offline, signed out): the pass ends
+    /// there, with nothing more sent or fetched, and that is not a failure.
+    private struct Stopped: Error {}
+
+    /// Called before every transfer in a pass, not only between passes.
+    private func mayGo() throws {
+        guard canWork else { throw Stopped() }
+    }
 
     private func watch() async {
         defer {
@@ -227,12 +258,14 @@ public actor PlotWatch {
         do {
             var justSent: Set<String> = []
             for request in ledger.open.filter({ $0.sent == nil }).map(\.request) {
+                try mayGo()
                 try await send(request, session)
                 justSent.insert(request.request)
             }
             var moved = false
             let looking = ledger.open.filter { $0.answer?.isFinal != true && !justSent.contains($0.request.request) }
             for open in looking {
+                try mayGo()
                 guard let bytes = try await session.download(path: PlotRequestFormat.answerPath(open.request.request)),
                       let answer = PlotAnswer.read([UInt8](bytes)), answer != open.answer else { continue }
                 if let index = ledger.open.firstIndex(where: { $0.request.request == open.request.request }) {
@@ -243,14 +276,19 @@ public actor PlotWatch {
             if moved { persist() }
             let time = now()
             let pending = ledger.open.contains { $0.sent != nil && $0.answer?.isFinal != true }
-            if pending, moved || checkInLooked.map({ time.timeIntervalSince($0) >= Self.checkInEvery }) ?? true {
+            // At most once a minute, whatever the answers do (ADR-0010's #70 amendment).
+            if pending, checkInLooked.map({ time.timeIntervalSince($0) >= Self.checkInEvery }) ?? true {
+                try mayGo()
                 checkedIn = try await session.serverModified(of: PlotRequestFormat.checkInPath)
                 checkInLooked = time
             }
             publish()
             for open in ledger.open where open.answer?.isFinal == true {
+                try mayGo()
                 try await finish(open.request.request, session)
             }
+            return true
+        } catch is Stopped {
             return true
         } catch let error as DropboxError {
             if error == .notSignedIn || error == .signInExpired { signedIn = false }
@@ -289,22 +327,22 @@ public actor PlotWatch {
         var reason = answer.reason.map(PlotAnswer.sentence) ?? "The laptop couldn't plot it."
         if answer.state == .done, answer.pdf == nil { reason = "The laptop said it plotted it, but not where the PDF is." }
         if answer.state == .done, let path = answer.pdf {
-            let keptName: String
-            if let kept = open.keptName {
-                keptName = kept
-            } else {
-                guard let pdfs else { throw DropboxError.unexpectedReply }
-                let kept = try await pdfs.pdf(at: path, contentHash: answer.contentHash, size: nil) {
-                    guard let reply = try await session.downloadPDF(path: path) else { throw DropboxError.unexpectedReply }
-                    return reply
-                }
-                keptName = kept.keptName
-                if let index = ledger.open.firstIndex(where: { $0.request.request == requestID }) {
-                    ledger.open[index].keptName = keptName
-                    persist()
-                }
-                publish()
+            // Through SheetPDFs every time, never on the name saved in the ledger alone: after a relaunch the system may
+            // have cleared Caches, and then the PDF comes down again before the request goes.
+            guard let pdfs else { throw DropboxError.unexpectedReply }
+            let kept = try await pdfs.pdf(at: path, contentHash: answer.contentHash, size: nil) {
+                guard let reply = try await session.downloadPDF(path: path) else { throw DropboxError.unexpectedReply }
+                return reply
             }
+            let keptName = kept.keptName
+            guard pdfs.holds(keptName: keptName, size: nil) else { throw DropboxError.unexpectedReply }
+            if let index = ledger.open.firstIndex(where: { $0.request.request == requestID }),
+               ledger.open[index].keptName != keptName {
+                ledger.open[index].keptName = keptName
+                persist()
+            }
+            publish()
+            try mayGo()
             plotted = PlottedPDF(path: path, contentHash: answer.contentHash, keptName: keptName, note: answer.note)
         }
         let path = open.request.dropboxPath
@@ -332,6 +370,9 @@ public actor PlotWatch {
 
     private func snapshot() -> [String: PlotProgress] {
         var out: [String: PlotProgress] = [:]
+        for (entry, reason) in notKept {
+            out[entry] = PlotProgress(entry: entry, request: "", stage: .notKept(reason: reason))
+        }
         for (entry, reason) in ledger.failed {
             out[entry] = PlotProgress(entry: entry, request: "", stage: .failed(reason: reason))
         }

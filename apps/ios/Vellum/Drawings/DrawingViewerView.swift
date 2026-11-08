@@ -58,6 +58,9 @@ struct DrawingViewerView: View {
         .sheet(item: $asking) { model in AddSheetFlow(model: model) }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("drawing-viewer")
+        // Whether the viewer is really on the screen, for the plot banner (#70).
+        .onAppear { index.viewerOnScreen(model.entry.id, true) }
+        .onDisappear { index.viewerOnScreen(model.entry.id, false) }
         #if DEBUG
         .task(id: model.isReady) { await DebugDrawingViewer.drive(self, ready: model.isReady) }
         #endif

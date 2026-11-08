@@ -201,7 +201,12 @@ final class PlotRequestTests: XCTestCase {
         XCTAssertEqual(done?.keptName, keptName)
         // The stages the app heard, in order.
         XCTAssertEqual(rig.reports.stages(entry.id).removingRepeats, [.asking, .plotting, .downloading, .done])
-        await rig.watch.indexLists(pdfsFor: [entry.id])
+        // The index lists the plot: it stays the drawing's plot while the index lists that PDF, and goes once it lists
+        // another.
+        await rig.watch.indexLists([entry.id: pdfPath])
+        let listed = await rig.watch.current[entry.id]
+        XCTAssertEqual(listed?.stage, .done)
+        await rig.watch.indexLists([entry.id: "/Projects/Made-up Plant Upgrade/Electrical/E-201.pdf"])
         let forgotten = await rig.watch.current[entry.id]
         XCTAssertNil(forgotten)
         // Waiting has stopped: nothing open, so nothing more is asked of Dropbox.
@@ -235,6 +240,20 @@ final class PlotRequestTests: XCTestCase {
         let done = await rig.watch.current[entry.id]
         XCTAssertEqual(done?.stage, .done)
         XCTAssertEqual(done?.note, "2 references couldn't be found, so the PDF is missing them.")
+
+        // Zach comes back once the index lists the plot (through the banner, or the row): the note is still there for
+        // that PDF, and only for it.
+        await rig.watch.indexLists([entry.id: pdfPath.uppercased()])
+        let listed = await rig.watch.current[entry.id]
+        XCTAssertEqual(listed?.note(forPDFAt: pdfPath), "2 references couldn't be found, so the PDF is missing them.")
+        XCTAssertNil(listed?.note(forPDFAt: "/Projects/Made-up School Addition/Mechanical/M-102.pdf"))
+        let relaunched = try Rig(t0, test: self, dropbox: rig.dropbox, ledger: rig.ledger, pdfs: rig.pdfs)
+        await relaunched.watch.start()
+        let afterRelaunch = await relaunched.watch.current[entry.id]
+        XCTAssertEqual(afterRelaunch?.note(forPDFAt: pdfPath), "2 references couldn't be found, so the PDF is missing them.")
+        await relaunched.watch.indexLists([entry.id: "/Projects/Made-up School Addition/Mechanical/M-102.pdf"])
+        let replotted = await relaunched.watch.current[entry.id]
+        XCTAssertNil(replotted, "another PDF listed: the plot and its note are forgotten")
     }
 
     func testTheRequestIsNeverDeletedBeforeThePDFIsDown() async throws {
@@ -311,6 +330,11 @@ final class PlotRequestTests: XCTestCase {
                 rig.laptop.answerAll("queued")
             }
             if time == t0.addingTimeInterval(10) {
+                // The check-in is looked at once a minute, so the laptop is seen again at the next look.
+                let still = await rig.watch.current[entry.id]
+                XCTAssertEqual(still?.stage, .waitingForLaptop(lastSeen: off))
+            }
+            if time == t0.addingTimeInterval(65) {
                 let plotting = await rig.watch.current[entry.id]
                 XCTAssertEqual(plotting?.stage, .plotting)
                 rig.laptop.answerAll("failed", reason: "the layout isn't in the DWG any more")
@@ -434,6 +458,143 @@ final class PlotRequestTests: XCTestCase {
     }
 }
 
+extension PlotRequestTests {
+    // MARK: Fixes from review (#84)
+
+    func testAnAskTheLedgerCantSaveIsNeitherQueuedNorSent() async throws {
+        let store = FlakyStore()
+        store.failing = true
+        let rig = try Rig(t0, test: self, store: store)
+        let entry = IndexFixture.entry("E-201")
+        rig.onLook { _ in await rig.watch.setActive(false) }
+        await rig.watch.start()
+        let asked = await rig.watch.ask(entry)
+        guard case .notKept(let reason)? = asked?.stage else { return XCTFail("not said: \(String(describing: asked))") }
+        XCTAssertTrue(reason.contains("couldn't save"))
+        await rig.watch.settled()
+        XCTAssertTrue(rig.dropbox.requests.isEmpty, "nothing sent")
+        let ledger = await rig.watch.ledgerNow
+        XCTAssertTrue(ledger.open.isEmpty, "nothing queued")
+        // Offline it is not shown as queued either.
+        await rig.watch.setOnline(false)
+        let offline = await rig.watch.ask(entry)
+        if case .notKept? = offline?.stage {} else { XCTFail("shown as \(String(describing: offline?.stage))") }
+        // Once the ledger saves again, asking again queues it, kept for a relaunch.
+        store.failing = false
+        let again = await rig.watch.ask(entry)
+        XCTAssertEqual(again?.stage, .queuedOnThisDuo)
+        XCTAssertEqual(store.load().open.map(\.request.id), [entry.id])
+        // A ledger that can't be opened at all refuses every ask the same way.
+        let unavailable = try Rig(t0, test: self, store: PlotLedgerUnavailable())
+        await unavailable.watch.start()
+        let refused = await unavailable.watch.ask(entry)
+        if case .notKept? = refused?.stage {} else { XCTFail("shown as \(String(describing: refused?.stage))") }
+    }
+
+    func testAPDFClearedFromCachesComesDownAgainBeforeTheRequestIsDeleted() async throws {
+        let dropbox = MadeUpDropbox()
+        let entry = IndexFixture.entry("E-201")
+        let pdfBytes = Array("%PDF-1.4 made-up plot of E-201 (example)\n%%EOF\n".utf8)
+        let pdfPath = "/Vellum/Plots/Made-up Plant Upgrade/E-201 - Layout1 - 2026-09-21 141500 - 5c0e1d2a.pdf"
+        let hash = DropboxContentHash.of(pdfBytes)
+        let request = try XCTUnwrap(PlotRequest.asking(for: entry, at: t0.addingTimeInterval(-120)))
+        dropbox.changeOnTheLaptop(request.dropboxPath, to: request.bytes)
+        dropbox.changeOnTheLaptop(pdfPath, to: pdfBytes)
+        // The ledger from before a relaunch: the answer read and the PDF's name saved, but Caches cleared since.
+        var saved = PlotLedger()
+        var open = OpenPlot(request: request)
+        open.sent = t0.addingTimeInterval(-120)
+        open.answer = PlotAnswer(request: request.request, id: entry.id, state: .done, pdf: pdfPath, contentHash: hash,
+                                 pageSetup: "saved", missingReferences: 0)
+        open.keptName = SheetPDFs.keptName(contentHash: hash, rev: "")
+        saved.open = [open]
+        let rig = try Rig(t0, test: self, dropbox: dropbox, ledger: PlotLedgerMemory(saved))
+        XCTAssertFalse(rig.pdfs.holds(keptName: open.keptName!, size: nil))
+        await rig.watch.start()
+        await rig.watch.settled()
+        XCTAssertEqual(rig.dropbox.requests, ["download \(pdfPath)", "delete \(request.dropboxPath)"])
+        XCTAssertTrue(rig.pdfs.holds(keptName: open.keptName!, size: pdfBytes.count))
+    }
+
+    func testLeavingTheScreenDuringADownloadStartsNoFurtherTransfer() async throws {
+        let dropbox = MadeUpDropbox()
+        var saved = PlotLedger()
+        for number in ["E-201", "M-102"] {
+            var open = OpenPlot(request: PlotRequest.asking(for: IndexFixture.entry(number), at: t0.addingTimeInterval(-30))!)
+            open.sent = t0.addingTimeInterval(-30)
+            saved.open.append(open)
+        }
+        let rig = try Rig(t0, test: self, dropbox: dropbox, ledger: PlotLedgerMemory(saved))
+        let first = PlotRequestFormat.answerPath(saved.open[0].request.request)
+        rig.spy.before = { request in
+            // The app goes to the background while the first answer is coming down.
+            if request.url.path == "/2/files/download" { await rig.watch.setActive(false) }
+        }
+        await rig.watch.start()
+        await rig.watch.settled()
+        XCTAssertEqual(rig.dropbox.requests, ["download \(first)"], "no second answer, no check-in")
+        let watching = await rig.watch.isWatching
+        XCTAssertFalse(watching)
+    }
+
+    func testTheCheckInIsLookedAtOnceAMinuteWhateverTheAnswersDo() async throws {
+        let rig = try Rig(t0, test: self)
+        let metadata = Box<Int>(0)
+        rig.onLook { time in
+            if time == t0.addingTimeInterval(5) { rig.laptop.answerAll("queued") }
+            if time == t0.addingTimeInterval(10) { rig.laptop.answerAll("plotting") }
+            if time == t0.addingTimeInterval(60) {
+                metadata.change { $0 = rig.dropbox.requests.filter { $0.hasPrefix("metadata") }.count }
+                await rig.watch.setActive(false)
+            }
+        }
+        await rig.watch.start()
+        await rig.watch.ask(IndexFixture.entry("E-201"))
+        await rig.watch.settled()
+        XCTAssertEqual(metadata.value, 1, "queued, then plotting, within a minute: one look at the check-in")
+    }
+}
+
+/// A plot ledger in memory whose saves fail while `failing`, as a full disk would.
+private final class FlakyStore: PlotLedgerStore, @unchecked Sendable {
+    struct Full: Error {}
+    private let lock = NSLock()
+    private var ledger = PlotLedger()
+    private var _failing = false
+
+    var failing: Bool {
+        get { lock.withLock { _failing } }
+        set { lock.withLock { _failing = newValue } }
+    }
+
+    func load() -> PlotLedger { lock.withLock { ledger } }
+    func save(_ ledger: PlotLedger) throws {
+        try lock.withLock {
+            if _failing { throw Full() }
+            self.ledger = ledger
+        }
+    }
+}
+
+/// The made-up Dropbox behind a hook that runs before each request reaches it.
+private final class Spy: DropboxTransport, @unchecked Sendable {
+    let inner: MadeUpDropbox
+    private let lock = NSLock()
+    private var _before: (@Sendable (DropboxHTTPRequest) async -> Void)?
+
+    init(_ inner: MadeUpDropbox) { self.inner = inner }
+
+    var before: (@Sendable (DropboxHTTPRequest) async -> Void)? {
+        get { lock.withLock { _before } }
+        set { lock.withLock { _before = newValue } }
+    }
+
+    func send(_ request: DropboxHTTPRequest) async throws -> DropboxHTTPResponse {
+        if let before { await before(request) }
+        return try await inner.send(request)
+    }
+}
+
 // MARK: - The rig
 
 /// A made-up Dropbox, a plot watch on it with a made-up clock, and the laptop played by the test. Each wait between
@@ -444,6 +605,7 @@ private final class Rig: @unchecked Sendable {
     let ledger: PlotLedgerMemory
     let pdfs: SheetPDFs
     let laptop: Laptop
+    let spy: Spy
     let reports = Reports()
     private(set) var watch: PlotWatch!
     private let lock = NSLock()
@@ -452,7 +614,7 @@ private final class Rig: @unchecked Sendable {
     private var look: (@Sendable (Date) async -> Void)?
 
     init(_ start: Date, test: XCTestCase, dropbox: MadeUpDropbox? = nil, ledger: PlotLedgerMemory? = nil,
-         pdfs: SheetPDFs? = nil) throws {
+         pdfs: SheetPDFs? = nil, store: (any PlotLedgerStore)? = nil) throws {
         self.start = start
         time = start
         let dropbox = dropbox ?? MadeUpDropbox()
@@ -466,15 +628,16 @@ private final class Rig: @unchecked Sendable {
             self.pdfs = SheetPDFs(folder: folder)
         }
         laptop = Laptop(dropbox)
+        spy = Spy(dropbox)
         let key = DropboxAppKey(buildSetting: "madeupplotkey01")!
         let tokens = DropboxTokens(accessToken: "made-up", refreshToken: "made-up", expiresAt: .distantFuture)
-        session = DropboxSession(appKey: key, transport: dropbox, store: DropboxMemoryTokenStore(tokens))
+        session = DropboxSession(appKey: key, transport: spy, store: DropboxMemoryTokenStore(tokens))
         dropbox.clock = { [unowned self] in self.now }
         if dropbox.allFiles[PlotRequestFormat.checkInPath] == nil {
             dropbox.changeOnTheLaptop(PlotRequestFormat.checkInPath, to: Laptop.checkIn, at: start.addingTimeInterval(-30))
         }
         let reports = self.reports
-        watch = PlotWatch(session: session, ledger: self.ledger, pdfs: self.pdfs,
+        watch = PlotWatch(session: session, ledger: store ?? self.ledger, pdfs: self.pdfs,
                           sleep: { [unowned self] seconds in await self.wait(seconds) },
                           now: { [unowned self] in self.now },
                           report: { reports.add($0) })

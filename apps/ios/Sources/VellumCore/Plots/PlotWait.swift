@@ -21,6 +21,8 @@ public enum PlotStage: Hashable, Sendable {
     case done
     /// The laptop won't plot it, for this reason, in its own words. Asking again is a new request.
     case failed(reason: String)
+    /// This Duo couldn't save the request in its plot ledger, so it was never queued or sent; trying again asks anew.
+    case notKept(reason: String)
 
     /// Decides the stage. `sent` is whether the request is in Dropbox; `answer` the laptop's latest answer read;
     /// `checkedIn` the check-in's `server_modified` when it was last looked at (nil when there is none, or it hasn't
@@ -53,7 +55,7 @@ public enum PlotStage: Hashable, Sendable {
     /// Whether the plot is still to come: the Duo keeps looking.
     public var isWaiting: Bool {
         switch self {
-        case .done, .failed: false
+        case .done, .failed, .notKept: false
         default: true
         }
     }
@@ -69,6 +71,7 @@ public enum PlotStage: Hashable, Sendable {
         case .plottedOffline: "Plotted · downloads when online"
         case .done: "PDF plotted"
         case .failed: "Couldn't plot"
+        case .notKept: "Couldn't save the request"
         }
     }
 
@@ -112,6 +115,13 @@ public struct PlotProgress: Hashable, Sendable {
     public var keptName: String?
     /// The laptop's warning or fallback line (`PlotAnswer.note`), shown in one short line with the PDF.
     public var note: String?
+
+    /// The plot's note, for the viewer showing the PDF at `path`: only while that PDF is this plot, so a note never
+    /// lands on another PDF the index lists for the drawing later.
+    public func note(forPDFAt path: String?) -> String? {
+        guard stage == .done, let path, let pdfPath, path.lowercased() == pdfPath.lowercased() else { return nil }
+        return note
+    }
 
     public init(entry: String, request: String, stage: PlotStage, pdfPath: String? = nil, contentHash: String? = nil,
                 keptName: String? = nil, note: String? = nil) {

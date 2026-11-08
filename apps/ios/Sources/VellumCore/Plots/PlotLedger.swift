@@ -89,6 +89,17 @@ public struct PlotLedgerFile: PlotLedgerStore {
     }
 }
 
+/// The store when the plot ledger's folder can't be opened on this Duo: nothing is kept, so every ask is refused
+/// and says so (`PlotStage.notKept`) rather than queueing a request a relaunch would lose.
+public struct PlotLedgerUnavailable: PlotLedgerStore {
+    public struct CantSave: Error {}
+
+    public init() {}
+
+    public func load() -> PlotLedger { PlotLedger() }
+    public func save(_ ledger: PlotLedger) throws { throw CantSave() }
+}
+
 /// A ledger in memory, for tests and the captures.
 public final class PlotLedgerMemory: PlotLedgerStore, @unchecked Sendable {
     private let lock = NSLock()

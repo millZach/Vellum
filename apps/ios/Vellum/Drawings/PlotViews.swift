@@ -34,6 +34,13 @@ struct PlotCard: View {
             case .plottedOffline:
                 title("Plotted, not downloaded", icon: "icloud.slash")
                 line("The laptop plotted \(number), but you're offline. The PDF downloads when you're back online.")
+            case .notKept(let reason):
+                title("Couldn't save the request", icon: "exclamationmark.triangle")
+                line(reason)
+                Button("Try again", action: askAgain)
+                    .buttonStyle(.bordered)
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.top, 4)
             case .failed(let reason):
                 title("The laptop couldn't plot \(number)", icon: "exclamationmark.triangle")
                 line(reason)
@@ -107,7 +114,7 @@ struct PlotChip: View {
         case nil, .waitingForLaptop?: "laptopcomputer"
         case .queuedOnThisDuo?: "clock"
         case .plottedOffline?: "icloud.slash"
-        case .failed?: "exclamationmark.triangle"
+        case .failed?, .notKept?: "exclamationmark.triangle"
         case .done?: "checkmark"
         case .asking?, .plotting?, .downloading?: "arrow.triangle.2.circlepath"
         }

@@ -216,7 +216,7 @@ final class DrawingIndexModel {
         let loaded = await Task.detached(priority: .userInitiated) { () -> Loaded? in
             guard let copy = await keeper.load() else { return nil }
             let index = DrawingSearchIndex(copy.entries)
-            let listed = plotted.isEmpty ? [] : Set(copy.entries.filter { plotted.contains($0.id) && $0.pdf != nil }.map(\.id))
+            let listed: Set<String> = plotted.isEmpty ? [] : Set(copy.entries.filter { plotted.contains($0.id) && $0.pdf != nil }.map(\.id))
             return (copy, index, index.keystroke(query, after: nil), listed)
         }.value
         guard let loaded else {

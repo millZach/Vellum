@@ -99,22 +99,50 @@ jobs:
           echo "Build number: $BUILD_NUMBER"
           echo "$BUILD_NUMBER" | grep -Eq '^[0-9]{8}\.[1-9][0-9]{0,5}$|^[0-9]{8}\.0$'
 
-  # Evidence, not part of the merge bar: every tab on the iPhone Duo simulator (iOS 27.1), unfolded, in light and dark,
-  # and the Home Screen with Vellum's icon.
-  duo-captures:
-    name: Duo simulator captures
+  # Evidence, not part of the merge bar: four captures jobs on the iPhone Duo simulator (iOS 27.1), unfolded, in light and
+  # dark, each on its own runner and simulator so that none nears its hour. Until #80 they were two jobs, "Duo simulator
+  # captures" (now tabs and canvas) and "Duo sheet and sync captures" (now sheets and sync), which reached 50 and 58
+  # minutes. On #80's run they took 27 to 35 minutes on runners slower than usual: about 1 minute building the Debug app,
+  # 4 to 7 booting the simulator, 21 to 27 capturing. A new capture goes in the job of its kind (capture-duo.sh's PART
+  # says which).
+
+  # Every tab, the Canvases list and a kill-and-reopen, the Drawings tab's Dropbox states and its drawing search unfolded
+  # and folded, and the Home Screen with Vellum's icon.
+  duo-captures-tabs:
+    name: "Duo captures: tabs, drawing search and Home Screen"
     runs-on: xcode-27
-    # The #7 captures (snap, lasso, moved selection, text, in light and dark) pushed the job past 30 minutes, and
-    # the #8 captures (measure, dimension, loupe, frame, window) take it to 34-46 minutes depending on the runner.
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Capture every tab and the Home Screen unfolded, in light and dark, and the drawing search folded too
-        run: PART=captures sh apps/ios/Scripts/capture-duo.sh .build-captures
-      # Timings are recorded and compared with docs/perf/baselines (docs/perf/README.md); they never fail the build.
+      - name: Capture the tabs, the Canvases list, saving, the drawing search folded and unfolded, and the Home Screen
+        run: PART=tabs sh apps/ios/Scripts/capture-duo.sh .build-captures
+      - name: Keep the captures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: duo-captures-tabs
+          path: apps/ios/.build-captures/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The canvas tools (Draw with finger, the Speed check, snap, lasso, text, symbols, measure, dimension, frame, window and
+  # the scale readout), Settings from the canvas, appearance after Light, the status bar walk, and the Debug benchmark.
+  # Timings are recorded and compared with docs/perf/baselines (docs/perf/README.md); they never fail the build.
+  duo-captures-canvas:
+    name: "Duo captures: canvas tools and benchmark"
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Capture the canvas tools, Settings from the canvas and appearance, walk the status bar and run the Debug benchmark
+        run: PART=canvas sh apps/ios/Scripts/capture-duo.sh .build-captures
       - name: Compare canvas frame timings with the baseline
         if: always()
         run: python3 apps/ios/Scripts/perf-compare.py canvas-rendering apps/ios/.build-captures/benchmark.json
@@ -122,29 +150,26 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: duo-captures
+          name: duo-captures-canvas
           path: apps/ios/.build-captures/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
 
-  # Evidence, not part of the merge bar: placing sheets (#11) on the iPhone Duo simulator, unfolded, in light and dark:
-  # Add sheet's browser, page grid and confirm steps, the outline before the tap, and placed sheets measured against
-  # their printed dimensions. Its own job, so the captures job stays under its hour. Since #12 it also captures the
-  # sync status in each state and the airplane-mode proof on the made-up Dropbox (about 22 minutes before #12), and since
-  # #40 the drawing tools: the flyout, tag, pad, angle guide, loupe naming each snap kind, and each shape.
-  duo-sheet-captures:
-    name: Duo sheet and sync captures
+  # Placing sheets (#11): Add sheet's browser, page grid and confirm steps, the outline before the tap, placed sheets
+  # measured against their printed dimensions, turned, selected and snapped to; then the drawing viewer (#69) and its time
+  # to first page.
+  duo-captures-sheets:
+    name: "Duo captures: sheets and drawing viewer"
     runs-on: xcode-27
-    # About 33 minutes before #40, whose 38 captures add about 16.
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Capture placing sheets, the drawing viewer, the sync status and the drawing tools unfolded, in light and dark
-        run: PART=sheets sh apps/ios/Scripts/capture-duo.sh .build-captures
+      - name: Capture placing, turning and snapping to sheets and the drawing viewer, and time its first page
+        run: PART=sheets-viewer sh apps/ios/Scripts/capture-duo.sh .build-captures
       - name: Compare the drawing viewer's time to first page with the baseline
         if: always()
         run: python3 apps/ios/Scripts/perf-compare.py sheets apps/ios/.build-captures/viewer-timing.json
@@ -152,7 +177,30 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: duo-sheet-captures
+          name: duo-captures-sheets
+          path: apps/ios/.build-captures/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The sync status in each state and the airplane-mode proof on the made-up Dropbox (#12), and the drawing tools (#40):
+  # the flyout, tag, pad, angle guide, loupe naming each snap kind, and each shape.
+  duo-captures-sync:
+    name: "Duo captures: sync and drawing tools"
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Capture the sync status, the airplane-mode proof and the drawing tools
+        run: PART=sync-tools sh apps/ios/Scripts/capture-duo.sh .build-captures
+      - name: Keep the captures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: duo-captures-sync
           path: apps/ios/.build-captures/
           include-hidden-files: true
           if-no-files-found: warn

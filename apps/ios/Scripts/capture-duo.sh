@@ -103,10 +103,26 @@ benchmark() {
   xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
 }
 
-# PART splits the work between CI jobs (the captures job outgrew its 45 minutes with #8): "captures" runs every capture
-# and the Debug benchmark, "sheets" the sheet captures (#11, their own job so the captures job stays under its
-# hour), the drawing viewer's (#69), the sync captures (#12) and the drawing tools' captures (#40), "release-benchmark" only the optimised build's benchmark; unset, it runs them all.
+# PART splits the work between CI jobs, one simulator each, so that none nears its hour (#8, #11, #80). Each CI job
+# runs one of these, and each new capture goes in the part of its kind:
+#   tabs           the tabs, the Canvases list, saving, the Drawings tab's Dropbox states and its drawing search, the
+#                  Home Screen and the app icon: "Duo captures: tabs, drawing search and Home Screen"
+#   canvas         the canvas tools (Draw with finger, the Speed check, snap, lasso, text, symbols, measure, the scale
+#                  readout), Settings from the canvas, appearance, the status bar walk and the Debug benchmark:
+#                  "Duo captures: canvas tools and benchmark"
+#   sheets-viewer  placing, turning and snapping to sheets (#11) and the drawing viewer (#69):
+#                  "Duo captures: sheets and drawing viewer"
+#   sync-tools     the sync status (#12) and the drawing tools (#40): "Duo captures: sync and drawing tools"
+#   release-benchmark  only the optimised build's benchmark: "Duo release benchmark"
+# "captures" is tabs and canvas, "sheets" is sheets-viewer and sync-tools (the two jobs before #80); unset, it runs
+# everything but the drawing viewer, as before #80.
 part=${PART:-all}
+case "$part" in
+  all|captures|sheets|tabs|canvas|sheets-viewer|sync-tools|release-benchmark) ;;
+  *) echo "Unknown PART=$part" >&2; exit 2 ;;
+esac
+# runs <part...>: whether PART is one of them.
+runs() { for p in "$@"; do [ "$part" = "$p" ] && return 0; done; return 1; }
 
 # Placing sheets (#11), in light and dark, on the made-up Dropbox (`--ui-dropbox sheets`) and made-up PDFs
 # (Vellum/DebugSheets.swift, VellumCore MadeUpSheets): Add sheet's Dropbox browser with the PDFs, the IFC set's page
@@ -193,7 +209,7 @@ sync_captures() {
 # drives the canvas view's own input paths on a made-up scene: the flyout with line weight at its foot, the tag, the pad over a
 # shape, the tag after Enter (12'-6"  30), the angle guide, the loupe naming each new snap kind, each new shape, and the tag,
 # pad and loupe staying clear of the chrome; then the longest of the shapes' prompts in full.
-# In the sheets job, since the captures job was at its hour without them.
+# In the sync and drawing tools part, since the captures job was at its hour without them.
 drawing_captures() {
   # Switching tool part way through a polyline keeps it (#40): only the running app reaches the order the tool changes in.
   xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
@@ -259,15 +275,17 @@ viewer_captures() {
   xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
 }
 
-if [ "$part" = sheets ]; then
+if runs sheets sheets-viewer; then
   sheet_captures
   viewer_captures
+fi
+if runs sheets sync-tools; then
   sync_captures
   drawing_captures
-  exit 0
 fi
+if runs sheets sheets-viewer sync-tools; then exit 0; fi
 
-if [ "$part" != release-benchmark ]; then
+if runs all captures tabs; then
 for appearance in light dark; do
   xcrun simctl ui "$udid" appearance "$appearance"
   # The canvas screen: a new empty canvas, then the Debug-only fixture (ink in all four markup colours) zoomed to
@@ -340,7 +358,9 @@ for appearance in light dark; do
 done
 xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
 sleep 1
+fi
 
+if runs all captures canvas; then
 # Draw with finger (#24), in light and dark. The Debug-only `--ui-draw-with-finger` turns the switch on for that
 # launch only (a registered default, never saved). The Settings sheet with the switch on, and a new canvas where the
 # Debug-only `--ui-finger-stroke` drives the canvas view's finger path, since the simulator cannot touch the glass: a
@@ -459,9 +479,11 @@ walk="" status_walk
 walk="-speed-check" status_walk --ui-speed-check
 
 benchmark ""
+fi
 
-if [ "$part" = all ]; then sheet_captures; sync_captures; drawing_captures; fi
+if runs all; then sheet_captures; sync_captures; drawing_captures; fi
 
+if runs all captures tabs; then
 # The Home Screen, to show the installed app icon. Vellum has to be on the first page: if SpringBoard put it on a later
 # page, it swaps places with the first page's first app in SpringBoard's saved layout while the simulator is shut down.
 xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
@@ -516,7 +538,7 @@ grep -E "\"(Name|Appearance|RenditionName|PixelWidth)\"" "$out/bundle-icons/Asse
 
 fi
 
-if [ "$part" != captures ]; then
+if runs all release-benchmark; then
 # The same benchmark in an optimised build: Release, with the BENCHMARK flag that compiles the benchmark and the
 # --ui-fixture-large launch argument in (TestFlight builds have neither). Its metrics end in _release.
 xcodebuild -project Vellum.xcodeproj -scheme Vellum -configuration Release -sdk iphonesimulator \

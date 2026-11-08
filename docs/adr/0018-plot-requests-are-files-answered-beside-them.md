@@ -14,22 +14,27 @@ Plot request format 1, set out in `docs/plot-requests.md`:
 - **One file per request,** `Dropbox/Vellum/Plots/requests/<UUID>.json`, a fresh UUID per tap, so two Duos or two taps
   never collide and Dropbox never has two writers for one file. It names the index entry's `id`, its DWG's `path`, its
   `layout`, when it was asked, and the format.
-- **The laptop answers beside it,** `<UUID>.answer.json`: `plotting`, `done` with the PDF's Dropbox path and content
-  hash, or `failed` with a reason in plain words. The Duo reads it with one small download, or sees it arrive in the
+- **The laptop answers beside it,** `<UUID>.answer.json`: `queued` the moment it is seen, on a thread of its own so
+  no read or plot in progress delays it, then `plotting`, then `done` with the PDF's Dropbox path and content hash
+  (and how many references, if any, couldn't be found), or `failed` with a reason in plain words. The Duo reads it with one small download, or sees it arrive in the
   listing of `Vellum/Plots/requests` it keeps a cursor for. The laptop publishes the index before it writes `done`, so
   the Duo finds the PDF in the index when it looks.
 - **The laptop trusts nothing in a request.** It plots only a DWG and layout its own index holds whose entry has the
   request's `id`, using the index's path and layout name, so nothing from a request reaches AutoCAD's script.
 - **The layout's own page setup,** plotted on a copy of the DWG, when its saved plotter writes PDFs; else DWG To PDF
-  at the layout's paper size, said so in the answer. Nothing is ever saved into the DWG.
-- **Plots go to `Dropbox/Vellum/Plots/<project>/<DWG name> - <layout> - <DWG saved> - <8 hex>.pdf`** and are the
+  at the layout's paper size, said so in the answer. Relative xref, image and underlay paths are made absolute against
+  the original's folder on the copy, so the PDF has them. Nothing is ever saved into the DWG.
+- **One plot a turn.** Between plots the indexer takes the watcher's changes and the next file to read, so a backlog
+  of plots never holds up the index.
+- **Plots go to `Dropbox/Vellum/Plots/<project>/<DWG name> - <layout> - <DWG saved> - <8 hex>.pdf`**, the 8 hex
+  digits covering the DWG's path, layout and bytes so no two versions share a name, and are the
   entry's `pdf` in the index, `pairedBy` `"plotted"`, with no change to the index's format (ADR-0017). A re-plot of a
   changed DWG is a new file; the older plot moves to `otherPdfs`.
 - **A check-in,** `Dropbox/Vellum/Plots/laptop.json`, a time and the indexer's version, rewritten every 2 minutes
   while the indexer runs. The Duo shows "Waiting for the laptop" when it is more than 5 minutes old by Dropbox's own
   `server_modified`.
 - **The Duo deletes its request once it has read a final answer; the laptop never deletes a request,** and deletes an
-  answer an hour after its request is gone.
+  answer an hour after it first sees the request gone.
 
 ## Considered options
 

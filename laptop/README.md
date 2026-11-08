@@ -209,13 +209,15 @@ and answers beside it. The format, the answers, the naming and the cleanup are
 [`docs/plot-requests.md`](../docs/plot-requests.md), decided in
 [ADR-0018](../docs/adr/0018-plot-requests-are-files-answered-beside-them.md).
 
-- **Seen within seconds.** The watcher tells the indexer the moment Dropbox writes a request (a request is not
-  debounced), and the indexer looks at the folder at start and once a minute anyway. Requests go ahead of everything
-  the scan is waiting to read, between any two files and every 256 files of a listing, so even during a first scan of
-  hours a request is answered within seconds plus the plot.
+- **Seen within seconds.** A thread of its own answers a new request `queued` the moment it is seen: the watcher
+  tells it when Dropbox writes one (a request is not debounced), and it lists the requests folder every 2 seconds
+  anyway, since a change notice can be lost. It never waits for a read or plot in progress. Requests then go ahead
+  of everything the scan is waiting to read, between any two files and every 256 files of a listing, so even during
+  a first scan of hours a request is plotted as soon as the read in progress ends.
 - **Checked against the index.** A request must name an entry the index holds, by its `id`, DWG path and layout; the
-  plot then uses only the index's own path and layout name. A malformed or unknown request is answered `failed` with
-  the reason.
+  plot then uses only the index's own path and layout name. Every string in it must be valid Unicode with no control
+  characters and a sane length. A malformed or unknown request is answered `failed` with the reason, and no request,
+  however made, stops the indexer.
 - **On a copy, with its own page setup.** The DWG is copied to a job folder in `%LOCALAPPDATA%\Vellum\indexer\work`
   (an online-only DWG is downloaded to the scratch folder and plotted there, then the copy deleted), and the core
   console runs `-PLOT` on the layout at below-normal priority, stopped after 5 minutes: with the layout's saved
@@ -223,11 +225,18 @@ and answers beside it. The format, the answers, the naming and the cleanup are
   is what AutoCAD prints. A layout with no such page setup is plotted again with `DWG To PDF.pc3` on the sheet that
   matches its paper size, its layout area at 1:1, and the answer says so. The plot answers "No" to saving its
   settings, and the console quits without saving; the DWG in the project folder is never opened.
-- **One at a time,** oldest first. The same layout asked for again with its DWG unchanged gets the PDF already made.
+- **References still found.** Before plotting, the script makes the copy's relative xref, raster image and PDF, DWF
+  or DGN underlay paths absolute against the original DWG's folder, on the copy only, so the PDF has them. References
+  still not found are counted, and the `done` answer says so ("2 references couldn't be found").
+- **One at a time,** oldest first, one plot a turn: after each plot the watcher's changes and the next file to read
+  come first, so a backlog of plots never holds up the index. The same layout asked for again with its DWG unchanged
+  gets the PDF already made.
 - **Kept in `Dropbox\Vellum\Plots\<project>\`**, named `<DWG name> - <layout> - <DWG saved> - <8 hex>.pdf`, read as any
   PDF (content hash, pages, paper size, thumbnail), and listed as the entry's `pdf` with `pairedBy` `plotted` before the
-  answer says `done`. A re-plot of a changed DWG is a new file, and the older plot moves to `otherPdfs`. The indexer
-  never deletes a plot, nor a request; it deletes an answer an hour after the Duo has deleted its request.
+  answer says `done`. The 8 hex digits cover the DWG's bytes, so a re-plot of a changed DWG is a new file even
+  within the same second, and the older plot moves to `otherPdfs`. A plot made before the DWG's layouts were read
+  moves to the right layout's entry once they are. The indexer never deletes a plot, nor a request; it deletes an
+  answer an hour after it first sees the Duo has deleted its request.
 - **The check-in,** `Dropbox\Vellum\Plots\laptop.json`, is rewritten every 2 minutes on a thread of its own, so the Duo
   can say "Waiting for the laptop" when it is more than 5 minutes old.
 

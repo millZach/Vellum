@@ -269,7 +269,7 @@ The PDF a drawing's DWG was plotted to, which the drawing index pairs with it: b
 _Avoid_: print, export, sheet (a sheet is a placed PDF page)
 
 **Plot request**:
-Vellum asking the laptop to plot a drawing that has no PDF yet: one small file per request in `Dropbox/Vellum/Plots/requests`, naming the drawing index entry. The laptop indexer plots it with AutoCAD's own core console, using the layout's page setup (or DWG To PDF at its paper size when it has none that plots to PDF), keeps the PDF in `Dropbox/Vellum/Plots` and answers beside the request: plotting, done, or failed with a reason. The Duo deletes its request once it has read a final answer (`docs/plot-requests.md`, ADR-0018).
+Vellum asking the laptop to plot a drawing that has no PDF yet: one small file per request in `Dropbox/Vellum/Plots/requests`, naming the drawing index entry. The laptop indexer plots it with AutoCAD's own core console, using the layout's page setup (or DWG To PDF at its paper size when it has none that plots to PDF), keeps the PDF in `Dropbox/Vellum/Plots` and answers beside the request: queued the moment it is seen, then plotting, done, or failed with a reason. The Duo deletes its request once it has read a final answer (`docs/plot-requests.md`, ADR-0018).
 _Avoid_: job (a job goes to Sotto), print request, plot job
 
 **Check-in**:

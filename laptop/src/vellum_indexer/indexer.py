@@ -29,7 +29,7 @@ from vellum_indexer import pdf as pdf_module
 from vellum_indexer import plot as plot_module
 from vellum_indexer.dropbox_api import DropboxError
 from vellum_indexer.index import IndexWriter, atomic_write, build_entries, content_name, entry_id, sheets_of
-from vellum_indexer.plot_requests import Answer, NotYet, PlotFolder, PlotRequest, Refused
+from vellum_indexer.plot_requests import Answer, NotYet, PlotFolder, PlotRequest, Refused, missing_warning
 from vellum_indexer.projects import ProjectFinder
 from vellum_indexer.scratch import Downloader, Unavailable, is_inside
 from vellum_indexer.state import Plot, Record, State
@@ -103,7 +103,9 @@ class Indexer:
         self.plot_wanted.set()  # look once at the start: requests may have come while the laptop was off
         self.next_plot_look = 0.0
         self._plotting = False
+        self._plot_ran = False  # whether the last look ran AutoCAD (one plot per turn)
         self.check_in = None  # the watcher's check-in thread, while it runs
+        self.acknowledger = None  # and its plot request acknowledger
         if downloader is not None:
             downloader.dropbox_root = root  # a scratch folder inside Dropbox is refused
             downloader.clean()  # copies and work folders a crash left behind
@@ -334,8 +336,13 @@ class Indexer:
         done: set[str] = set()
         urgent = 0
         last_log = last_publish = time.monotonic()
+        plot_turn = True
         while queue:
-            self.answer_plot_requests()  # a plot request goes ahead of every file waiting to be read
+            # A plot request goes ahead of every file waiting to be read, one plot a turn: after a plot the watcher's
+            # changes and the next file come first, so a backlog of plots never holds up the index.
+            if plot_turn:
+                self.answer_plot_requests()
+                plot_turn = not self._plot_ran
             if self.poll_changes is not None:
                 fresh_batch = self.poll_changes()
                 if fresh_batch is not None:
@@ -350,6 +357,7 @@ class Indexer:
                     continue
             facts = queue.popleft()
             self.take(facts)
+            plot_turn = True
             done.add(files.key(facts.path))
             now = time.monotonic()
             if urgent:
@@ -406,8 +414,11 @@ class Indexer:
         return self.plot_wanted.is_set() or time.monotonic() >= self.next_plot_look
 
     def answer_plot_requests(self) -> int:
-        """Answer every plot request waiting in Dropbox/Vellum/Plots/requests, one plot at a time, oldest first.
-        Cheap when none is due: a flag and a clock. Returns how many were answered."""
+        """Answer the plot requests waiting in Dropbox/Vellum/Plots/requests, oldest first, running AutoCAD at most
+        once: requests refused or answered from a plot already made cost nothing, but after one plot the rest wait
+        for the next turn, so the watcher's changes and the scan are taken between plots. Cheap when none is due: a
+        flag and a clock. Returns how many were answered."""
+        self._plot_ran = False
         if self._plotting or not self.plots_due():
             return 0
         self._plotting = True
@@ -415,17 +426,26 @@ class Indexer:
             self.plot_wanted.clear()
             answered = 0
             arriving = False
-            for name, path in self.plot_folder.pending():
-                result = self._answer_one(name, path)
+            pending = self.plot_folder.pending()
+            for i, (name, path) in enumerate(pending):
+                try:
+                    result = self._answer_one(name, path)
+                except Exception as error:  # noqa: BLE001 - no request, however made, stops the indexer
+                    log.exception("Could not handle plot request %s", name)
+                    self._answer(Answer(name, "failed", reason=f"the laptop couldn't handle this request "
+                                                               f"({type(error).__name__})"))
+                    result = True
                 answered += result is True
                 arriving |= result is None
+                if self._plot_ran and i + 1 < len(pending):
+                    self.plot_wanted.set()  # the rest at the next turn
+                    break
             self.plot_folder.clean()
             # a request still arriving is looked at again in a couple of seconds
             self.next_plot_look = time.monotonic() + (PLOT_ARRIVING_SECONDS if arriving else PLOT_LOOK_SECONDS)
             return answered
         finally:
             self._plotting = False
-        self.check_in = None  # the watcher's check-in thread, while it runs
 
     def _answer(self, answer: Answer) -> None:
         try:
@@ -458,11 +478,13 @@ class Indexer:
             self._answer(Answer(name, "failed", id=request.id, reason=str(failed)))
             return True
         self.publish()  # the index lists the PDF before the answer says done, so the Duo finds it there
+        missing = plot.facts.get("missingReferences") or 0
         self._answer(Answer(name, "done", id=request.id, pdf=plot.path, content_hash=plot.facts.get("contentHash"),
                             page_setup=page_setup,
                             reason=None if page_setup != "fallback" else
                             "the layout has no page setup that plots to PDF, so it was plotted with DWG To PDF "
-                            "at its paper size"))
+                            "at its paper size",
+                            missing_references=missing, warning=missing_warning(missing)))
         return True
 
     def _entry_of(self, request: PlotRequest) -> tuple[str, Record, str | None]:
@@ -506,16 +528,22 @@ class Indexer:
             local = files.local_path(self.root, facts.path)
             if not is_inside(local, self.root):
                 raise Refused("the DWG isn't in Dropbox")
+        origin = files.local_path(self.root, facts.path).parent  # where its relative references are, in Dropbox
         try:
             try:
-                result = self.plotter.plot(local, layout, work) if work else self.plotter.plot(local, layout)
+                version = plot_module.file_version(local)
+            except OSError:
+                raise Refused("the DWG couldn't be read") from None
+            self._plot_ran = True
+            try:
+                result = self.plotter.plot(local, layout, work, origin)
             except plot_module.PlotError as error:
                 raise Refused(str(error)) from None
         finally:
             if copy is not None:
                 Downloader.done(copy)
         project = self.projects.project_of(record.path)
-        db_pdf = plot_module.plot_name(project.name, record.path, layout, facts.mtime_ns)
+        db_pdf = plot_module.plot_name(project.name, record.path, layout, facts.mtime_ns, version)
         dest = files.local_path(self.root, db_pdf)
         if not is_inside(dest, self.plots_root):
             raise Refused("the plot's name would put it outside Dropbox/Vellum/Plots")
@@ -526,6 +554,9 @@ class Indexer:
         except OSError as error:
             raise Refused(f"the PDF couldn't be saved in Dropbox/Vellum/Plots ({error.strerror or error})") from None
         read["pageSetup"] = result.page_setup
+        read["plottedLayout"] = result.layout or layout  # a request with no layout: the layout AutoCAD plotted
+        read["references"] = result.references
+        read["missingReferences"] = result.missing
         plot = Plot(sheet, facts.size, facts.mtime_ns, db_pdf, st.st_size, st.st_mtime_ns, read)
         self.state.put_plot(plot)
         self.counters.plots_made += 1

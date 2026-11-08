@@ -13,9 +13,16 @@ The plotter is a seam (``Plotter``), as the title block reader is: AutoCAD's con
   ``DWG To PDF.pc3`` at the layout's paper size, matched to one of that plotter's sheets, with the layout's area, at
   1:1, keeping its plot style. The answer says so. When the paper size matches none of its sheets the plot fails with
   that reason rather than guessing.
+- **References on the copy.** The copy sits in a job folder, so an xref, raster image or PDF, DWF or DGN underlay saved
+  with a relative path (``..\\Xrefs\\base.dwg``) would no longer resolve. Before plotting, the script makes each such
+  path absolute against the original DWG's folder, on the copy only (xrefs re-pathed with ``-XREF Path``, images and
+  underlays by changing their definition, images then reloaded), and reports every top-level reference and whether it
+  was found. The original is never changed, nothing is written beside it, and the copy is never saved. References
+  still not found are counted in the answer.
 - Everything typed into the console's script comes from the indexer, never from a request: the layout name comes
   from the title block the indexer read, and is refused if it holds a quote, a backslash or a control character (all of
-  which AutoCAD forbids in a layout name anyway), and the output path is the plotter's own job folder.
+  which AutoCAD forbids in a layout name anyway); the original's folder is the index's own path, written with forward
+  slashes; and the output path is the plotter's own job folder.
 """
 
 from __future__ import annotations
@@ -46,18 +53,23 @@ class PlotResult:
     page_setup: str  # "saved" (the layout's own) or "fallback" (DWG To PDF at its paper size)
     device: str  # the plotter the layout has saved
     media: str  # the paper it was plotted on, as AutoCAD names it
+    layout: str = ""  # the layout plotted, as AutoCAD names it (the saved one, for a request with no layout)
+    references: int = 0  # top-level xrefs, images and underlays
+    missing: int = 0  # of those, how many couldn't be found
 
 
 class Plotter(Protocol):
     id: str
 
-    def plot(self, dwg: Path, layout: str | None, work: Path | None = None) -> PlotResult: ...
+    def plot(self, dwg: Path, layout: str | None, work: Path | None = None,
+             origin: Path | None = None) -> PlotResult: ...
 
 
 class NoPlotter:
     id = "none"
 
-    def plot(self, dwg: Path, layout: str | None, work: Path | None = None) -> PlotResult:
+    def plot(self, dwg: Path, layout: str | None, work: Path | None = None,
+             origin: Path | None = None) -> PlotResult:
         raise PlotError("AutoCAD isn't installed on the laptop")
 
 
@@ -108,12 +120,51 @@ def landscape(width_mm: float, height_mm: float, rotation: int) -> bool:
 # --- The script --------------------------------------------------------------------------------------------------
 
 # AutoLISP typed into the script, as the title block dump is (dwg.py): nothing is loaded, so SECURELOAD never asks.
-# (vellum-plot LAYOUT OUT INFO MODE SHEET UNITS ORIENT): LAYOUT "" plots the layout the DWG was saved on. It writes
-# to INFO the layout's saved setup ("SETUP", name, plotter, paper, width mm, height mm, rotation; the layout's name is
-# the group 1 after its AcDbLayout marker, the first group 1 being its page setup's name), then either plots
-# and writes "PLOTTED", or writes "UNUSABLE" (mode "saved" and its plotter is not a PDF one) or "NOLAYOUT", then END.
+# (vellum-plot LAYOUT OUT INFO MODE SHEET UNITS ORIENT FOLDER): LAYOUT "" plots the layout the DWG was saved on. It
+# writes to INFO the layout's saved setup ("SETUP", name, plotter, paper, width mm, height mm, rotation; the layout's
+# name is the group 1 after its AcDbLayout marker, the first group 1 being its page setup's name), makes relative
+# reference paths absolute against FOLDER (the original DWG's folder) and reports each reference ("REF", kind, path,
+# 1 found or 0 not), then either plots and writes "PLOTTED", or writes "UNUSABLE" (mode "saved" and its plotter is not
+# a PDF one) or "NOLAYOUT", then END. A reference is relative unless it starts with a drive (``C:``), a backslash or
+# a slash; nested xrefs (``A|B``) resolve from their parent's path, so only top-level ones are changed.
 PLOT_FORMS = [
-    r"""(defun vellum-plot (name out info mode sheet units orient / f d e dev)
+    r"""(defun vellum-pclean (s)
+      (while (vl-string-search "\t" s) (setq s (vl-string-subst " " "\t" s)))
+      (while (vl-string-search "\n" s) (setq s (vl-string-subst " " "\n" s)))
+      s)""",
+    r"""(defun vellum-abs (p folder / c)
+      (setq c (substr p 1 1))
+      (cond ((= p "") p)
+            ((= (substr p 2 1) ":") p)
+            ((or (= c "\\") (= c "/")) p)
+            (T (strcat folder "/" p))))""",
+    r"""(defun vellum-refs (folder f / b n p a d e img)
+      (setq b (tblnext "BLOCK" T))
+      (while b
+        (if (and (= 4 (logand 4 (cdr (assoc 70 b)))) (not (vl-string-search "|" (cdr (assoc 2 b)))))
+          (progn
+            (setq n (cdr (assoc 2 b)) p (cdr (assoc 1 b)) a (vellum-abs p folder))
+            (if (/= a p) (command "_.-XREF" "_P" n a))
+            (write-line (strcat "REF\txref\t" (vellum-pclean a) "\t"
+                                (if (= 32 (logand 32 (cdr (assoc 70 (tblsearch "BLOCK" n))))) "1" "0")) f)))
+        (setq b (tblnext "BLOCK")))
+      (foreach k '(("ACAD_IMAGE_DICT" . "image") ("ACAD_PDFDEFINITIONS" . "pdf") ("ACAD_DWFDEFINITIONS" . "dwf")
+                   ("ACAD_DGNDEFINITIONS" . "dgn"))
+        (if (setq d (dictsearch (namedobjdict) (car k)))
+          (foreach g d
+            (if (= 350 (car g))
+              (progn
+                (setq e (entget (cdr g)) p (cdr (assoc 1 e)))
+                (if p
+                  (progn
+                    (setq a (vellum-abs p folder))
+                    (if (/= a p)
+                      (progn (entmod (subst (cons 1 a) (assoc 1 e) e)) (if (= (cdr k) "image") (setq img T))))
+                    (write-line (strcat "REF\t" (cdr k) "\t" (vellum-pclean a) "\t" (if (findfile a) "1" "0"))
+                                f))))))))
+      (if img (command "_.-IMAGE" "_R" "*"))
+      (princ))""",
+    r"""(defun vellum-plot (name out info mode sheet units orient folder / f d e dev)
       (setq f (vl-catch-all-apply 'open (list info "w" "utf8")))
       (if (or (null f) (vl-catch-all-error-p f)) (setq f (open info "w")))
       (if (= name "") (setq name (getvar "CTAB")))
@@ -127,6 +178,7 @@ PLOT_FORMS = [
           (write-line (strcat "SETUP\t" name "\t" dev "\t" (if (cdr (assoc 4 e)) (cdr (assoc 4 e)) "") "\t"
                               (rtos (cdr (assoc 44 e)) 2 2) "\t" (rtos (cdr (assoc 45 e)) 2 2) "\t"
                               (itoa (cdr (assoc 73 e)))) f)
+          (vellum-refs folder f)
           (cond
             ((= mode "saved")
               (if (and (wcmatch (strcase dev) "*.PC3") (wcmatch (strcase dev) "*PDF*"))
@@ -154,10 +206,14 @@ def lisp_string(text: str) -> str:
 
 
 def plot_script(layout: str | None, out: Path, info: Path, mode: str = "saved", sheet: str = "",
-                units: str = "Inches", orient: str = "Landscape") -> str:
-    """The .scr the console runs: define the plot, run it on the layout, quit without saving."""
+                units: str = "Inches", orient: str = "Landscape", folder: Path | None = None) -> str:
+    """The .scr the console runs: define the plot, run it on the layout, quit without saving. ``folder`` is the
+    original DWG's folder, against which relative references are made absolute."""
+    origin = folder.as_posix().rstrip("/") if folder is not None else ""
+    if UNSAFE_IN_SCRIPT.search(origin):
+        raise PlotError("the DWG's folder can't be typed into AutoCAD")
     call = "(vellum-plot {})".format(" ".join(lisp_string(a) for a in (
-        layout or "", out.as_posix(), info.as_posix(), mode, sheet, f"_{units[0]}", f"_{orient[0]}")))
+        layout or "", out.as_posix(), info.as_posix(), mode, sheet, f"_{units[0]}", f"_{orient[0]}", origin)))
     return "\n".join([PLOT_LISP, call, "_.QUIT", "_Y", ""])
 
 
@@ -171,11 +227,23 @@ class SavedSetup:
     rotation: int
 
 
-def parse_info(text: str) -> tuple[SavedSetup | None, str]:
-    """The plot's report: the layout's saved setup, and how it ended ("PLOTTED", "UNUSABLE", "NOLAYOUT")."""
+@dataclass
+class Reference:
+    kind: str  # "xref", "image", "pdf", "dwf" or "dgn"
+    path: str  # as the copy has it after the script: absolute when it was relative
+    found: bool
+
+
+def parse_info(text: str) -> tuple[SavedSetup | None, str, list[Reference]]:
+    """The plot's report: the layout's saved setup, how it ended ("PLOTTED", "UNUSABLE", "NOLAYOUT"), and the
+    references it found."""
     setup, outcome, complete = None, "", False
+    refs: list[Reference] = []
     for line in text.splitlines():
         parts = line.rstrip("\r").split("\t")
+        if parts[0] == "REF" and len(parts) >= 4:
+            refs.append(Reference(parts[1], parts[2], parts[3].strip() == "1"))
+            continue
         if parts[0] == "SETUP" and len(parts) >= 7:
             try:
                 setup = SavedSetup(parts[1], parts[2], parts[3], float(parts[4]), float(parts[5]), int(parts[6]))
@@ -187,7 +255,7 @@ def parse_info(text: str) -> tuple[SavedSetup | None, str]:
             complete = True
     if not complete:
         outcome = ""
-    return setup, outcome
+    return setup, outcome, refs
 
 
 class AccoreconsolePlotter:
@@ -200,9 +268,13 @@ class AccoreconsolePlotter:
         self.work = work
         self.timeout = timeout
 
-    def plot(self, dwg: Path, layout: str | None, work: Path | None = None) -> PlotResult:
+    def plot(self, dwg: Path, layout: str | None, work: Path | None = None,
+             origin: Path | None = None) -> PlotResult:
+        """``origin`` is the original DWG's folder (for an online-only DWG, its folder in Dropbox, not the scratch
+        copy's), against which relative references are made absolute."""
         if layout is not None:
             lisp_string(layout)  # refused before AutoCAD starts
+        origin = origin or dwg.parent
         job = (work or self.work) / f"plot-{uuid.uuid4().hex[:12]}"
         job.mkdir(parents=True, exist_ok=True)
         try:
@@ -211,7 +283,7 @@ class AccoreconsolePlotter:
                 shutil.copyfile(dwg, copy)
             except OSError as error:
                 raise PlotError("the DWG couldn't be read") from error
-            setup, outcome, pdf = self._run(job, copy, layout, "saved")
+            setup, outcome, pdf, refs = self._run(job, copy, layout, "saved", folder=origin)
             if outcome == "NOLAYOUT":
                 raise PlotError("the layout isn't in the DWG any more")
             if setup is None or outcome not in ("PLOTTED", "UNUSABLE"):
@@ -219,25 +291,29 @@ class AccoreconsolePlotter:
             if outcome == "PLOTTED":
                 if pdf is None:
                     raise PlotError("AutoCAD made no PDF from the layout's page setup")
-                return PlotResult(pdf, "saved", setup.device, setup.media)
+                return PlotResult(pdf, "saved", setup.device, setup.media, setup.layout, len(refs),
+                                  sum(not r.found for r in refs))
             sheet = fallback_sheet(setup.width_mm, setup.height_mm)
             if sheet is None:
                 raise PlotError("the layout has no page setup that plots to PDF, and its paper size "
                                 f"({setup.width_mm:.0f} x {setup.height_mm:.0f} mm) isn't one DWG To PDF has")
             orient = "Landscape" if landscape(setup.width_mm, setup.height_mm, setup.rotation) else "Portrait"
-            setup2, outcome, pdf = self._run(job, copy, setup.layout, "fallback", sheet[0], sheet[1], orient)
+            _, outcome, pdf, refs = self._run(job, copy, setup.layout, "fallback", sheet[0], sheet[1], orient,
+                                              folder=origin)
             if outcome != "PLOTTED" or pdf is None:
                 raise PlotError("AutoCAD made no PDF with DWG To PDF")
-            return PlotResult(pdf, "fallback", setup.device, sheet[0])
+            return PlotResult(pdf, "fallback", setup.device, sheet[0], setup.layout, len(refs),
+                              sum(not r.found for r in refs))
         finally:
             shutil.rmtree(job, ignore_errors=True)
 
     def _run(self, job: Path, copy: Path, layout: str | None, mode: str, sheet: str = "", units: str = "Inches",
-             orient: str = "Landscape") -> tuple[SavedSetup | None, str, bytes | None]:
+             orient: str = "Landscape", folder: Path | None = None
+             ) -> tuple[SavedSetup | None, str, bytes | None, list[Reference]]:
         out = job / f"{mode}.pdf"
         info = job / f"{mode}.txt"
         script = job / f"{mode}.scr"
-        script.write_text(plot_script(layout, out, info, mode, sheet, units, orient), encoding="utf-8")
+        script.write_text(plot_script(layout, out, info, mode, sheet, units, orient, folder), encoding="utf-8")
         args = [*self.command, "/i", str(copy), "/s", str(script), "/l", "en-US"]
         flags = BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW if sys.platform == "win32" else 0
         try:
@@ -257,13 +333,13 @@ class AccoreconsolePlotter:
             text = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
             text = raw.decode("cp1252", errors="replace")
-        setup, outcome = parse_info(text)
+        setup, outcome, refs = parse_info(text)
         pdf = None
         if out.is_file():
             data = out.read_bytes()
             if data.startswith(b"%PDF"):
                 pdf = data
-        return setup, outcome, pdf
+        return setup, outcome, pdf, refs
 
 
 # --- Where a plot goes -------------------------------------------------------------------------------------------
@@ -284,15 +360,26 @@ def safe_part(text: str, limit: int = 60) -> str:
     return cleaned
 
 
-def plot_name(project: str | None, dwg_path: str, layout: str | None, dwg_mtime_ns: int) -> str:
+def plot_name(project: str | None, dwg_path: str, layout: str | None, dwg_mtime_ns: int, version: str = "") -> str:
     """The plot's Dropbox path: ``/Vellum/Plots/<project>/<DWG name> - <layout> - <DWG saved, UTC> - <8 hex>.pdf``.
 
     The project and drawing are recognisable at a glance. The layout keeps two layouts of one DWG apart; the DWG's
-    saved time keeps a re-plot of a changed DWG beside the older plot rather than over it; the 8 hex digits (from the
-    DWG's path and layout) keep two DWGs of one name in different folders of a project apart.
+    saved time, to the second, is there to read. The 8 hex digits come from the DWG's path, layout and ``version``,
+    the SHA-256 of the DWG's bytes: two DWGs of one name in different folders of a project never clash, and nor do two
+    versions of one DWG saved within the same second, so a re-plot never overwrites the older plot.
     """
     stem = PurePosixPath(dwg_path).stem
     saved = datetime.fromtimestamp(dwg_mtime_ns / 1e9, UTC).strftime("%Y-%m-%d %H%M%S")
-    tag = hashlib.sha256((dwg_path.lower() + "#" + (layout or "").lower()).encode("utf-8")).hexdigest()[:8]
+    key = dwg_path.lower() + "#" + (layout or "").lower() + "#" + version
+    tag = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
     parts = [safe_part(stem, 80)] + ([safe_part(layout, 40)] if layout else []) + [saved, tag]
     return "/" + "/".join([*PLOTS_FOLDER, safe_part(project or NO_PROJECT, 80), " - ".join(parts) + ".pdf"])
+
+
+def file_version(path: Path) -> str:
+    """The SHA-256 of a file's bytes, read in 1 MB blocks: which version of a DWG a plot is of."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        while block := f.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()

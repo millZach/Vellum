@@ -81,6 +81,8 @@ class DropboxEvents:
             if db is None or db == "/":
                 continue
             lower = db.lower()
+            if lower.startswith("/vellum/plots"):
+                log.debug("Plots folder event: %s %s", event_type, db)
             if lower.startswith(PLOT_REQUESTS) or lower == PLOT_REQUESTS.rstrip("/"):
                 rest = lower[len(PLOT_REQUESTS):]
                 wake = (event_type != "deleted" and "/" not in rest
@@ -118,11 +120,20 @@ def watch(
     from watchdog.observers import Observer
 
     from vellum_indexer import __version__
-    from vellum_indexer.plot_requests import CHECK_IN_SECONDS, CheckIn
+    from vellum_indexer.plot_requests import CHECK_IN_SECONDS, Acknowledger, CheckIn
 
     stop = stop or threading.Event()
     debouncer = Debouncer(quiet, max_wait)
-    handler = DropboxEvents(indexer.root, indexer.rules, debouncer, on_plot_request=indexer.plot_wanted.set)
+    # A request is answered "queued" by the acknowledger's thread the moment it is seen, even while the indexer is
+    # part way through a long read; the indexer plots it as soon as that read ends.
+    acknowledger = Acknowledger(indexer.plot_folder, on_new=indexer.plot_wanted.set)
+    indexer.acknowledger = acknowledger
+
+    def request_seen() -> None:
+        acknowledger.wake()
+        indexer.plot_wanted.set()
+
+    handler = DropboxEvents(indexer.root, indexer.rules, debouncer, on_plot_request=request_seen)
     indexer.plot_folder.make_requests_folder()
     observer = Observer()
     observer.schedule(handler, str(indexer.root), recursive=True)
@@ -132,6 +143,7 @@ def watch(
     check_in = CheckIn(indexer.plot_folder, __version__, check_in_seconds or CHECK_IN_SECONDS)
     check_in.start()
     indexer.check_in = check_in
+    acknowledger.start()
     try:
         indexer.answer_plot_requests()  # requests that came while the laptop was off, before the scan's listing
         indexer.scan()
@@ -162,6 +174,7 @@ def watch(
                 observer.start()
                 indexer.scan()
     finally:
+        acknowledger.close()
         check_in.close()
         observer.stop()
         observer.join(timeout=5)

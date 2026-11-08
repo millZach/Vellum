@@ -121,11 +121,12 @@
     {
       "metric": "dropbox_files_written_one_plot",
       "kind": "count",
-      "value": 6,
+      "value": 7,
       "unit": "files",
       "tolerance": 0,
-      "measured": "PR #67 2026-11-07 laptop/tests made-up Dropbox, stand-in console (tests/fake_plot_console.py)",
-      "note": "One plot request answered: the PDF in Dropbox/Vellum/Plots, the answer twice (plotting, then done), and the index's changed shard, the PDF's thumbnail and the manifest. Nothing else is uploaded."
+      "measured": "PR #83 round 2 2026-11-08 laptop/tests made-up Dropbox, stand-in console (tests/fake_plot_console.py)",
+      "note": "One plot request answered: the PDF in Dropbox/Vellum/Plots, the answer three times (queued the moment it is seen, then plotting, then done), and the index's changed shard, the PDF's thumbnail and the manifest. Nothing else is uploaded. Raised from 6 in review: the queued answer, written on its own thread, tells the Duo the laptop has the request even while a long read or another plot is running; each answer is about 300 bytes.",
+      "before": 6
     },
     {
       "metric": "plot_console_runs_with_page_setup",

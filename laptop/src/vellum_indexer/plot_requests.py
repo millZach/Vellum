@@ -41,6 +41,9 @@ REQUEST_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{7,63}\.json$")
 ENTRY_ID = re.compile(r"^[0-9a-f]{16}$")
 ISO_TIME = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$")
 FINAL = ("done", "failed")
+CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+MAX_PATH = 1024
+MAX_LAYOUT = 255
 
 
 def now_iso() -> str:
@@ -88,28 +91,44 @@ def decode(name: str, data: bytes, age_seconds: float = SETTLE_SECONDS) -> PlotR
     if body.get("format") != FORMAT:
         raise Refused(f"the request is in format {body.get('format')!r}; this laptop reads plot request format 1")
     entry_id, path, layout, asked = body.get("id"), body.get("path"), body.get("layout"), body.get("asked")
-    if not isinstance(entry_id, str) or not ENTRY_ID.match(entry_id):
+    if not _text(entry_id, 16) or not ENTRY_ID.match(entry_id):
         raise Refused("the request names no drawing index entry")
-    if not isinstance(path, str) or not path.startswith("/") or not path.lower().endswith(".dwg") or len(path) > 1024:
-        raise Refused("the request names no DWG")
-    if any(part in ("..", ".") for part in path.split("/")) or "\\" in path or "\x00" in path:
+    if not _text(path, MAX_PATH):
         raise Refused("the request's path isn't a Dropbox path")
-    if layout is not None and (not isinstance(layout, str) or not layout or len(layout) > 255):
+    if not path.startswith("/") or not path.lower().endswith(".dwg"):
+        raise Refused("the request names no DWG")
+    if any(part in ("..", ".") for part in path.split("/")) or "\\" in path:
+        raise Refused("the request's path isn't a Dropbox path")
+    if layout is not None and not _text(layout, MAX_LAYOUT):
         raise Refused("the request's layout isn't a layout name")
-    if not isinstance(asked, str) or not ISO_TIME.match(asked):
+    if not _text(asked, 40) or not ISO_TIME.match(asked):
         raise Refused("the request doesn't say when it was asked")
     return PlotRequest(name, entry_id, path, layout, asked)
+
+
+def _text(value, limit: int) -> bool:
+    """A string fit to be used: 1 to ``limit`` characters, valid Unicode (no lone surrogate, which JSON's ``\\ud800``
+    escape can make and SQLite can't store), and no control characters."""
+    if not isinstance(value, str) or not 0 < len(value) <= limit or CONTROL.search(value):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 @dataclass
 class Answer:
     request: str
-    state: str  # "plotting", "done" or "failed"
+    state: str  # "queued", "plotting", "done" or "failed"
     id: str | None = None
     pdf: str | None = None
     content_hash: str | None = None
     page_setup: str | None = None  # "saved" or "fallback"
     reason: str | None = None
+    missing_references: int | None = None  # on done: xrefs, images and underlays that couldn't be found
+    warning: str | None = None  # on done: what Zach should know about the PDF, in plain words
     updated: str = ""
 
     def to_json(self) -> dict:
@@ -123,7 +142,17 @@ class Answer:
             "contentHash": self.content_hash,
             "pageSetup": self.page_setup,
             "reason": self.reason,
+            "missingReferences": self.missing_references,
+            "warning": self.warning,
         }
+
+
+def missing_warning(missing: int) -> str | None:
+    if not missing:
+        return None
+    if missing == 1:
+        return "1 reference couldn't be found, so the PDF is missing it"
+    return f"{missing} references couldn't be found, so the PDF is missing them"
 
 
 class PlotFolder:
@@ -133,6 +162,10 @@ class PlotFolder:
         self.folder = folder
         self.requests = folder / REQUESTS
         self.clock = clock
+        # Answers are written from two threads (the acknowledger's "queued", the indexer's the rest): one at a time,
+        # and "queued" only where there is no answer yet, so it never overwrites a later state.
+        self.lock = threading.Lock()
+        self.missing_since: dict[str, float] = {}  # answer file -> when its request was first seen gone
 
     def pending(self) -> list[tuple[str, Path]]:
         """Requests with no final answer, oldest first: (request id, file). A request answered ``plotting`` only is
@@ -173,31 +206,51 @@ class PlotFolder:
             return None
         return body.get("state") if isinstance(body, dict) else None
 
+    @staticmethod
+    def _bytes(answer: Answer) -> bytes:
+        return (json.dumps(answer.to_json(), ensure_ascii=False, indent=1, sort_keys=True) + "\n").encode("utf-8")
+
     def answer(self, answer: Answer) -> None:
-        data = (json.dumps(answer.to_json(), ensure_ascii=False, indent=1, sort_keys=True) + "\n").encode("utf-8")
-        atomic_write(self.requests / f"{answer.request}{ANSWER_SUFFIX}", data)
+        with self.lock:
+            atomic_write(self.requests / f"{answer.request}{ANSWER_SUFFIX}", self._bytes(answer))
+
+    def answer_if_none(self, answer: Answer) -> bool:
+        """Write the answer only if the request has none yet. Whether it was written."""
+        path = self.requests / f"{answer.request}{ANSWER_SUFFIX}"
+        with self.lock:
+            if path.exists():
+                return False
+            atomic_write(path, self._bytes(answer))
+            return True
 
     def clean(self) -> int:
-        """Delete answers whose request the Duo deleted, an hour after. A request is never deleted here: the Duo
-        deletes its own once it has read a final answer."""
+        """Delete answers whose request the Duo deleted, an hour after it was first seen gone. A request is never
+        deleted here: the Duo deletes its own once it has read a final answer. When a request went is kept in memory,
+        so after a restart the hour starts again: an answer is kept longer, never shorter."""
         try:
             entries = list(os.scandir(self.requests))
         except OSError:
             return 0
         names = {e.name for e in entries}
+        now = self.clock()
         gone = 0
+        orphans = set()
         for entry in entries:
             if not entry.name.endswith(ANSWER_SUFFIX) or entry.name.startswith("~$"):
                 continue
             request = entry.name[: -len(ANSWER_SUFFIX)] + ".json"
             if request in names:
                 continue
-            try:
-                if self.clock() - entry.stat(follow_symlinks=False).st_mtime >= ANSWER_GRACE_SECONDS:
+            orphans.add(entry.name)
+            since = self.missing_since.setdefault(entry.name, now)
+            if now - since >= ANSWER_GRACE_SECONDS:
+                try:
                     os.remove(entry.path)
                     gone += 1
-            except OSError:
-                pass
+                    orphans.discard(entry.name)
+                except OSError:
+                    pass
+        self.missing_since = {k: v for k, v in self.missing_since.items() if k in orphans}
         return gone
 
     def make_requests_folder(self) -> None:
@@ -243,5 +296,70 @@ class CheckIn:
 
     def close(self) -> None:
         self.stop.set()
+        if self.thread is not None:
+            self.thread.join(5)
+
+
+class Acknowledger:
+    """Answers a new request ``queued`` the moment it is seen, on its own thread, so the Duo hears that the laptop has
+    it even while the indexer is busy with a long read or another plot. It reads only the requests folder and writes
+    only answers: a request that can't be read at all is answered ``failed`` here; one that can is answered
+    ``queued`` and left for the indexer, which checks it against the index and plots it. It wakes when the watcher
+    sees a request arrive (``wake``) and lists the folder every ``every`` seconds anyway, since a change notice can
+    be lost. ``on_new`` is called for every request it finds unanswered, to tell the indexer."""
+
+    def __init__(self, plots: PlotFolder, on_new=None, every: float = 2.0):
+        self.plots = plots
+        self.on_new = on_new
+        self.every = every
+        self.woken = threading.Event()
+        self.stop = threading.Event()
+        self.thread: threading.Thread | None = None
+        self.acknowledged = 0
+
+    def wake(self) -> None:
+        self.woken.set()
+
+    def look(self) -> int:
+        """One look at the folder: answer every unanswered request. How many it answered."""
+        answered = 0
+        for name, path in self.plots.pending():
+            if self.plots.answer_state(name) is not None:
+                continue
+            try:
+                request = self.plots.read(name, path)
+            except NotYet:
+                continue
+            except Refused as refused:
+                if self.plots.answer_if_none(Answer(name, "failed", reason=str(refused))):
+                    log.info("Refused plot request %s: %s", name, refused)
+                    answered += 1
+                continue
+            except Exception as error:  # noqa: BLE001 - one bad file never stops the acknowledger
+                log.warning("Could not look at plot request %s: %s", name, error)
+                continue
+            if self.plots.answer_if_none(Answer(name, "queued", id=request.id)):
+                answered += 1
+                self.acknowledged += 1
+            if self.on_new:
+                self.on_new()
+        return answered
+
+    def start(self) -> None:
+        self.thread = threading.Thread(target=self._run, name="plot-acknowledger", daemon=True)
+        self.thread.start()
+
+    def _run(self) -> None:
+        while not self.stop.is_set():
+            try:
+                self.look()
+            except Exception as error:  # noqa: BLE001
+                log.warning("Plot request acknowledger: %s", error)
+            self.woken.wait(self.every)
+            self.woken.clear()
+
+    def close(self) -> None:
+        self.stop.set()
+        self.woken.set()
         if self.thread is not None:
             self.thread.join(5)

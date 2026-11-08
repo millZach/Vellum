@@ -75,8 +75,14 @@ def entries(dropbox: Path) -> dict[str, dict]:
 
 
 def answer_now(indexer) -> int:
+    """Turns until every waiting request is answered (one plot a turn)."""
     indexer.plot_wanted.set()
-    return indexer.answer_plot_requests()
+    answered = 0
+    for _ in range(50):
+        answered += indexer.answer_plot_requests()
+        if not indexer.plot_wanted.is_set():
+            break
+    return answered
 
 
 def spy_answers(indexer) -> list[tuple[str, str]]:
@@ -113,7 +119,7 @@ def test_a_request_decodes():
     ({"path": "/Projects/../../Windows/E-201.dwg"}, "isn't a Dropbox path"),
     ({"path": "/Projects/./E-201.dwg"}, "isn't a Dropbox path"),
     ({"path": "/Projects\\..\\E-201.dwg"}, "isn't a Dropbox path"),
-    ({"path": "/" + "a" * 1100 + ".dwg"}, "no DWG"),
+    ({"path": "/" + "a" * 1100 + ".dwg"}, "isn't a Dropbox path"),
     ({"layout": 7}, "isn't a layout name"),
     ({"layout": ""}, "isn't a layout name"),
     ({"asked": "yesterday"}, "when it was asked"),
@@ -162,12 +168,15 @@ def test_the_fallback_sheet_is_dwg_to_pdfs_for_the_layouts_paper():
 
 
 def test_the_script_types_only_what_the_indexer_chose_and_never_saves(tmp_path):
-    script = plot_script("E-201 Power", tmp_path / "saved.pdf", tmp_path / "saved.txt")
+    origin = tmp_path / "Dropbox" / "Projects" / "Made-up" / "CAD"
+    script = plot_script("E-201 Power", tmp_path / "saved.pdf", tmp_path / "saved.txt", folder=origin)
     lines = script.splitlines()
-    assert lines[0].startswith("(defun vellum-plot ") and lines[0].count("(") == lines[0].count(")")
-    assert lines[1] == (f'(vellum-plot "E-201 Power" "{(tmp_path / "saved.pdf").as_posix()}" '
-                        f'"{(tmp_path / "saved.txt").as_posix()}" "saved" "" "_I" "_L")')
-    assert lines[2:] == ["_.QUIT", "_Y"]
+    assert [line.split(" ")[1] for line in lines[:4]] == ["vellum-pclean", "vellum-abs", "vellum-refs", "vellum-plot"]
+    for line in lines[:4]:
+        assert line.startswith("(defun ") and line.count("(") == line.count(")")
+    assert lines[4] == (f'(vellum-plot "E-201 Power" "{(tmp_path / "saved.pdf").as_posix()}" '
+                        f'"{(tmp_path / "saved.txt").as_posix()}" "saved" "" "_I" "_L" "{origin.as_posix()}")')
+    assert lines[5:] == ["_.QUIT", "_Y"]
     lowered = script.lower()
     for word in ("qsave", "saveas", "wblock", "(load", "appload", ".lsp", "secureload", "setvar"):
         assert word not in lowered
@@ -354,17 +363,21 @@ def test_asking_twice_plots_once(dropbox, tmp_path, make_indexer, plot_log):
     assert len([r for r in plot_log() if r["mode"] == "saved"]) == budget("plot_console_runs_asked_twice") == 1
 
 
-def test_one_plot_writes_six_files_to_dropbox(dropbox, tmp_path, make_indexer, plot_log):
+def test_one_plot_writes_seven_files_to_dropbox(dropbox, tmp_path, make_indexer, plot_log):
     small_tree(dropbox)
     indexer = make_indexer(plotter=plotter(tmp_path))
     indexer.scan()
     ask(dropbox, entries(dropbox)[("E-202.dwg", "Layout1")])
     indexer.writer.counts.files = 0
     indexer.counters.plot_answers = indexer.counters.plots_made = 0
-    answer_now(indexer)
-    written = indexer.writer.counts.files + indexer.counters.plot_answers + indexer.counters.plots_made
-    assert (indexer.writer.counts.files, indexer.counters.plot_answers, indexer.counters.plots_made) == (3, 2, 1)
-    assert written == budget("dropbox_files_written_one_plot") == 6
+    acknowledger = pr.Acknowledger(indexer.plot_folder)
+    acknowledger.look()  # "queued", as the watcher's acknowledger writes it
+    answer_now(indexer)  # "plotting", then "done"
+    written = (indexer.writer.counts.files + acknowledger.acknowledged + indexer.counters.plot_answers
+               + indexer.counters.plots_made)
+    assert (indexer.writer.counts.files, acknowledger.acknowledged, indexer.counters.plot_answers,
+            indexer.counters.plots_made) == (3, 1, 2, 1)
+    assert written == budget("dropbox_files_written_one_plot") == 7
 
 
 def test_a_replot_of_a_changed_dwg_takes_the_pdfs_place_and_keeps_the_older_in_other_pdfs(dropbox, tmp_path,
@@ -488,6 +501,7 @@ def test_an_online_only_dwg_is_plotted_from_a_copy_on_the_scratch_drive(dropbox,
     assert server.downloads == [f"/{PLANT}/CAD/E-202.dwg"]
     for run in plot_log():  # AutoCAD worked in the scratch drive's work folder, never on C: or in Dropbox
         assert Path(run["drawing"]).is_relative_to(downloader.work)
+        assert run["folder"] == (dropbox / PLANT / "CAD").as_posix()  # references found from its Dropbox folder
     assert scratch_files(scratch) == []
 
 
@@ -510,7 +524,8 @@ def test_an_online_only_dwg_with_no_drive_is_answered_failed(dropbox, tmp_path, 
 
 def test_cleanup_never_removes_a_request_and_removes_an_answer_only_after_its_request(tmp_path):
     folder = tmp_path / "Dropbox" / "Vellum" / "Plots"
-    plots = PlotFolder(folder)
+    clock = FakeClock(time.time())
+    plots = PlotFolder(folder, clock=clock)
     requests = folder / "requests"
     requests.mkdir(parents=True)
     week = time.time() - 7 * 86400
@@ -524,11 +539,44 @@ def test_cleanup_never_removes_a_request_and_removes_an_answer_only_after_its_re
     for p in requests.iterdir():
         if "just-read" not in p.name and names["just-read"] not in p.name:
             os.utime(p, (week, week))
-    assert plots.clean() == 1
+    everything = sorted(p.name for p in requests.iterdir())
+    assert plots.clean() == 0  # a week-old answer whose request has only now been seen gone stays
+    clock.now += 59 * 60
+    assert plots.clean() == 0 and sorted(p.name for p in requests.iterdir()) == everything
+    clock.now += 2 * 60  # an hour after its request was first seen gone
+    assert plots.clean() == 2
     left = sorted(p.name for p in requests.iterdir())
     assert left == sorted([f"{names['unanswered']}.json", f"{names['answered']}.json",
-                           f"{names['answered']}.answer.json", f"{names['just-read']}.answer.json"])
+                           f"{names['answered']}.answer.json"])
     assert [n for n, _ in plots.pending()] == [names["unanswered"]]
+
+
+class FakeClock:
+    def __init__(self, now: float):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_an_hour_counts_from_when_the_request_went_not_from_the_answers_age(tmp_path):
+    folder = tmp_path / "Dropbox" / "Vellum" / "Plots"
+    clock = FakeClock(time.time())
+    plots = PlotFolder(folder, clock=clock)
+    (folder / "requests").mkdir(parents=True)
+    request = folder / "requests" / "EEEEEEEE-5.json"
+    request.write_text(json.dumps(GOOD))
+    plots.answer(pr.Answer("EEEEEEEE-5", "done", pdf="/Vellum/Plots/x.pdf"))
+    day = time.time() - 86400
+    os.utime(folder / "requests" / "EEEEEEEE-5.answer.json", (day, day))  # a day-old answer
+    assert plots.clean() == 0  # its request still there
+    clock.now += 3600 * 5
+    request.unlink()  # the Duo has just read the answer and deleted its request
+    assert plots.clean() == 0
+    clock.now += 3599
+    assert plots.clean() == 0 and (folder / "requests" / "EEEEEEEE-5.answer.json").exists()
+    clock.now += 2
+    assert plots.clean() == 1 and not (folder / "requests" / "EEEEEEEE-5.answer.json").exists()
 
 
 def test_the_check_in_is_written_atomically_and_kept_fresh(tmp_path):
@@ -606,7 +654,7 @@ def test_the_watcher_answers_a_request_within_seconds_and_checks_in(dropbox, tmp
             time.sleep(0.05)
         assert (dropbox / "Vellum" / "Plots" / "laptop.json").exists()
         assert requests_folder(dropbox).is_dir()  # made at start, so a request lands in a watched folder
-        indexer.next_plot_look = time.monotonic() + 3600  # only the watcher's notice can find it in time
+        indexer.next_plot_look = time.monotonic() + 3600  # not the minute's look: the notice or the 2 s listing
         asked = time.monotonic()
         name = ask(dropbox, entries(dropbox)[("E-202.dwg", "Layout1")])
         while (answer_of(dropbox, name) or {}).get("state") != "done" and time.monotonic() - asked < 20:
@@ -622,3 +670,297 @@ def test_the_watcher_answers_a_request_within_seconds_and_checks_in(dropbox, tmp
     finally:
         stop.set()
         thread.join(10)
+
+
+def test_the_watchers_events_wake_the_indexer_for_requests_only(dropbox):
+    from vellum_indexer.files import SkipRules
+    from vellum_indexer.watch import Debouncer, DropboxEvents
+
+    woken = []
+    d = Debouncer()
+    events = DropboxEvents(dropbox, SkipRules(), d, on_plot_request=lambda: woken.append(1))
+    requests = requests_folder(dropbox)
+    events.handle("created", str(requests / "6F1C2B9A-0D3E-4A5B-8C7D-1E2F3A4B5C6D.json"), None, False)
+    events.handle("moved", str(dropbox / ".dropbox.cache" / "x"), str(requests / "AAAAAAAA-0001.json"), False)
+    events.handle("created", str(requests), None, True)  # the folder itself appearing
+    assert len(woken) == 3
+    for quiet in [("modified", requests / "AAAAAAAA-0001.answer.json", False),  # the laptop's own answer
+                  ("created", requests / "~$AAAAAAAA-0001.answer.json.12.tmp", False),
+                  ("deleted", requests / "AAAAAAAA-0001.json", False),  # the Duo tidying up
+                  ("modified", dropbox / "Vellum" / "Plots" / "laptop.json", False)]:
+        events.handle(quiet[0], str(quiet[1]), None, quiet[2])
+    assert len(woken) == 3 and d.take()[0] == set()  # and no request is sent to the drawing reader
+
+
+# --- Review fixes (#67 round 2) ----------------------------------------------------------------------------------
+
+def test_relative_references_are_made_absolute_against_the_originals_folder_and_missing_ones_reach_the_answer(
+        dropbox, tmp_path, make_indexer, plot_log):
+    import ezdxf
+
+    cad = dropbox / PLANT / "CAD"
+    dwg = make_dxf(cad / "E-501.dwg", [("Layout1", {"DWG_NO": "E-501"})], setups={"Layout1": ARCH_D})
+    doc = ezdxf.readfile(dwg)
+    doc.add_xref_def("..\\Xrefs\\base.dwg", "BASE")  # relative, there
+    doc.add_image_def("..\\Images\\photo.png", (100, 100))  # relative, missing
+    doc.add_underlay_def("vendor.pdf", "pdf", "1")  # relative, in the same folder, there
+    doc.saveas(dwg)
+    make_dxf(dropbox / PLANT / "Xrefs" / "base.dwg", [("Layout1", {"NOTE": "made-up base"})])
+    make_pdf(cad / "vendor.pdf")
+    before = sorted(p.name for p in cad.iterdir())
+    original = dwg.read_bytes()
+    indexer = make_indexer(plotter=plotter(tmp_path))
+    indexer.scan()
+    name = ask(dropbox, entries(dropbox)[("E-501.dwg", "Layout1")])
+    answer_now(indexer)
+    answer = answer_of(dropbox, name)
+    assert answer["state"] == "done" and answer["missingReferences"] == 1
+    assert answer["warning"] == "1 reference couldn't be found, so the PDF is missing it"
+    run = plot_log()[0]
+    assert run["folder"] == cad.as_posix()  # the original's folder, not the job folder the copy is in
+    assert Path(run["drawing"]).parent != cad
+    assert sorted(p.name for p in cad.iterdir()) == before and dwg.read_bytes() == original  # original untouched
+
+
+def test_the_plot_report_counts_references():
+    from vellum_indexer.plot import Reference, parse_info
+
+    text = ("SETUP\tLayout1\tDWG To PDF.pc3\tARCH D\t914.40\t609.60\t0\nREF\txref\tC:/P/Xrefs/base.dwg\t1\n"
+            "REF\timage\tC:/P/Images/photo.png\t0\nPLOTTED\nEND\n")
+    setup, outcome, refs = parse_info(text)
+    assert outcome == "PLOTTED" and setup.layout == "Layout1"
+    assert refs == [Reference("xref", "C:/P/Xrefs/base.dwg", True), Reference("image", "C:/P/Images/photo.png", False)]
+    assert pr.missing_warning(0) is None
+    assert pr.missing_warning(2) == "2 references couldn't be found, so the PDF is missing them"
+
+
+def test_a_request_is_answered_queued_while_a_long_read_is_still_running(dropbox, tmp_path, make_indexer, plot_log):
+    small_tree(dropbox)
+    indexer = make_indexer(plotter=plotter(tmp_path))
+    indexer.scan()
+    entry = entries(dropbox)[("E-202.dwg", "Layout1")]
+    make_dxf(dropbox / PLANT / "CAD" / "Slow.dwg", [("Layout1", {"DWG_NO": "S-1"})])
+    reading, release = threading.Event(), threading.Event()
+    real = indexer.dwg_reader.read
+
+    def stalled(path, work=None):
+        if path.name == "Slow.dwg":
+            reading.set()
+            release.wait(30)  # AutoCAD stuck on one drawing
+        return real(path, work)
+
+    indexer.dwg_reader.read = stalled
+    acknowledger = pr.Acknowledger(indexer.plot_folder, on_new=indexer.plot_wanted.set, every=0.1)
+    acknowledger.start()
+    scan = threading.Thread(target=indexer.scan, daemon=True)
+    try:
+        scan.start()
+        assert reading.wait(15)
+        name = ask(dropbox, entry)
+        acknowledger.wake()
+        deadline = time.monotonic() + 10
+        while answer_of(dropbox, name) is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert answer_of(dropbox, name)["state"] == "queued" and answer_of(dropbox, name)["id"] == entry["id"]
+        assert not release.is_set() and plot_log() == []  # the read is still running; nothing plotted yet
+        release.set()
+        scan.join(30)
+        assert answer_of(dropbox, name)["state"] == "done"  # plotted as soon as the read ended
+    finally:
+        release.set()
+        acknowledger.close()
+        scan.join(30)
+
+
+def test_the_acknowledger_refuses_garbage_and_never_overwrites_a_later_answer(tmp_path):
+    folder = tmp_path / "Dropbox" / "Vellum" / "Plots"
+    plots = PlotFolder(folder)
+    (folder / "requests").mkdir(parents=True)
+    (folder / "requests" / "AAAAAAAA-1.json").write_text(json.dumps(GOOD))
+    (folder / "requests" / "BBBBBBBB-2.json").write_text(json.dumps({**GOOD, "format": 9}))
+    (folder / "requests" / "CCCCCCCC-3.json").write_text(json.dumps(GOOD))
+    plots.answer(pr.Answer("CCCCCCCC-3", "plotting"))
+    woken = []
+    acknowledger = pr.Acknowledger(plots, on_new=lambda: woken.append(1))
+    assert acknowledger.look() == 2
+    assert plots.answer_state("AAAAAAAA-1") == "queued" and plots.answer_state("BBBBBBBB-2") == "failed"
+    assert plots.answer_state("CCCCCCCC-3") == "plotting" and woken == [1]
+    assert not plots.answer_if_none(pr.Answer("AAAAAAAA-1", "queued"))  # never over an answer already there
+    assert acknowledger.look() == 0
+
+
+def test_a_plot_backlog_takes_one_plot_a_turn_with_the_scan_between(dropbox, tmp_path, make_indexer, plot_log):
+    small_tree(dropbox)
+    for n in ("E-601", "E-602", "E-603"):
+        make_dxf(dropbox / PLANT / "CAD" / f"{n}.dwg", [("Layout1", {"DWG_NO": n})], setups={"Layout1": ARCH_D})
+    indexer = make_indexer(plotter=plotter(tmp_path, "hang", timeout=1))  # every console times out
+    indexer.scan()
+    listed = entries(dropbox)
+    names = [ask(dropbox, listed[(f"{n}.dwg", "Layout1")]) for n in ("E-601", "E-602", "E-603")]
+    for n, name in enumerate(names):  # oldest first
+        t = time.time() - 100 + n
+        os.utime(requests_folder(dropbox) / f"{name}.json", (t, t))
+    indexer.plot_wanted.set()
+    indexer.answer_plot_requests()
+    assert [answer_of(dropbox, n) and answer_of(dropbox, n)["state"] for n in names] == ["failed", None, None]
+    assert len(plot_log()) == 1 and indexer.plot_wanted.is_set()  # the rest wait for the next turn
+
+    # in a scan, a file is read between plots
+    for i in range(3):
+        make_dxf(dropbox / PLANT / "CAD" / "New" / f"N-{i}.dwg", [("Layout1", {"DWG_NO": f"N-{i}"})])
+    order = []
+    real = indexer.dwg_reader.read
+
+    def read(path, work=None):
+        order.append("read")
+        return real(path, work)
+
+    indexer.dwg_reader.read = read
+    real_answer = indexer.plot_folder.answer
+
+    def answered(answer):
+        if answer.state == "failed":
+            order.append("plot")
+        real_answer(answer)
+
+    indexer.plot_folder.answer = answered
+    indexer.scan()
+    assert order[:4] == ["plot", "read", "plot", "read"]
+    assert all(answer_of(dropbox, n)["state"] == "failed" for n in names)
+
+
+@pytest.mark.parametrize("raw, reason", [
+    ('"/Projects/\\ud800.dwg"', "isn't a Dropbox path"),  # a lone surrogate, escaped in JSON
+    ('"/Projects/E-202\\u0000.dwg"', "isn't a Dropbox path"),  # a NUL
+    ('"/' + "a" * 10000 + '.dwg"', "too big to be a plot request"),  # a 10,000-character path
+])
+def test_a_malformed_string_is_refused_and_never_stops_the_indexer(dropbox, tmp_path, make_indexer, plot_log, raw,
+                                                                   reason):
+    small_tree(dropbox)
+    indexer = make_indexer(plotter=plotter(tmp_path))
+    indexer.scan()
+    entry = entries(dropbox)[("E-202.dwg", "Layout1")]
+    folder = requests_folder(dropbox)
+    folder.mkdir(parents=True, exist_ok=True)
+    body = ('{"format": 1, "id": "' + entry["id"] + '", "path": ' + raw
+            + ', "layout": "Layout1", "asked": "2026-11-07T12:00:00Z"}')
+    (folder / "AAAAAAAA-bad.json").write_text(body, encoding="utf-8")
+    old = time.time() - 100
+    os.utime(folder / "AAAAAAAA-bad.json", (old, old))
+    good = ask(dropbox, entry)
+    answer_now(indexer)
+    bad = answer_of(dropbox, "AAAAAAAA-bad")
+    assert bad["state"] == "failed" and reason in bad["reason"]
+    assert answer_of(dropbox, good)["state"] == "done"  # the next request is still answered
+    with pytest.raises(Refused, match=reason):
+        decode("abcdefgh", body.encode("utf-8"), age_seconds=60)
+
+
+def test_a_path_over_1024_characters_is_refused_even_in_a_small_request():
+    with pytest.raises(Refused, match="isn't a Dropbox path"):
+        decode("abcdefgh", json.dumps({**GOOD, "path": "/" + "a" * 2000 + ".dwg"}).encode(), age_seconds=60)
+
+
+def test_each_string_in_a_request_is_checked():
+    for field, value in (("layout", "Layout\ud8001"), ("layout", "Lay\x00out"), ("layout", "L" * 300),
+                         ("asked", "2026-11-07T12:00:00Z\x07"), ("id", "dd0bdad0ab9b908\x00")):
+        with pytest.raises(Refused):
+            decode("abcdefgh", json.dumps({**GOOD, field: value}).encode(), age_seconds=60)
+
+
+def test_an_unexpected_error_in_one_request_is_answered_failed_and_the_next_is_still_plotted(
+        dropbox, tmp_path, make_indexer, plot_log, monkeypatch):
+    small_tree(dropbox)
+    indexer = make_indexer(plotter=plotter(tmp_path))
+    indexer.scan()
+    entry = entries(dropbox)[("E-202.dwg", "Layout1")]
+    first = ask(dropbox, entry)
+    t = time.time() - 100
+    os.utime(requests_folder(dropbox) / f"{first}.json", (t, t))
+    second = ask(dropbox, entry)
+    real = indexer._entry_of
+    calls = []
+
+    def flaky(request):
+        calls.append(request.name)
+        if len(calls) == 1:
+            raise RuntimeError("made-up surprise")
+        return real(request)
+
+    monkeypatch.setattr(indexer, "_entry_of", flaky)
+    answer_now(indexer)
+    assert answer_of(dropbox, first)["state"] == "failed"
+    assert answer_of(dropbox, first)["reason"] == "the laptop couldn't handle this request (RuntimeError)"
+    assert answer_of(dropbox, second)["state"] == "done"
+
+
+def test_a_replot_within_the_same_second_keeps_the_older_plot(dropbox, tmp_path, make_indexer, plot_log):
+    small_tree(dropbox)
+    indexer = make_indexer(plotter=plotter(tmp_path))
+    indexer.scan()
+    dwg = dropbox / PLANT / "CAD" / "E-202.dwg"
+    second = 1_800_000_000 * 10**9
+    os.utime(dwg, ns=(second, second + 100_000_000))
+    indexer.scan()
+    n1 = ask(dropbox, entries(dropbox)[("E-202.dwg", "Layout1")])
+    answer_now(indexer)
+    first = answer_of(dropbox, n1)["pdf"]
+    make_dxf(dwg, [("Layout1", {"DWG_NO": "E-202", "TITLE": "Boiler room lighting plan", "REV": "2"})])
+    os.utime(dwg, ns=(second, second + 700_000_000))  # saved again in the same second
+    indexer.scan()
+    n2 = ask(dropbox, entries(dropbox)[("E-202.dwg", "Layout1")])
+    answer_now(indexer)
+    newer = answer_of(dropbox, n2)["pdf"]
+    assert newer != first and newer.rsplit(" - ", 2)[1] == first.rsplit(" - ", 2)[1]  # same second shown
+    assert (dropbox / first.lstrip("/")).exists() and (dropbox / newer.lstrip("/")).exists()
+    entry = entries(dropbox)[("E-202.dwg", "Layout1")]
+    assert entry["pdf"]["path"] == newer and entry["otherPdfs"] == [first]
+
+
+class LateReader:
+    """Reads no title blocks until ``ready``, as a DWG not read yet (AutoCAD missing, or online-only)."""
+
+    def __init__(self):
+        from makers import DxfReader
+
+        self.inner = DxfReader()
+        self.ready = False
+        self.id = "late-0"
+
+    def read(self, path, work=None):
+        return self.inner.read(path, work) if self.ready else []
+
+    def come_ready(self):
+        self.ready, self.id = True, "late-1"
+
+
+@pytest.mark.parametrize("active, layouts, kept_on", [
+    ("Layout1", ["Layout1"], "Layout1"),  # the DWG's one layout
+    ("Layout2", ["Layout1", "Layout2"], "Layout2"),  # the layout AutoCAD plotted
+])
+def test_a_plot_of_a_dwg_with_no_layout_yet_stays_once_its_layouts_are_known(dropbox, tmp_path, make_indexer,
+                                                                            plot_log, active, layouts, kept_on):
+    import ezdxf
+
+    dwg = make_dxf(dropbox / PLANT / "CAD" / "E-701.dwg",
+                   [(name, {"DWG_NO": f"E-701-{i}", "TITLE": f"Made-up {name}"}) for i, name in enumerate(layouts)],
+                   setups={name: ARCH_D for name in layouts})
+    doc = ezdxf.readfile(dwg)
+    doc.layouts.set_active_layout(active)
+    doc.saveas(dwg)
+    reader = LateReader()
+    indexer = make_indexer(plotter=plotter(tmp_path), dwg_reader=reader)
+    indexer.scan()
+    entry = entries(dropbox)[("E-701.dwg", None)]  # title blocks not read: one entry, no layout
+    name = ask(dropbox, entry)
+    answer_now(indexer)
+    pdf = answer_of(dropbox, name)["pdf"]
+    assert plot_log()[0]["layout"] == ""  # the layout it was saved on
+    reader.come_ready()
+    indexer.scan()
+    listed = entries(dropbox)
+    assert ("E-701.dwg", None) not in listed
+    assert listed[("E-701.dwg", kept_on)]["pdf"]["path"] == pdf
+    assert listed[("E-701.dwg", kept_on)]["pairedBy"] == "plotted"
+    for other in set(layouts) - {kept_on}:
+        assert listed[("E-701.dwg", other)]["pdf"] is None

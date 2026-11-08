@@ -65,25 +65,30 @@ before it is looked up.
  "pdf": "/Vellum/Plots/Made-up Plant Upgrade/E-202 - Layout1 - 2026-09-21 141500 - 5c0e1d2a.pdf",
  "contentHash": "85a8840345de4e26c4bff449341350969d9599d516462abb9940cd750debaeda",
  "pageSetup": "saved",
- "reason": null
+ "reason": null,
+ "missingReferences": 0,
+ "warning": null
 }
 ```
 
 | Key | Meaning |
 |---|---|
-| `state` | `plotting`, `done` or `failed` (below). |
+| `state` | `queued`, `plotting`, `done` or `failed` (below). |
 | `request`, `id` | The request's id, and the entry's `id` (`null` when the request could not be read at all). |
 | `updated` | When the laptop wrote this state. |
 | `pdf`, `contentHash` | On `done`: the PDF's Dropbox path and its Dropbox content hash, as the index lists it. Else `null`. |
 | `pageSetup` | On `done`: `saved` when the layout was plotted with its own page setup, `fallback` when with DWG To PDF at its paper size (below). Else `null`. |
 | `reason` | On `failed`, why, in plain words to show Zach as it is. On a `fallback` `done`, a sentence saying so. Else `null`. |
+| `missingReferences` | On `done`: how many of the DWG's xrefs, raster images and PDF, DWF or DGN underlays couldn't be found, so are missing from the PDF (0 when all were found). Else `null`. |
+| `warning` | On `done` with references missing, a sentence to show Zach as it is: "2 references couldn't be found, so the PDF is missing them". Else `null`. The PDF is still the layout's plot. |
 
 ### The states
 
 | State | Seen on the Duo as | Means |
 |---|---|---|
-| no answer yet | "Asking the laptop…", or "Waiting for the laptop" when the check-in is stale | The request is in Dropbox; the laptop has not answered. |
-| `plotting` | "Plotting on the laptop" | The laptop has the request, checked it, and is plotting it now or next. |
+| no answer yet | "Asking the laptop…", or "Waiting for the laptop" when the check-in is stale | The request is in Dropbox; the laptop has not seen it. |
+| `queued` | "Plotting on the laptop" | The laptop has seen the request and will plot it once what it is doing ends (a long read of another DWG, or another plot). Written within seconds of the request arriving, whatever else the laptop is doing. |
+| `plotting` | "Plotting on the laptop" | The laptop has checked the request against its index and is plotting it now. |
 | `done` | the PDF opens | The PDF is in `Dropbox/Vellum/Plots` and the drawing index already lists it as the entry's `pdf`: the laptop publishes the index before it writes `done`. |
 | `failed` | the reason | It will not be plotted. Asking again is a new request. |
 
@@ -98,11 +103,22 @@ isn't in the drawing index", "the request doesn't match the drawing index (the d
 
 ### How the laptop works through requests
 
-- It makes `requests/` at start if it is not there, and looks at it when the watcher sees a request arrive (within half a second of Dropbox writing it), at
-  start, and once a minute anyway. Requests go ahead of everything the scan is waiting to read, even during a first
-  scan's listing of all of Dropbox, so one is answered within seconds plus the plot while the laptop is on.
+- It makes `requests/` at start if it is not there. A thread of its own answers each new request `queued` the moment
+  it is seen: when the watcher sees one arrive (within half a second of Dropbox writing it), and from a listing of
+  the folder every 2 seconds anyway, since a change notice can be lost. It never waits for a read or a plot in
+  progress, and it never writes over an answer already there. A request that can't be read at all is answered
+  `failed` there and then.
+- The indexer then plots requests ahead of everything the scan is waiting to read, even during a first scan's
+  listing of all of Dropbox, so one is plotted as soon as the read in progress ends (a few seconds, at most that read's
+  3-minute limit).
 - One plot at a time, oldest request first, through AutoCAD's console at below-normal priority, stopped after 5
-  minutes (`plot_timeout_minutes`).
+  minutes (`plot_timeout_minutes`). After each plot the watcher's changes and the next file to read come first, so a
+  backlog of plots never holds up the index: ten plots that each time out cost the index ten reads' delay, not 50
+  minutes.
+- Every string in a request is checked before it is used: valid Unicode (no lone surrogate, which JSON's `\ud800`
+  escape can make), no control characters, `path` at most 1024 characters and `layout` at most 255. Anything else is
+  answered `failed` with the reason. No request, however made, stops the indexer: an error handling one is answered
+  `failed` ("the laptop couldn't handle this request") and the next is taken.
 - A request with a `done` or `failed` answer is never plotted again. One answered only `plotting` (the laptop stopped
   part way) is plotted again.
 - The same layout asked for again while its DWG is unchanged gets the PDF already plotted, without plotting again.
@@ -122,6 +138,14 @@ isn't in the drawing index", "the request doesn't match the drawing index (the d
   `DWG To PDF.pc3` on that plotter's sheet that matches the layout's paper size (ANSI A to E, ARCH A to E1, ISO A4
   to A0, within 2 mm either way round), the layout's area at 1:1, its plot style kept. The answer's `pageSetup` is
   `fallback` and its `reason` says so. A paper size none of those sheets match fails, rather than guess a scale.
+- **References.** The copy is in a job folder, so a reference saved with a relative path would not resolve there.
+  Before plotting, the script makes each top-level xref's, raster image's and PDF, DWF or DGN underlay's relative
+  path absolute against the original DWG's folder in Dropbox (for an online-only DWG too, not the scratch folder), on
+  the copy only: xrefs with `-XREF Path`, images and underlays by changing their definition, then images reloaded. A
+  path is relative unless it starts with a drive (`C:`), `\` or `/`. Nested xrefs resolve from their parent's path,
+  now absolute. The original is never changed, nothing is written beside it, and the copy is never saved. Each
+  reference is then checked (an xref resolved, a file found), and any still missing are counted in the answer's
+  `missingReferences` and `warning`; the answer is still `done`.
 
 ## Where a plot goes
 
@@ -129,10 +153,11 @@ isn't in the drawing index", "the request doesn't match the drawing index (the d
 
 - `<project>` is the drawing's project in the index, or `No project`.
 - `<DWG name>` is the DWG's name less `.dwg`; `<layout>` its layout (left out for a `null` layout).
-- `<DWG saved>` is the DWG's modified time, UTC, `YYYY-MM-DD HHMMSS`: a re-plot of a changed DWG is a new file beside
-  the older plot, never over it.
-- `<8 hex>` is the first 8 hex digits of the SHA-256 of the DWG's path in lower case, `#` and the layout in lower
-  case: two DWGs of one name in different folders of a project never clash.
+- `<DWG saved>` is the DWG's modified time, UTC, `YYYY-MM-DD HHMMSS`, to read at a glance.
+- `<8 hex>` is the first 8 hex digits of the SHA-256 of the DWG's path in lower case, `#`, the layout in lower case,
+  `#` and the SHA-256 of the DWG's bytes: two DWGs of one name in different folders of a project never clash, and a
+  re-plot of a changed DWG is a new file beside the older plot, never over it, even when both were saved within the
+  same second.
 - Characters Windows or Dropbox refuse (`<>:"/\|?*` and control characters) become `_`; leading dots and `~$`, and
   trailing dots and spaces, are dropped; reserved names (`CON`, `NUL`, …) get a leading `_`.
 
@@ -142,6 +167,11 @@ Example: `/Vellum/Plots/Made-up Plant Upgrade/E-202 - Layout1 - 2026-09-21 14150
 pages, paper size and a thumbnail as for any PDF. The newest PDF of a layout is its `pdf`, so a re-plot of a changed
 DWG takes the older plot's place and the older one moves to `otherPdfs`. A plot deleted from `Dropbox/Vellum/Plots`
 leaves the index at the next scan. The laptop never deletes a plot.
+
+A plot made for an entry with a `null` layout (its title blocks not read yet) stays when a later read finds the DWG's
+layouts. It becomes the plot of the layout AutoCAD plotted (the one the DWG was saved on), else the DWG's one layout,
+else the layout with the plot's drawing number, else the DWG's own entry with no layout's fields. It is never
+dropped while its DWG is there.
 
 ## The check-in
 
@@ -169,8 +199,9 @@ state that rarely changes; every 10 minutes would leave a plot request looking m
 - **The Duo deletes its own request** (`files/delete_v2`) once it has read a `done` or `failed` answer. That is how
   the laptop knows the answer was seen.
 - **The laptop never deletes a request**, answered or not.
-- **The laptop deletes an answer an hour after its request is gone**, so a second Duo part way through reading it
-  still finds it.
+- **The laptop deletes an answer an hour after it first sees its request gone**, however old the answer is, so a
+  second Duo part way through reading it still finds it. When a request was first seen gone is kept in memory, so
+  after a restart the hour starts again: an answer is kept longer, never shorter.
 - Plots in `Dropbox/Vellum/Plots` are kept; they are Zach's to delete.
 
 A request whose Duo never came back for its answer (a reinstalled app) stays with its answer: two files of a few

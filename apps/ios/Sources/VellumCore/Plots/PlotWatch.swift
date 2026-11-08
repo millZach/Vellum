@@ -344,7 +344,7 @@ public actor PlotWatch {
             publish()
             try mayGo()
             plotted = PlottedPDF(path: path, contentHash: answer.contentHash, keptName: keptName, note: answer.note,
-                                 fitted: answer.fitted)
+                                 fitted: answer.isFitted ? true : nil)
         }
         let path = open.request.dropboxPath
         if PlotRequestFormat.isRequestPath(path) { _ = try await session.delete(path) }

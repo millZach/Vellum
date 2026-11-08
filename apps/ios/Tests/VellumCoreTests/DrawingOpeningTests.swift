@@ -301,6 +301,37 @@ final class DrawingOpeningTests: XCTestCase {
         }
     }
 
+    func testAnEntryOrPlotWithNoFittedPlotEncodesAsBefore92AndAFittedOneRoundTrips() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        // The Duo's copy of an index entry's PDF, as it was before #92, byte for byte.
+        let plain = DrawingEntry.PDF(path: "/Vellum/Plots/Made-up/M-101 - Model - a.pdf", size: 4096,
+                                     modified: "2026-11-08T12:00:00Z", read: true, contentHash: "h", pages: 1,
+                                     paperInches: [11.5, 8.5])
+        XCTAssertEqual(String(decoding: try encoder.encode(plain), as: UTF8.self),
+                       #"{"contentHash":"h","modified":"2026-11-08T12:00:00Z","pages":1,"paperInches":[11.5,8.5],"#
+                           + #""path":"/Vellum/Plots/Made-up/M-101 - Model - a.pdf","read":true,"size":4096}"#)
+        var fitted = plain
+        fitted.fitted = true
+        let fittedBytes = try encoder.encode(fitted)
+        XCTAssertTrue(String(decoding: fittedBytes, as: UTF8.self).contains(#""fitted":true"#))
+        XCTAssertEqual(try JSONDecoder().decode(DrawingEntry.PDF.self, from: fittedBytes), fitted)
+        XCTAssertEqual(try JSONDecoder().decode(DrawingEntry.PDF.self, from: try encoder.encode(plain)).fitted, nil)
+
+        // The plot ledger's plot, as before #92, and a fitted one.
+        let kept = PlottedPDF(path: "/Vellum/Plots/x.pdf", contentHash: "h", keptName: "k", note: nil)
+        XCTAssertEqual(String(decoding: try encoder.encode(kept), as: UTF8.self),
+                       #"{"contentHash":"h","keptName":"k","path":"/Vellum/Plots/x.pdf"}"#)
+        let keptFitted = PlottedPDF(path: "/Vellum/Plots/x.pdf", contentHash: "h", keptName: "k",
+                                    note: PlotAnswer.fittedNote, fitted: true)
+        XCTAssertEqual(try JSONDecoder().decode(PlottedPDF.self, from: try encoder.encode(keptFitted)), keptFitted)
+
+        // An answer with no `fitted`, kept in the ledger, writes none back.
+        let answer = try XCTUnwrap(PlotAnswer.read(Array(
+            #"{"format":1,"request":"r","id":"e","state":"done","pdf":"/Vellum/Plots/x.pdf","pageSetup":"saved"}"#.utf8)))
+        XCTAssertFalse(String(decoding: try encoder.encode(answer), as: UTF8.self).contains("fitted"))
+    }
+
     func testTheIndexsFittedMarkIsReadAndAnIndexWithoutItReadsAsBefore() throws {
         func shard(_ pdf: String) -> [UInt8] {
             Array(("{\"format\":1,\"project\":null,\"projectPath\":null,\"drawings\":[{\"id\":\"0123456789abcdef\","

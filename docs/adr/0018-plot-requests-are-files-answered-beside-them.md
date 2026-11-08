@@ -47,8 +47,9 @@ the sheet; the Duo says "plotted to fit, not to scale" and places it as an NTS s
 - The Model tab's `-PLOT` answers `_F` (Fit) to the scale prompt instead of `1:1`; every other answer is #87's, and
   paper layouts and a saved page setup are unchanged.
 - **The signal is one boolean, `fitted`,** chosen as the smallest change both old readers ignore: on a `done` answer
-  (`true` for a fitted plot, `false` for any other, `null` before `done`), and on the index entry's `pdf` (`true` only
-  for a fitted plot, absent on every other PDF, so no other shard changes). `pageSetup` could not carry it: a
+  and on the index entry's `pdf`, present and `true` only for a fitted plot and absent everywhere else, so an answer or
+  shard with no fitted plot is byte for byte what it was, and the Duo's copy of the index and its plot ledger carry it
+  only when true (an entry in memory is no bigger than before: `index_copy_bytes_20000` is unchanged). `pageSetup` could not carry it: a
   paper layout's fallback is also `fallback` and is to scale. A new value for `scale` could not either, since `scale`
   is the title block's text, which an older Duo would show and parse as written. The format stays 1: an older Duo
   ignores the key and reads everything else as before, and an older laptop's answers and index, having no `fitted`,

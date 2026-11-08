@@ -167,7 +167,8 @@ final class PlotRequestTests: XCTestCase {
             "r", "e", "done", pdf: "/Vellum/Plots/x.pdf", hash: "h", pageSetup: "fallback", reason: reason, missing: 1,
             warning: "1 reference couldn't be found, so the PDF is missing it", fitted: true)))
         XCTAssertEqual(both.note, "1 reference couldn't be found, so the PDF is missing it. Plotted to fit, not to scale")
-        // A plot to scale says false; an answer from a laptop before 1.1.2 has no `fitted` and reads exactly as before.
+        // The laptop writes no `fitted` for a plot to scale; a `false` reads the same. An answer from a laptop before
+        // 1.1.2 has no `fitted` and reads exactly as before.
         let scaled = try XCTUnwrap(PlotAnswer.read(Laptop.answer(
             "r", "e", "done", pdf: "/Vellum/Plots/x.pdf", hash: "h", pageSetup: "fallback",
             reason: "the layout has no page setup that plots to PDF, so it was plotted with DWG To PDF at its paper size",

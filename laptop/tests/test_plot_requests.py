@@ -225,7 +225,7 @@ def test_a_request_is_answered_plotting_then_done_and_the_index_lists_the_pdf(dr
     answer = answer_of(dropbox, name)
     assert answer["state"] == "done" and answer["format"] == 1 and answer["request"] == name
     assert answer["id"] == entry["id"] and answer["pageSetup"] == "saved" and answer["reason"] is None
-    assert answer["fitted"] is False and "fitted" not in entries(dropbox)[("E-301.dwg", "Layout1")]["pdf"]
+    assert "fitted" not in answer and "fitted" not in entries(dropbox)[("E-301.dwg", "Layout1")]["pdf"]
     assert answer["pdf"].startswith("/Vellum/Plots/Made-up Plant Upgrade/E-301 - Layout1 - ")
     pdf = dropbox / answer["pdf"].lstrip("/")
     assert pdf.read_bytes().startswith(b"%PDF")
@@ -1053,6 +1053,21 @@ def test_a_model_tab_plot_made_at_1_1_before_92_is_plotted_again_fitted_and_kept
     assert answer_of(dropbox, again)["pdf"] == answer["pdf"] and len(plot_log()) == 2
 
 
+def test_an_answer_says_fitted_only_when_it_is():
+    before_92 = (b'{\n "contentHash": "h",\n "format": 1,\n "id": "0123456789abcdef",\n "missingReferences": 0,\n'
+                 b' "pageSetup": "saved",\n "pdf": "/Vellum/Plots/x.pdf",\n "reason": null,\n "request": "r1234567",\n'
+                 b' "state": "done",\n "updated": "2026-11-08T12:00:00Z",\n "warning": null\n}\n')
+    plain = pr.Answer("r1234567", "done", id="0123456789abcdef", pdf="/Vellum/Plots/x.pdf", content_hash="h",
+                      page_setup="saved", missing_references=0, updated="2026-11-08T12:00:00Z")
+    assert PlotFolder._bytes(plain) == before_92
+    plain.fitted = False
+    assert PlotFolder._bytes(plain) == before_92
+    fitted = pr.Answer("r1234567", "done", id="0123456789abcdef", pdf="/Vellum/Plots/x.pdf", content_hash="h",
+                       page_setup="fallback", missing_references=0, fitted=True, updated="2026-11-08T12:00:00Z")
+    assert json.loads(PlotFolder._bytes(fitted))["fitted"] is True
+    assert "fitted" not in pr.Answer("r1234567", "plotting", fitted=True).to_json()
+
+
 def test_a_fitted_plot_never_takes_another_plots_name():
     t = 1_790_000_000 * 10**9
     args = ("Made-up Plant Upgrade", "/Projects/Made-up Plant Upgrade/CAD/M-101.dwg", "Model", t, "abc")
@@ -1076,7 +1091,7 @@ def test_a_paper_layout_falls_back_with_the_layouts_answers_unchanged(dropbox, t
                                    "_L", "_N", "_L", "1:1", "", "_Y", "", "_Y"]
     assert run["answers"][13:16] == ["_N", "_N", "_N"]  # scale lineweights, paper space first, hide paperspace
     assert run["answers"][16].endswith("/fallback.pdf") and run["answers"][17:] == ["_N", "_Y"]
-    assert answer["fitted"] is False and "fitted" not in entries(dropbox)[("E-202.dwg", "Layout1")]["pdf"]
+    assert "fitted" not in answer and "fitted" not in entries(dropbox)[("E-202.dwg", "Layout1")]["pdf"]
 
 
 def test_answers_out_of_step_fail_within_seconds_with_a_plain_reason(dropbox, tmp_path, make_indexer, plot_log,

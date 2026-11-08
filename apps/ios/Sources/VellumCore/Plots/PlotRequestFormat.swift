@@ -149,8 +149,8 @@ public struct PlotAnswer: Codable, Hashable, Sendable {
     public var missingReferences: Int?
     /// On `done` with references missing, a sentence to show as it is.
     public var warning: String?
-    /// On `done`, from a laptop on 1.1.2 or later: true for a plot fitted to the page, not to scale (a Model-tab DWG's
-    /// fallback, #92), which the Duo places as an NTS sheet. Nil from an older laptop.
+    /// On `done`: true for a plot fitted to the page, not to scale (a Model-tab DWG's fallback, #92), which the Duo
+    /// places as an NTS sheet. The laptop writes it only when true (indexer 1.1.2 and later), so it is nil otherwise.
     public var fitted: Bool?
 
     public init(request: String?, id: String?, state: State, updated: String? = nil, pdf: String? = nil,

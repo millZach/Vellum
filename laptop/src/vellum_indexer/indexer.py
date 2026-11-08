@@ -559,7 +559,8 @@ class Indexer:
         read["plottedLayout"] = result.layout or layout  # a request with no layout: the layout AutoCAD plotted
         read["references"] = result.references
         read["missingReferences"] = result.missing
-        read["fitted"] = result.fitted  # to fit the page, not to scale: the Duo places it NTS (#92)
+        if result.fitted:  # to fit the page, not to scale: the Duo places it NTS (#92); absent otherwise
+            read["fitted"] = True
         plot = Plot(sheet, facts.size, facts.mtime_ns, db_pdf, st.st_size, st.st_mtime_ns, read)
         self.state.put_plot(plot)
         self.counters.plots_made += 1

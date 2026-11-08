@@ -67,8 +67,7 @@ before it is looked up.
  "pageSetup": "saved",
  "reason": null,
  "missingReferences": 0,
- "warning": null,
- "fitted": false
+ "warning": null
 }
 ```
 
@@ -82,7 +81,7 @@ before it is looked up.
 | `reason` | On `failed`, why, in plain words to show Zach as it is. On a `fallback` `done`, a sentence saying so. Else `null`. |
 | `missingReferences` | On `done`: how many of the DWG's xrefs, raster images and PDF, DWF or DGN underlays couldn't be found, so are missing from the PDF (0 when all were found). Else `null`. |
 | `warning` | On `done` with references missing, a sentence to show Zach as it is: "2 references couldn't be found, so the PDF is missing them". Else `null`. The PDF is still the layout's plot. |
-| `fitted` | On `done`: `true` when the plot was fitted to the page, not to scale (the Model tab's fallback, below), so the Duo places it as an NTS sheet and says "Plotted to fit, not to scale"; `false` for any other plot. Else `null`. A laptop before indexer 1.1.2 doesn't write it, and a Duo reads its answer as a plot to scale (#92). |
+| `fitted` | On `done`, only for a plot fitted to the page, not to scale (the Model tab's fallback, below): `true`, so the Duo places it as an NTS sheet and says "Plotted to fit, not to scale". **Absent unless true**: an answer for any other plot, or in any other state, has no `fitted` key and is byte for byte what it was before #92. A reader treats a missing key, or `false`, as a plot to scale. A laptop before indexer 1.1.2 never writes it. |
 
 ### The states
 

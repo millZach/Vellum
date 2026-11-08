@@ -129,11 +129,11 @@ class Answer:
     reason: str | None = None
     missing_references: int | None = None  # on done: xrefs, images and underlays that couldn't be found
     warning: str | None = None  # on done: what Zach should know about the PDF, in plain words
-    fitted: bool | None = None  # on done: whether it was plotted to fit the page, not to scale (#92)
+    fitted: bool = False  # on done: plotted to fit the page, not to scale (#92); written only when true
     updated: str = ""
 
     def to_json(self) -> dict:
-        return {
+        body = {
             "format": FORMAT,
             "request": self.request,
             "id": self.id,
@@ -145,8 +145,10 @@ class Answer:
             "reason": self.reason,
             "missingReferences": self.missing_references,
             "warning": self.warning,
-            "fitted": self.fitted if self.state == "done" else None,
         }
+        if self.fitted and self.state == "done":
+            body["fitted"] = True  # absent otherwise, so an answer with no fitted plot is as it was before #92
+        return body
 
 
 def missing_warning(missing: int) -> str | None:

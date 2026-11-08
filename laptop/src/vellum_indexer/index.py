@@ -23,10 +23,10 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from vellum_indexer.fields import Sheet, TitleBlock, number_from_file_name
-from vellum_indexer.pairing import Candidate, pair
+from vellum_indexer.pairing import Candidate, norm_number, pair, whole_dwg
 from vellum_indexer.pdf import THUMBNAIL_BOX
 from vellum_indexer.projects import ProjectFinder
-from vellum_indexer.state import Record
+from vellum_indexer.state import Plot, Record
 
 FORMAT = 1
 MANIFEST = "index.json"
@@ -69,9 +69,13 @@ def sheets_of(record: Record) -> list[Sheet]:
     return sheets or [Sheet("", TitleBlock())]
 
 
-def build_entries(records: dict[str, Record], projects: ProjectFinder) -> list[dict]:
+PLOTTED = "plotted"
+
+
+def build_entries(records: dict[str, Record], projects: ProjectFinder, plotted: list[Plot] | None = None) -> list[dict]:
     """Every drawing: each DWG layout's title block (a sheet) with the PDF plotted from it if any, then each PDF
-    with no DWG."""
+    with no DWG. ``plotted`` are the PDFs the laptop plotted on request, in Dropbox/Vellum/Plots: each is its sheet's
+    PDF, ``pairedBy`` "plotted", the newest of its sheet's PDFs shown and the rest in ``otherPdfs``."""
     project_of = {k: projects.project_of(r.path) for k, r in records.items()}
     dwgs = [k for k, r in records.items() if r.kind == "dwg"]
     pdfs = [k for k, r in records.items() if r.kind == "pdf"]
@@ -96,6 +100,14 @@ def build_entries(records: dict[str, Record], projects: ProjectFinder) -> list[d
     plots: dict[str, list[tuple[str, str]]] = {}
     for pdf_key, p in pairs.items():
         plots.setdefault(p.dwg_key, []).append((pdf_key, p.rule))
+    if plotted:
+        records = dict(records)
+        for plot in plotted:
+            sheet = plot.sheet if plot.sheet in sheets else _sheet_for_plot(plot, sheets)
+            if sheet is not None:
+                key = plot.path.lower()
+                records[key] = plot.record()
+                plots.setdefault(sheet, []).append((key, PLOTTED))
 
     entries = []
     for sheet_key, (dwg_key, sheet) in sheets.items():
@@ -116,6 +128,29 @@ def build_entries(records: dict[str, Record], projects: ProjectFinder) -> list[d
             entries.append(_entry(records, project_of, None, None, pdf_key, None, []))
     entries.sort(key=lambda e: (e["path"].lower(), (e["layout"] or "").lower()))
     return entries
+
+
+def _sheet_for_plot(plot: Plot, sheets: dict[str, tuple[str, Sheet]]) -> str | None:
+    """The sheet a plot belongs to when the one it was made for is not there any more: a plot of a DWG whose title
+    blocks were not read yet (``path#``) once its layouts are known. The layout AutoCAD plotted, else the DWG's one
+    layout, else the layout with the plot's drawing number; else the DWG itself, with no layout's fields. A plot is
+    never dropped while its DWG is there; one for a layout no longer in the DWG is."""
+    if not plot.sheet.endswith("#"):
+        return None  # made for a layout the DWG no longer has
+    dwg_key = plot.sheet[:-1]
+    own = {sk: sh for sk, (k, sh) in sheets.items() if k == dwg_key}
+    if not own:
+        return None  # the DWG is gone
+    plotted = (plot.facts.get("plottedLayout") or "").lower()
+    if plotted and f"{dwg_key}#{plotted}" in own:
+        return f"{dwg_key}#{plotted}"
+    if len(own) == 1:
+        return next(iter(own))
+    number = norm_number(TitleBlock.from_dict(plot.facts.get("text")).number)
+    by_number = [sk for sk, sh in own.items() if number and norm_number(sh.block.number) == number]
+    if len(by_number) == 1:
+        return by_number[0]
+    return whole_dwg(dwg_key)
 
 
 def _entry(records, project_of, dwg_key, sheet, pdf_key, rule, others) -> dict:

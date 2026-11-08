@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from vellum_indexer import __version__, dwg, fields, files
+from vellum_indexer import plot as plot_module
 from vellum_indexer.config import ConfigError, Settings, find_dropbox, indexer_home, load_settings
 from vellum_indexer.dropbox_api import DropboxClient, DropboxError, KeyringTokenStore, pkce_pair
 from vellum_indexer.indexer import Indexer
@@ -91,6 +92,9 @@ def make_indexer(home: Path, dropbox: Path | None) -> tuple[Indexer, str, Settin
     root = find_dropbox(settings, dropbox)
     console = dwg.find_accoreconsole(settings.accoreconsole)
     reader = dwg.AccoreconsoleReader([str(console)], home / "work") if console else dwg.NoReader()
+    plotter = (plot_module.AccoreconsolePlotter([str(console)], home / "work",
+                                                timeout=settings.plot_timeout_minutes * 60)
+               if console else plot_module.NoPlotter())
     described = f"AutoCAD core console at {console}" if console else "none (no accoreconsole.exe found)"
     indexer = Indexer(
         root,
@@ -100,6 +104,7 @@ def make_indexer(home: Path, dropbox: Path | None) -> tuple[Indexer, str, Settin
         dwg_reader=reader,
         tags=fields.TagMap(settings.title_block_tags),
         downloader=make_downloader(settings),
+        plotter=plotter,
     )
     return indexer, described, settings
 
@@ -153,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
             indexer, reader, settings = make_indexer(home, args.dropbox)
             print(f"Dropbox folder: {indexer.root}")
             print(f"Index folder:   {indexer.index_folder}")
+            print(f"Plots folder:   {indexer.plots_root} (requests\\, laptop.json)")
             print(f"Indexer folder: {home} (state.sqlite, indexer.log, settings.toml)")
             print(f"DWG reader:     {reader}")
             d = indexer.downloader

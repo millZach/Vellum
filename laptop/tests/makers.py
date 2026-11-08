@@ -86,8 +86,10 @@ def title_block_pdf(path: Path, number=None, title=None, rev=None, scale=None, d
     return make_pdf(path, lines, title=title_meta, **kw)
 
 
-def make_dxf(path: Path, inserts: list[tuple[str, dict[str, str]]]) -> Path:
-    """A DXF standing in for a DWG: per (layout, {tag: value}), a block insert with those attributes."""
+def make_dxf(path: Path, inserts: list[tuple[str, dict[str, str]]], setups: dict[str, dict] | None = None) -> Path:
+    """A DXF standing in for a DWG: per (layout, {tag: value}), a block insert with those attributes. ``setups`` gives
+    a layout a saved page setup: {layout: {"device": "DWG To PDF.pc3", "media": ..., "size": (w mm, h mm),
+    "rotation": 0..3}}; a layout without one has ezdxf's (no plotter, A3)."""
     doc = ezdxf.new("R2018")
     for n, (layout_name, attributes) in enumerate(inserts):
         block = doc.blocks.new(name=f"TB{n}")
@@ -98,6 +100,14 @@ def make_dxf(path: Path, inserts: list[tuple[str, dict[str, str]]]) -> Path:
             doc.layouts.get(layout_name) if layout_name in doc.layouts else doc.layouts.new(layout_name)
         )
         layout.add_blockref(block.name, (0, 0)).add_auto_attribs(attributes)
+    for layout_name, setup in (setups or {}).items():
+        layout = doc.layouts.get(layout_name) if layout_name in doc.layouts else doc.layouts.new(layout_name)
+        dxf = layout.dxf_layout.dxf
+        dxf.plot_configuration_file = setup.get("device", "")
+        dxf.paper_size = setup.get("media", "")
+        if "size" in setup:
+            dxf.paper_width, dxf.paper_height = setup["size"]
+        dxf.plot_rotation = setup.get("rotation", 0)
     path.parent.mkdir(parents=True, exist_ok=True)
     doc.saveas(path)
     return path

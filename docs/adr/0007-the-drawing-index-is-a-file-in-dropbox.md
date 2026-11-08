@@ -22,3 +22,11 @@ The laptop indexer is built (`laptop/`, its README says how it works). The index
 Online-only files, Zach's decision on 2026-11-07 ("Download and read them … to my external drive, once done go ahead and delete what's been read, not from Dropbox but from the external drive"): the indexer never opens the placeholder in the laptop's Dropbox folder, which would make Dropbox download the file there. It downloads the file through the Dropbox API (`files/download`) to a scratch folder on the external drive (`D:\Vellum indexer\scratch` by default), reads it, and deletes the copy, one file at a time; nothing is deleted from Dropbox. The laptop signs in to Vellum's own Dropbox app once, with PKCE and no app secret as the Duo does (ADR-0013); the refresh token lives in Windows Credential Manager and the app key in the laptop's settings, neither in the repository. With the drive unplugged or no sign-in, online-only files stay listed unread and are read when both are back.
 
 The AutoLISP that dumps title block attributes is typed into the core console's script rather than loaded from a file, so AutoCAD's `SECURELOAD` never asks, and Zach's AutoCAD security settings are left alone. A DWG with several titled layouts is one index entry per layout (ADR-0017).
+
+## Amendment (#67): plotting on request
+
+Built as ADR-0018 says, in plot request format 1 (`docs/plot-requests.md`): the Duo writes one file per request to
+`Dropbox/Vellum/Plots/requests`, the laptop indexer answers beside it (`plotting`, `done` with the PDF's path, or
+`failed` with a reason), and keeps a check-in in `Dropbox/Vellum/Plots/laptop.json` so the Duo can tell it is off. The
+PDF goes to `Dropbox/Vellum/Plots/<project>/`, plotted with the layout's own page setup on a copy of the DWG, or with
+DWG To PDF at its paper size when the layout has none that plots to PDF.

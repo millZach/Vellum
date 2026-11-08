@@ -3,12 +3,14 @@
 The **laptop indexer** runs on Zach's Windows laptop. It scans the laptop's Dropbox folder for DWGs and PDFs, pairs
 each PDF with the DWG it was plotted from, reads each drawing's title block fields (drawing number, title, revision,
 scale, date), makes a thumbnail, and keeps the **drawing index** in `Dropbox\Vellum\Index`, where the Duo reads it
-(#68). It starts at logon and watches Dropbox, so a saved PDF is in the index within seconds.
+(#68). It starts at logon and watches Dropbox, so a saved PDF is in the index within seconds. When Vellum asks for a
+plot of a drawing with no PDF, it plots it with AutoCAD's own core console and keeps the PDF in `Dropbox\Vellum\Plots`
+(see "Plotting on request").
 
 It reads the folder the Dropbox desktop app keeps in sync. Only for files Dropbox keeps online-only does it use the
 Dropbox API, to download a copy to a scratch folder on the external drive, read it and delete it (see "Online-only
 files"). It only reads project files; it never changes, moves or deletes them, and it writes to Dropbox only inside
-`Dropbox\Vellum\Index`.
+`Dropbox\Vellum\Index` and `Dropbox\Vellum\Plots`.
 
 The index's format is [`docs/drawing-index-format.md`](../docs/drawing-index-format.md), decided in
 [ADR-0017](../docs/adr/0017-the-drawing-index-is-a-manifest-of-project-shards.md).
@@ -34,7 +36,13 @@ at logon (below-normal priority, on battery too, restarted within a minute if it
 - `-NoStart` registers the task without starting it.
 
 Uninstall with `laptop\scripts\uninstall.ps1`; add `-Purge` to sign out of Dropbox and delete the state file, log
-and settings too. Neither touches `Dropbox\Vellum\Index`.
+and settings too. Neither touches `Dropbox\Vellum\Index` or `Dropbox\Vellum\Plots`.
+
+**Updating the installed indexer.** In the checkout it was installed from (`C:\Users\zache\Projects\Vellum` on
+Zach's laptop), `git pull`, then run `install.ps1` again with no options (settings.toml and the Dropbox sign-in are
+kept): it stops the running task, installs the new version into the same environment, and starts the task again.
+`vellum-indexer where` then names the plots folder, and the log's first line names the version (1.1.0 plots on
+request).
 
 By hand, from a checkout: `python -m pip install -r laptop\requirements.lock` and `python -m pip install --no-deps
 laptop`, then `vellum-indexer where` (prints where everything is), `vellum-indexer scan` (one scan, then exit) or
@@ -46,6 +54,9 @@ laptop`, then `vellum-indexer where` (prints where everything is), `vellum-index
 |---|---|
 | Dropbox folder | from `%APPDATA%\Dropbox\info.json` or `%LOCALAPPDATA%\Dropbox\info.json` (the personal account, else business), unless `--dropbox` or `dropbox_path` names it |
 | The index the Duo reads | `<Dropbox>\Vellum\Index\` (`index.json`, `shards\`, `thumbnails\`) |
+| Plot requests and answers | `<Dropbox>\Vellum\Plots\requests\` (`<request>.json` from the Duo, `<request>.answer.json` from the laptop) |
+| Plots made on request | `<Dropbox>\Vellum\Plots\<project>\` |
+| The check-in | `<Dropbox>\Vellum\Plots\laptop.json`, rewritten every 2 minutes while it runs |
 | State file | `%LOCALAPPDATA%\Vellum\indexer\state.sqlite` |
 | Log | `%LOCALAPPDATA%\Vellum\indexer\indexer.log` (5 MB, three old logs kept) |
 | Settings | `%LOCALAPPDATA%\Vellum\indexer\settings.toml` (optional) |
@@ -68,6 +79,7 @@ dropbox_app_key = '<Vellum app key>'  # to download online-only files (install.p
 scratch_folder = 'D:\Vellum indexer\scratch'   # where they are downloaded, read and deleted
 scratch_min_free_gb = 5               # leave this much free on that drive; wait rather than fill it
 retry_unread_minutes = 10             # try unread online-only files again this often
+plot_timeout_minutes = 5              # a plot on request is stopped after this long, and answered failed
 
 [title_block_tags]                    # more attribute tags, per field
 number = ['SHT_ID']
@@ -78,7 +90,7 @@ title = ['HEADING']
 
 All of Dropbox, for `.dwg` and `.pdf` files, except:
 
-- `Dropbox\Vellum` itself (canvases, symbols and the index);
+- `Dropbox\Vellum` itself (canvases, symbols, the index and plots made on request, which the indexer lists itself);
 - Dropbox's own folders (`.dropbox.cache`, `.dropbox`) at any depth;
 - temp, lock and backup files: `~$*`, `.~*`, `*.dwl`, `*.dwl2`, `*.bak`, `*.sv$`, `*.tmp`;
 - anything `exclude` names.
@@ -190,6 +202,44 @@ holding the drawing's discipline and format folders: walking up past folders nam
 `Mechanical`, `Electrical`, `Issued`, `Rev C`, the first other folder is the project. A drawing at Dropbox's top has
 none.
 
+## Plotting on request
+
+Opening a DWG with no PDF on the Duo writes a plot request to `Dropbox\Vellum\Plots\requests`; the indexer plots it
+and answers beside it. The format, the answers, the naming and the cleanup are
+[`docs/plot-requests.md`](../docs/plot-requests.md), decided in
+[ADR-0018](../docs/adr/0018-plot-requests-are-files-answered-beside-them.md).
+
+- **Seen within seconds.** A thread of its own answers a new request `queued` the moment it is seen: the watcher
+  tells it when Dropbox writes one (a request is not debounced), and it lists the requests folder every 2 seconds
+  anyway, since a change notice can be lost. It never waits for a read or plot in progress. Requests then go ahead
+  of everything the scan is waiting to read, between any two files and every 256 files of a listing, so even during
+  a first scan of hours a request is plotted as soon as the read in progress ends.
+- **Checked against the index.** A request must name an entry the index holds, by its `id`, DWG path and layout; the
+  plot then uses only the index's own path and layout name. Every string in it must be valid Unicode with no control
+  characters and a sane length. A malformed or unknown request is answered `failed` with the reason, and no request,
+  however made, stops the indexer.
+- **On a copy, with its own page setup.** The DWG is copied to a job folder in `%LOCALAPPDATA%\Vellum\indexer\work`
+  (an online-only DWG is downloaded to the scratch folder and plotted there, then the copy deleted), and the core
+  console runs `-PLOT` on the layout at below-normal priority, stopped after 5 minutes: with the layout's saved
+  plotter, paper, area, scale and plot style when that plotter writes PDFs (a `.pc3` with PDF in its name), so the PDF
+  is what AutoCAD prints. A layout with no such page setup is plotted again with `DWG To PDF.pc3` on the sheet that
+  matches its paper size, its layout area at 1:1, and the answer says so. The plot answers "No" to saving its
+  settings, and the console quits without saving; the DWG in the project folder is never opened.
+- **References still found.** Before plotting, the script makes the copy's relative xref, raster image and PDF, DWF
+  or DGN underlay paths absolute against the original DWG's folder, on the copy only, so the PDF has them. References
+  still not found are counted, and the `done` answer says so ("2 references couldn't be found").
+- **One at a time,** oldest first, one plot a turn: after each plot the watcher's changes and the next file to read
+  come first, so a backlog of plots never holds up the index. The same layout asked for again with its DWG unchanged
+  gets the PDF already made.
+- **Kept in `Dropbox\Vellum\Plots\<project>\`**, named `<DWG name> - <layout> - <DWG saved> - <8 hex>.pdf`, read as any
+  PDF (content hash, pages, paper size, thumbnail), and listed as the entry's `pdf` with `pairedBy` `plotted` before the
+  answer says `done`. The 8 hex digits cover the DWG's bytes, so a re-plot of a changed DWG is a new file even
+  within the same second, and the older plot moves to `otherPdfs`. A plot made before the DWG's layouts were read
+  moves to the right layout's entry once they are. The indexer never deletes a plot, nor a request; it deletes an
+  answer an hour after it first sees the Duo has deleted its request.
+- **The check-in,** `Dropbox\Vellum\Plots\laptop.json`, is rewritten every 2 minutes on a thread of its own, so the Duo
+  can say "Waiting for the laptop" when it is more than 5 minutes old.
+
 ## Gentle on the laptop
 
 - Windows background mode (low CPU, disk and memory priority) for the indexer, below-normal priority for AutoCAD's
@@ -240,7 +290,8 @@ python scripts/make_fixture_index.py   # rebuilds tests/fixtures/drawing-index
 ```
 
 Every drawing in the tests is made up by the tests: PDFs written by hand, DXF title blocks made with ezdxf standing in
-for DWGs, DWG headers with made-up previews, a stand-in for `accoreconsole.exe`, and a scripted Dropbox API (made-up
+for DWGs, DWG headers with made-up previews, stand-ins for `accoreconsole.exe` (reading title blocks, and plotting:
+`tests/fake_plot_console.py` reads a made-up DXF's saved page setup and writes a made-up PDF), and a scripted Dropbox API (made-up
 tokens, no network) for online-only downloads. `tests/fixtures/drawing-index` is
 a made-up index for the Duo's tests (#68). CI runs all of it on GitHub's Windows runner ("Laptop indexer tests
 (Windows)"), including `install.ps1` and `uninstall.ps1` against a made-up Dropbox folder.

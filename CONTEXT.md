@@ -265,15 +265,23 @@ What a tap on a row of the Drawings tab's search opens: the drawing's PDF, its p
 _Avoid_: preview, reader, PDF view
 
 **Plot**:
-The PDF a drawing's DWG was plotted to, which the drawing index pairs with it: by the PDF's plot metadata naming the DWG, by the same name nearby, or by the same drawing number in the same project. A drawing with none has no PDF yet; a PDF with no DWG is "PDF only, no DWG".
+The PDF a drawing's DWG was plotted to, which the drawing index pairs with it: by the PDF's plot metadata naming the DWG, by the same name nearby, or by the same drawing number in the same project, or because the laptop plotted it on request into `Dropbox/Vellum/Plots`. A drawing with none has no PDF yet; a PDF with no DWG is "PDF only, no DWG".
 _Avoid_: print, export, sheet (a sheet is a placed PDF page)
+
+**Plot request**:
+Vellum asking the laptop to plot a drawing that has no PDF yet: one small file per request in `Dropbox/Vellum/Plots/requests`, naming the drawing index entry. The laptop indexer plots it with AutoCAD's own core console, using the layout's page setup (or DWG To PDF at its paper size when it has none that plots to PDF), keeps the PDF in `Dropbox/Vellum/Plots` and answers beside the request: queued the moment it is seen, then plotting, done, or failed with a reason. The Duo deletes its request once it has read a final answer (`docs/plot-requests.md`, ADR-0018).
+_Avoid_: job (a job goes to Sotto), print request, plot job
+
+**Check-in**:
+The laptop indexer's "last seen" file, `Dropbox/Vellum/Plots/laptop.json`: a time and its version, rewritten every 2 minutes while it runs. Older than 5 minutes, the laptop is off, and a plot request waits ("Waiting for the laptop").
+_Avoid_: heartbeat, ping, status
 
 **Online-only file**:
 A Dropbox file the laptop keeps only in the cloud, a placeholder until it is opened. The laptop indexer never opens the placeholder, because that downloads the file into the laptop's Dropbox folder: it downloads a copy through the Dropbox API to the scratch folder, reads it and deletes the copy. While it can't (the drive unplugged, not signed in), the file is listed unread by its path and name.
 _Avoid_: cloud file, smart sync file, placeholder (alone)
 
 **Scratch folder**:
-The folder on Zach's external drive (`D:\Vellum indexer\scratch`) where the laptop indexer downloads an online-only file to read it, one at a time, deleting each copy once what was read is saved. The indexer works only in its own marked subfolder of it, `Vellum indexer copies`, and refuses a scratch folder inside the Dropbox folder.
+The folder on Zach's external drive (`E:\Vellum indexer\scratch` on his laptop, set in its settings; `D:` by default) where the laptop indexer downloads an online-only file to read it, one at a time, deleting each copy once what was read is saved; an online-only DWG asked for in a plot request is plotted from a copy there too. The indexer works only in its own marked subfolder of it, `Vellum indexer copies`, and refuses a scratch folder inside the Dropbox folder.
 _Avoid_: cache, temp folder, download folder
 
 ## Meetings

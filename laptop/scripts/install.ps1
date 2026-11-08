@@ -8,8 +8,11 @@ pinned dependencies in requirements.lock, and registers the scheduled task "\Vel
 runs it (pythonw, no window) at logon, at below-normal priority, on battery too, and restarts it if it stops. It
 then starts the task, unless -NoStart.
 
-Nothing is written to Dropbox here. The indexer itself writes only to Dropbox\Vellum\Index; its state file, log
-and settings stay in %LOCALAPPDATA%\Vellum\indexer.
+Nothing is written to Dropbox here. The indexer itself writes only to Dropbox\Vellum\Index and Dropbox\Vellum\Plots;
+its state file, log and settings stay in %LOCALAPPDATA%\Vellum\indexer.
+
+Run again from an updated checkout to update an installed indexer: it stops the running task first, installs the new
+version into the same environment, and starts it again. The state file and settings are kept.
 
 .PARAMETER DropboxPath
 The Dropbox folder, when Dropbox's info.json should not be used. Written to settings.toml.
@@ -65,6 +68,15 @@ if (-not (Test-Path (Join-Path $venv 'Scripts\python.exe'))) {
 $venvPython = Join-Path $venv 'Scripts\python.exe'
 $venvPythonw = Join-Path $venv 'Scripts\pythonw.exe'
 
+$installed = Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction SilentlyContinue
+if ($installed -and $installed.State -eq 'Running') {
+    Write-Host 'Stopping the running indexer to update it'
+    Stop-ScheduledTask -TaskName $taskName -TaskPath $taskPath
+    for ($i = 0; $i -lt 20 -and (Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath).State -eq 'Running'; $i++) {
+        Start-Sleep -Milliseconds 500
+    }
+}
+
 Write-Host 'Installing the indexer and its pinned dependencies'
 & $venvPython -m pip install --disable-pip-version-check --quiet --requirement (Join-Path $laptop 'requirements.lock')
 if ($LASTEXITCODE -ne 0) { throw 'pip could not install the dependencies.' }
@@ -103,7 +115,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
     -MultipleInstances IgnoreNew -Priority 7
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Action $action -Trigger $trigger -Settings $settings `
-    -Principal $principal -Description "Keeps Vellum's drawing index in Dropbox\Vellum\Index. Installed from $laptop." `
+    -Principal $principal -Description "Keeps Vellum's drawing index in Dropbox\Vellum\Index and plots drawings Vellum asks for. Installed from $laptop." `
     -Force | Out-Null
 Write-Host "Registered the task $taskPath$taskName to start at logon for $user"
 

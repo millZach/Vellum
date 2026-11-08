@@ -136,4 +136,6 @@ enum DropboxEndpoint {
     static let move = URL(string: "https://api.dropboxapi.com/2/files/move_v2")!
     /// Deletes a file or folder (#12): a canvas's log parts of a generation a newer snapshot has replaced.
     static let delete = URL(string: "https://api.dropboxapi.com/2/files/delete_v2")!
+    /// One file's metadata (#70): the laptop's check-in, whose `server_modified` says when it was last seen.
+    static let metadata = URL(string: "https://api.dropboxapi.com/2/files/get_metadata")!
 }

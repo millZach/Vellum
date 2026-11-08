@@ -1,7 +1,8 @@
 import Foundation
 
 /// A made-up Dropbox, in memory, that answers the requests syncing makes (`files/upload`, `files/move_v2`,
-/// `files/delete_v2`, `files/list_folder` and `list_folder/continue`, `files/download` since #41, and token renewal) the way Dropbox does, behind
+/// `files/delete_v2`, `files/list_folder` and `list_folder/continue`, `files/download` since #41, `files/get_metadata` since #70, and
+/// token renewal) the way Dropbox does, behind
 /// the same transport seam the live client uses.
 /// The tests sync through it, and Debug builds use it for the simulator's sync captures (`--ui-sync`), since the
 /// simulator has no Dropbox key. It can be switched offline, made to fail, and have a file changed "on the laptop".
@@ -11,6 +12,8 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
         public var path: String
         public var bytes: [UInt8]
         public var rev: String
+        /// When the made-up Dropbox wrote it: its `server_modified` (#70).
+        public var modified: Date
     }
 
     private let lock = NSLock()
@@ -99,11 +102,18 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
         }
     }
 
-    /// A file written by something other than the Duo, as an edit on the laptop would.
-    public func changeOnTheLaptop(_ path: String, to bytes: [UInt8]) {
+    /// The clock uploads and the laptop's changes are stamped with (`server_modified`); tests set their own.
+    public var clock: @Sendable () -> Date {
+        get { lock.withLock { _clock } }
+        set { lock.withLock { _clock = newValue } }
+    }
+    private var _clock: @Sendable () -> Date = { Date() }
+
+    /// A file written by something other than the Duo, as an edit on the laptop would, stamped `at` (else now).
+    public func changeOnTheLaptop(_ path: String, to bytes: [UInt8], at: Date? = nil) {
         lock.withLock {
             revisions += 1
-            files[path.lowercased()] = File(path: path, bytes: bytes, rev: Self.rev(revisions))
+            files[path.lowercased()] = File(path: path, bytes: bytes, rev: Self.rev(revisions), modified: at ?? _clock())
             changes.append(DropboxTreeEntry(path: path.lowercased(), kind: .file))
         }
     }
@@ -166,7 +176,7 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
                 return Self.badRequest
             }
             revisions += 1
-            let file = File(path: path, bytes: bytes, rev: Self.rev(revisions))
+            let file = File(path: path, bytes: bytes, rev: Self.rev(revisions), modified: _clock())
             files[path.lowercased()] = file
             changes.append(DropboxTreeEntry(path: path.lowercased(), kind: .file))
             return Self.json(["name": (path as NSString).lastPathComponent, "path_display": path, "rev": file.rev,
@@ -186,7 +196,7 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
             guard !moved.isEmpty else { return Self.conflict("from_lookup/not_found/") }
             for file in moved {
                 let path = to + file.path.dropFirst(from.count)
-                files[path.lowercased()] = File(path: path, bytes: file.bytes, rev: file.rev)
+                files[path.lowercased()] = File(path: path, bytes: file.bytes, rev: file.rev, modified: file.modified)
                 changes.append(DropboxTreeEntry(path: path.lowercased(), kind: .file))
             }
             return Self.json(["metadata": ["path_display": to]])
@@ -229,6 +239,18 @@ public final class MadeUpDropbox: DropboxTransport, @unchecked Sendable {
             let resultHeader = (try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
             return DropboxHTTPResponse(status: 200, body: Data(file.bytes), headers: ["dropbox-api-result": resultHeader])
+        case "/2/files/get_metadata":
+            guard let body = request.body,
+                  let argument = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let path = argument["path"] as? String else { return Self.badRequest }
+            _requests.append("metadata \(path)")
+            if let file = files[path.lowercased()] {
+                return Self.json([".tag": "file", "name": (file.path as NSString).lastPathComponent,
+                                  "path_display": file.path, "rev": file.rev, "size": file.bytes.count,
+                                  "server_modified": PlotRequestFormat.time(file.modified)])
+            }
+            guard exists(path) else { return Self.conflict("path/not_found/") }
+            return Self.json([".tag": "folder", "name": (path as NSString).lastPathComponent, "path_display": path])
         case "/2/files/list_folder/continue":
             guard let body = request.body,
                   let argument = try? JSONSerialization.jsonObject(with: body) as? [String: Any],

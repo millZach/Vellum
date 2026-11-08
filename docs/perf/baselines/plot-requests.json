@@ -1,0 +1,52 @@
+{
+  "area": "plot-requests",
+  "issue": "#70",
+  "about": "The Duo's side of plot requests (ADR-0018): asking the laptop to plot a DWG with no PDF, waiting for its answer and the check-in, and taking the PDF. Counts are budgets enforced by PlotRequestTests in VellumCore, on a made-up Dropbox with the laptop played by the test and a made-up clock, so they are deterministic.",
+  "entries": [
+    {
+      "metric": "plot_request_uploads_per_ask",
+      "kind": "count",
+      "value": 1,
+      "unit": "requests",
+      "tolerance": 0,
+      "measured": "feat/plot-wait 2026-11-08 VellumCore PlotRequestTests (deterministic)",
+      "note": "One files/upload, mode add, per ask. Asking again for the same entry while its request is open writes nothing."
+    },
+    {
+      "metric": "plot_request_bytes",
+      "kind": "count",
+      "value": 165,
+      "unit": "bytes",
+      "tolerance": 0,
+      "measured": "feat/plot-wait 2026-11-08 VellumCore PlotRequestTests (deterministic)",
+      "note": "The request file for the fixture's E-201, format 1 as docs/plot-requests.md writes it. A request grows only with its DWG path and layout name; the laptop refuses one over 4 KB."
+    },
+    {
+      "metric": "plot_wait_requests_per_minute_first_2_min",
+      "kind": "count",
+      "value": 13,
+      "unit": "requests",
+      "tolerance": 0,
+      "measured": "feat/plot-wait 2026-11-08 VellumCore PlotRequestTests (deterministic)",
+      "note": "While a request is new (its first 2 minutes): a look every 5 s, each one files/download of the request's answer (a not-found reply of about 100 bytes until the laptop writes one, then the answer's 300 to 400 bytes), and files/get_metadata of laptop.json once a minute (a reply of about 400 bytes). About 1 KB a request with its headers, so about 13 KB a minute."
+    },
+    {
+      "metric": "plot_wait_requests_per_minute_after",
+      "kind": "count",
+      "value": 3,
+      "unit": "requests",
+      "tolerance": 0,
+      "measured": "feat/plot-wait 2026-11-08 VellumCore PlotRequestTests (deterministic)",
+      "note": "After its first 2 minutes, for as long as it stays open: a look every 30 s and the check-in once a minute, about 3 KB a minute. Nothing at all while nothing is open, while offline, signed out or off the screen."
+    },
+    {
+      "metric": "plot_pdf_downloads_per_plot",
+      "kind": "count",
+      "value": 1,
+      "unit": "downloads",
+      "tolerance": 0,
+      "measured": "feat/plot-wait 2026-11-08 VellumCore PlotRequestTests (deterministic)",
+      "note": "The plotted PDF comes down once, through the app's one SheetPDFs, under the answer's content hash; the viewer, Add sheet and placing then use that file with no download."
+    }
+  ]
+}

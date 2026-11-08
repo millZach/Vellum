@@ -20,7 +20,7 @@ final class DrawingViewerModel {
         case opening
         /// Open, with its page count.
         case ready(pages: Int)
-        /// A DWG with no plot: nothing to show until the laptop plots it (#70).
+        /// A DWG with no plot: waiting for the laptop to plot it (#70), as the index model's `plots` says.
         case noPDFYet
         /// Something went wrong, in plain words.
         case failed(String)
@@ -30,7 +30,10 @@ final class DrawingViewerModel {
     static let zooms: [Double] = [1, 1.5, 2, 3, 4, 6]
 
     let entry: DrawingEntry
-    let pdf: DrawingOpening.PDF?
+    /// The entry's PDF, or the plot the laptop made of it (#70); nil while it waits for one.
+    private(set) var pdf: DrawingOpening.PDF?
+    /// The laptop's one line about its plot (missing references, the fallback page setup), when it had one.
+    private(set) var plotNote: String?
     private(set) var state: State
     /// The page shown, counting from 0.
     var page = 0 {
@@ -50,10 +53,32 @@ final class DrawingViewerModel {
     private(set) var downloaded = false
     @ObservationIgnored private let tapped = ContinuousClock.now
 
-    init(entry: DrawingEntry) {
+    /// `plot` is what the Duo knows of a plot of a DWG with no PDF in the index: once it is on the Duo, it is the PDF
+    /// shown.
+    init(entry: DrawingEntry, plot: PlotProgress? = nil) {
         self.entry = entry
-        pdf = DrawingOpening.pdf(for: entry)
-        state = pdf == nil ? .noPDFYet : .opening
+        let shown = DrawingOpening.pdf(for: entry) ?? plot.flatMap(Self.plotted)
+        pdf = shown
+        // The plot's note stays while the PDF shown is that plot, however the drawing was opened (#70).
+        plotNote = plot?.note(forPDFAt: shown?.path)
+        state = shown == nil ? .noPDFYet : .opening
+    }
+
+    /// A plot on the Duo as the PDF to show: its path, and the content hash it is kept under.
+    private static func plotted(_ plot: PlotProgress) -> DrawingOpening.PDF? {
+        guard plot.stage == .done, let path = plot.pdfPath else { return nil }
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        return DrawingOpening.PDF(path: path, name: name, contentHash: plot.contentHash, size: nil, pages: nil)
+    }
+
+    /// The laptop's plot came in while this viewer waited for it: it fills in, from the copy the plot watch kept, with no
+    /// download.
+    func plotArrived(_ plot: PlotProgress, session: DropboxSession?) {
+        guard state == .noPDFYet, let pdf = Self.plotted(plot) else { return }
+        self.pdf = pdf
+        plotNote = plot.note(forPDFAt: pdf.path)
+        state = .opening
+        Task { await open(session: session) }
     }
 
     var pageCount: Int {

@@ -68,6 +68,23 @@ final class DrawingIndexModel {
     /// The Dropbox session the copy is refreshed on, which the viewer downloads PDFs through.
     @ObservationIgnored private(set) var session: DropboxSession?
 
+    /// What each entry's plot has got to (#70), by entry id: asked, plotting, waiting, failed, or done and on the Duo
+    /// until the index lists it.
+    private(set) var plots: [String: PlotProgress] = [:]
+    /// Entries whose plot came in this session, which their rows mark "PDF plotted", as the prototype does.
+    private(set) var plottedThisSession: Set<String> = []
+    /// A plot that came in while Zach was elsewhere: the banner that calls him back to it.
+    var plotBanner: DrawingEntry?
+    /// How many drawing viewers on the screen show each entry, as the viewers say when they appear and go: a viewer
+    /// kept while Zach browses Dropbox or another tab is not on the screen, and the banner shows.
+    @ObservationIgnored private var viewersOnScreen: [String: Int] = [:]
+    /// Asks the laptop for plots and waits for them, off the main thread (`PlotWatch`).
+    @ObservationIgnored private(set) var plotWatch: PlotWatch?
+    /// Where the plot watch keeps its requests: Application Support, or memory in the captures.
+    @ObservationIgnored var plotLedger: (any PlotLedgerStore)?
+    /// The Debug captures' way to switch tabs, which the tab bar follows; always nil in the app.
+    var debugTab: AppTab?
+
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var searching: Task<Void, Never>?
     @ObservationIgnored private(set) var keeper: DrawingIndexKeeper?
@@ -121,6 +138,7 @@ final class DrawingIndexModel {
         let keeper = DrawingIndexKeeper(session: session, root: root)
         self.keeper = keeper
         self.session = session
+        await startPlotWatch(session: session)
         await reload()
         await notePDFsOnThisDuo()
         if followsConnection {
@@ -155,15 +173,26 @@ final class DrawingIndexModel {
         refreshing = false
     }
 
-    /// The app came back to the screen: refresh, unless a refresh started moments ago (launch makes the app active too).
+    /// The app came back to the screen: the plot watch looks again, and the copy is refreshed unless a refresh started
+    /// moments ago (launch makes the app active too).
     func appBecameActive() {
+        let plotWatch = self.plotWatch
+        Task { await plotWatch?.setActive(true) }
         guard Date().timeIntervalSince(lastStarted) > 10 else { return }
         Task { await refresh() }
         Task { await notePDFsOnThisDuo() }
     }
 
+    /// The app left the screen: the plot watch stops looking until it is back.
+    func appLeftScreen() {
+        let plotWatch = self.plotWatch
+        Task { await plotWatch?.setActive(false) }
+    }
+
     /// Zach signed in to Dropbox: every sign-in refreshes the copy, as signing out keeps it.
     func signInChanged(signedIn: Bool) {
+        let plotWatch = self.plotWatch
+        Task { await plotWatch?.signInChanged() }
         guard signedIn else { return }
         Task { await refresh() }
     }
@@ -171,6 +200,8 @@ final class DrawingIndexModel {
     func setOnline(_ isOnline: Bool) {
         guard isOnline != online else { return }
         online = isOnline
+        let plotWatch = self.plotWatch
+        Task { await plotWatch?.setOnline(isOnline) }
         if isOnline { Task { await refresh() } }
         Task { await notePDFsOnThisDuo() }
     }
@@ -180,17 +211,28 @@ final class DrawingIndexModel {
     private func reload() async {
         guard let keeper else { return }
         let query = self.query
-        typealias Loaded = (DrawingIndexCopy, DrawingSearchIndex, DrawingSearchResult)
+        // Plots kept on the Duo, and failures, for entries the index may now list a PDF for (#70).
+        let plotted = Set(plots.filter { !$0.value.stage.isWaiting }.keys)
+        typealias Loaded = (DrawingIndexCopy, DrawingSearchIndex, DrawingSearchResult, [String: String])
         let loaded = await Task.detached(priority: .userInitiated) { () -> Loaded? in
             guard let copy = await keeper.load() else { return nil }
             let index = DrawingSearchIndex(copy.entries)
-            return (copy, index, index.keystroke(query, after: nil))
+            var listed: [String: String] = [:]
+            if !plotted.isEmpty {
+                for entry in copy.entries where plotted.contains(entry.id) {
+                    if let pdf = entry.pdf { listed[entry.id] = pdf.path }
+                }
+            }
+            return (copy, index, index.keystroke(query, after: nil), listed)
         }.value
         guard let loaded else {
             if copyState != .ready { copyState = .none }
             return
         }
-        let (copy, index, result) = loaded
+        let (copy, index, result, listed) = loaded
+        if !listed.isEmpty, let plotWatch {
+            Task { await plotWatch.indexLists(listed) }
+        }
         generation += 1
         listing = Listing(entries: copy.entries, index: index, result: result, generation: generation,
                           updated: copy.manifest.updatedDate)
@@ -236,10 +278,17 @@ final class DrawingIndexModel {
     // MARK: Opening a drawing (#69)
 
     /// A tap on a row: opens the drawing in the viewer, from the Duo when its PDF is kept here, else downloading it once;
-    /// offline with its PDF never opened on this Duo, the viewer doesn't open and the tab says why.
+    /// offline with its PDF never opened on this Duo, the viewer doesn't open and the tab says why. A DWG with no PDF
+    /// yet opens waiting for its plot, and asks the laptop for one unless it is already asked or the laptop said why it
+    /// can't (#70).
     func open(_ entry: DrawingEntry) {
         selection = entry.id
         openProblem = nil
+        if plotBanner?.id == entry.id { plotBanner = nil }
+        if entry.pdf == nil, entry.dwg != nil {
+            openForPlot(entry)
+            return
+        }
         if case .notOnThisDuo = DrawingOpening.decide(entry, online: online, pdfsOnThisDuo: pdfsOnThisDuo,
                                                          pdfPathsOnThisDuo: pdfPathsOnThisDuo) {
             openProblem = DrawingOpening.notOnThisDuoText(number: entry.number ?? entry.name)
@@ -249,13 +298,94 @@ final class DrawingIndexModel {
         if let viewer, viewer.entry.id == entry.id, viewer.entry == entry {
             if case .failed = viewer.state {} else { return }
         }
-        let viewer = DrawingViewerModel(entry: entry)
+        let viewer = DrawingViewerModel(entry: entry, plot: plots[entry.id])
         self.viewer = viewer
         let session = self.session
         Task {
             await viewer.open(session: session)
             await notePDFsOnThisDuo()
         }
+    }
+
+    /// A DWG with no PDF in the index: the viewer shows its plot when the Duo has one, else waits for it.
+    private func openForPlot(_ entry: DrawingEntry) {
+        if let viewer, viewer.entry.id == entry.id, viewer.entry == entry {
+            if case .failed = viewer.state {} else { return }
+        }
+        let plot = plots[entry.id]
+        let viewer = DrawingViewerModel(entry: entry, plot: plot)
+        self.viewer = viewer
+        if viewer.pdf != nil {
+            let session = self.session
+            Task { await viewer.open(session: session) }
+            return
+        }
+        if case .failed? = plot?.stage { return }
+        ask(entry)
+    }
+
+    /// Asks the laptop to plot `entry` (Ask again after a failure, too); an open request is reused.
+    func ask(_ entry: DrawingEntry) {
+        guard let plotWatch else { return }
+        Task { await plotWatch.ask(entry) }
+    }
+
+    // MARK: Plots (#70)
+
+    private func startPlotWatch(session: DropboxSession?) async {
+        guard plotWatch == nil else { return }
+        let store = plotLedger
+        let ledger: any PlotLedgerStore = await Task.detached(priority: .utility) { () -> any PlotLedgerStore in
+            if let store { return store }
+            // A ledger that can't be opened is a failure the Duo shows (each ask says it couldn't be saved), never a
+            // quiet ledger in memory that a relaunch would lose.
+            return (try? PlotLedgerFile.onThisDevice()) ?? PlotLedgerUnavailable()
+        }.value
+        let watch = PlotWatch(session: session, ledger: ledger, pdfs: SheetPDFs.app, report: { [weak self] progress in
+            Task { @MainActor in self?.plotsChanged(progress) }
+        })
+        plotWatch = watch
+        if !online { await watch.setOnline(false) }
+        await watch.start()
+    }
+
+    /// The plot watch's news. A plot that has just come in fills the viewer showing it, or, when Zach isn't looking at
+    /// that drawing on the Drawings tab, puts up the banner; and the index is refreshed, so it lists the plot.
+    private func plotsChanged(_ progress: [String: PlotProgress]) {
+        let before = plots
+        plots = progress
+        var arrived = false
+        for (id, plot) in progress where plot.stage == .done && before[id].map({ $0.stage != .done }) ?? false {
+            arrived = true
+            plottedThisSession.insert(id)
+            if let viewer, viewer.entry.id == id {
+                viewer.plotArrived(plot, session: session)
+            }
+            if (viewersOnScreen[id] ?? 0) == 0,
+               let entry = viewer?.entry.id == id ? viewer?.entry : listing?.entries.first(where: { $0.id == id }) {
+                plotBanner = entry
+            }
+        }
+        if arrived {
+            Task { await notePDFsOnThisDuo() }
+            Task { await refresh() }
+        }
+    }
+
+    /// A drawing viewer showing `entry` came onto the screen, or went.
+    func viewerOnScreen(_ entry: String, _ shown: Bool) {
+        let count = max(0, (viewersOnScreen[entry] ?? 0) + (shown ? 1 : -1))
+        viewersOnScreen[entry] = count == 0 ? nil : count
+    }
+
+    /// View, on the banner: back to the Drawings tab's viewer, showing the plot.
+    func viewBanner() {
+        guard let entry = plotBanner else { return }
+        plotBanner = nil
+        let current = listing?.entries.first { $0.id == entry.id } ?? entry
+        if let viewer, viewer.entry.id == current.id, viewer.pdf != nil { return }
+        viewer = nil
+        open(current)
     }
 
     /// Back to the list.
@@ -291,8 +421,11 @@ final class DrawingIndexModel {
     /// For the captures: the connection as the capture says, not as the simulator's.
     func debugSetOnline(_ isOnline: Bool) {
         online = isOnline
+        let plotWatch = self.plotWatch
+        Task { await plotWatch?.setOnline(isOnline) }
         Task { await notePDFsOnThisDuo() }
     }
+
 
     func debugThumbnailNames() -> [String] { listing?.entries.compactMap(\.thumbnail) ?? [] }
 

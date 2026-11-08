@@ -32,6 +32,35 @@ struct RootView: View {
             }
         }
         .background(WindowAppearance(style: (AppearanceSetting(rawValue: appearance) ?? .default).interfaceStyle))
+        // A plot that came in while Zach was elsewhere calls him back to it (#70): floating at the top of whichever tab
+        // is showing, shifted right into the free space beside the screen's title row and clear of its buttons and of
+        // the tab rail (Zach, 2026-11-08). Nothing on the screen moves for it. Where it goes on each screen is
+        // `PlotBannerPlace`.
+        .overlay {
+            if let entry = drawings.plotBanner {
+                GeometryReader { proxy in
+                    let place = PlotBannerPlace(size: proxy.size, safe: proxy.safeAreaInsets, tab: selection,
+                                                canvasOpen: canvases.openEditor != nil,
+                                                placingSheet: canvases.openEditor?.placingSheet != nil)
+                    PlotBanner(entry: entry,
+                               view: {
+                                   selection = .drawings
+                                   drawings.viewBanner()
+                               },
+                               dismiss: { drawings.plotBanner = nil })
+                        .frame(maxWidth: place.maxWidth, alignment: .trailing)
+                        .padding(.top, place.top)
+                        .padding(.trailing, place.trailing)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
+                .ignoresSafeArea()
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: drawings.plotBanner?.id)
+        .onChange(of: drawings.debugTab) { _, tab in
+            if let tab { selection = tab }
+        }
         .task {
             // The drawing index is read and refreshed off the main thread; nothing here waits for it.
             Task { await DrawingIndexSetup.start(drawings) }
@@ -55,6 +84,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             // Every change is already written; leaving the screen flushes it to storage so a power cut keeps it too.
             if phase != .active { canvases.appWillLeaveScreen(background: phase == .background) }
+            if phase == .background { drawings.appLeftScreen() }
             if phase == .active {
                 canvases.appDidBecomeActive()
                 drawings.appBecameActive()

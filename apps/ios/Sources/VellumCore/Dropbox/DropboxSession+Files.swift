@@ -227,6 +227,29 @@ extension DropboxSession {
         return DropboxDownload(bytes: response.body, contentHash: result?.content_hash)
     }
 
+    /// When Dropbox last wrote the file at `path` (`files/get_metadata`, one request, a reply of a few hundred bytes):
+    /// its `server_modified`, Dropbox's clock rather than the writer's, for the laptop's check-in (#70); nil when nothing
+    /// is at `path`, or it is a folder.
+    public func serverModified(of path: String) async throws(DropboxError) -> Date? {
+        let started = generation
+        guard isSignedIn else { throw .notSignedIn }
+        let response = try await authorizedJSON(DropboxEndpoint.metadata, ["path": path], started: started,
+                                                acceptingConflict: true)
+        if response.status == 409 {
+            guard Self.summary(response).contains("not_found") else { throw .unexpectedReply }
+            return nil
+        }
+        struct Reply: Decodable {
+            let tag: String
+            let server_modified: String?
+            enum CodingKeys: String, CodingKey { case tag = ".tag", server_modified }
+        }
+        guard let reply = try? JSONDecoder().decode(Reply.self, from: response.body) else { throw .unexpectedReply }
+        guard reply.tag == "file" else { return nil }
+        guard let text = reply.server_modified, let date = PlotRequestFormat.date(text) else { throw .unexpectedReply }
+        return date
+    }
+
     /// What changed under the listed folder since `cursor` (`files/list_folder/continue`, following its paging), in
     /// Dropbox's order, deletions included; nil when Dropbox can't say (the cursor was reset, or the folder is gone),
     /// so the folder has to be listed again (#37).

@@ -97,7 +97,9 @@ Dropbox.
 
 Reasons the laptop gives, among others: "AutoCAD isn't installed on the laptop", "the DWG couldn't be read", "the
 layout isn't in the DWG any more", "the layout has no page setup that plots to PDF, and its paper size (500 x 700 mm)
-isn't one DWG To PDF has", "timed out: AutoCAD took longer than 5 minutes, so the plot was stopped", "the drawing
+isn't one DWG To PDF has" (or "the Model tab has no page setup…"), "AutoCAD stopped at a question the laptop didn't
+expect while plotting" (AutoCAD cancelled the plot: it fails within seconds), "timed out: AutoCAD took longer than 5
+minutes, so the plot was stopped" (a console that truly hangs), "the drawing
 isn't in the drawing index", "the request doesn't match the drawing index (the drawing's layouts may have changed)",
 "the DWG is online-only, and the laptop can't download it now: …", "the request couldn't be read".
 
@@ -137,7 +139,19 @@ isn't in the drawing index", "the request doesn't match the drawing index (the d
 - **The fallback.** A layout whose saved plotter is not a PDF one (None, or a printer) is plotted with
   `DWG To PDF.pc3` on that plotter's sheet that matches the layout's paper size (ANSI A to E, ARCH A to E1, ISO A4
   to A0, within 2 mm either way round), the layout's area at 1:1, its plot style kept. The answer's `pageSetup` is
-  `fallback` and its `reason` says so. A paper size none of those sheets match fails, rather than guess a scale.
+  `fallback` and its `reason` says so ("the layout has no page setup that plots to PDF, so it was plotted with DWG
+  To PDF at its paper size"). A paper size none of those sheets match fails, rather than guess a scale.
+- **The Model tab's fallback.** A DWG plotted on its Model tab whose saved plotter is not a PDF one is plotted with
+  `DWG To PDF.pc3` on the sheet matching the Model tab's saved paper, its **extents at 1:1** (Zach's decision on
+  #87), the plot style and lineweights kept and the offset left as saved, shade plot "As displayed". The reason
+  says so: "the Model tab has no page setup that plots to PDF, so its extents were plotted with DWG To PDF at 1:1".
+  AutoCAD's `-PLOT` asks the Model tab other questions than a layout (no "Scale lineweights", "Plot paper space
+  first" or "Hide paperspace objects", a shade plot setting instead, and Limits rather than Layout among the plot
+  areas), so the Model tab has its own answers.
+- **A question out of step.** Should AutoCAD ask something the script did not expect, it cancels the plot. The
+  script catches that and ends its report, and the laptop stops a console that hasn't quit a few seconds later. The
+  answer is `failed`, "AutoCAD stopped at a question the laptop didn't expect while plotting", within seconds; the
+  log names AutoCAD's own message. The 5-minute limit is left for a console that truly hangs.
 - **References.** The copy is in a job folder, so a reference saved with a relative path would not resolve there.
   Before plotting, the script makes each top-level xref's, raster image's and PDF, DWF or DGN underlay's relative
   path absolute against the original DWG's folder in Dropbox (for an online-only DWG too, not the scratch folder), on

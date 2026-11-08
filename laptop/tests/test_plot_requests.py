@@ -171,12 +171,13 @@ def test_the_script_types_only_what_the_indexer_chose_and_never_saves(tmp_path):
     origin = tmp_path / "Dropbox" / "Projects" / "Made-up" / "CAD"
     script = plot_script("E-201 Power", tmp_path / "saved.pdf", tmp_path / "saved.txt", folder=origin)
     lines = script.splitlines()
-    assert [line.split(" ")[1] for line in lines[:4]] == ["vellum-pclean", "vellum-abs", "vellum-refs", "vellum-plot"]
-    for line in lines[:4]:
+    assert [line.split(" ")[1] for line in lines[:5]] == ["vellum-pclean", "vellum-abs", "vellum-refs",
+                                                          "vellum-plot-done", "vellum-plot"]
+    for line in lines[:5]:
         assert line.startswith("(defun ") and line.count("(") == line.count(")")
-    assert lines[4] == (f'(vellum-plot "E-201 Power" "{(tmp_path / "saved.pdf").as_posix()}" '
+    assert lines[5] == (f'(vellum-plot "E-201 Power" "{(tmp_path / "saved.pdf").as_posix()}" '
                         f'"{(tmp_path / "saved.txt").as_posix()}" "saved" "" "_I" "_L" "{origin.as_posix()}")')
-    assert lines[5:] == ["_.QUIT", "_Y"]
+    assert lines[6:] == ["_.QUIT", "_Y"]
     lowered = script.lower()
     for word in ("qsave", "saveas", "wblock", "(load", "appload", ".lsp", "secureload", "setvar"):
         assert word not in lowered
@@ -964,3 +965,148 @@ def test_a_plot_of_a_dwg_with_no_layout_yet_stays_once_its_layouts_are_known(dro
     assert listed[("E-701.dwg", kept_on)]["pairedBy"] == "plotted"
     for other in set(layouts) - {kept_on}:
         assert listed[("E-701.dwg", other)]["pdf"] is None
+
+
+# --- The Model tab and answers out of step (#87) -----------------------------------------------------------------
+
+MODEL_ANSWERS = ["_.-PLOT", "_Y", "Model", "DWG To PDF.pc3", "ANSI full bleed A (8.50 x 11.00 Inches)", "_I", "_L",
+                 "_N", "_E", "1:1", "", "_Y", "", "_Y", "_A", "<out>", "_N", "_Y"]
+# detailed, layout, device, paper, units, orientation, upside down, area, scale, offset, plot styles, style table,
+# lineweights, then the shade plot setting on the Model tab
+
+
+def model_dwg(dropbox: Path) -> Path:
+    """A made-up DWG saved on the Model tab, its title block in model space, with no PDF plotter saved: ANSI A."""
+    dwg = make_dxf(dropbox / PLANT / "CAD" / "M-101.dwg", [("Model", {"DWG_NO": "M-101", "TITLE": "Made-up model"})],
+                   setups={"Model": {"device": "None", "media": "ANSI_A_(11.00_x_8.50_Inches)", "size": (279.4, 215.9)}})
+    return dwg
+
+
+def test_a_model_tab_dwg_falls_back_to_its_extents_at_1_1_with_the_model_tabs_answers(dropbox, tmp_path, make_indexer,
+                                                                                       plot_log):
+    model_dwg(dropbox)
+    indexer = make_indexer(plotter=plotter(tmp_path, timeout=10))
+    indexer.scan()
+    name = ask(dropbox, entries(dropbox)[("M-101.dwg", "Model")])
+    started = time.monotonic()
+    answer_now(indexer)
+    assert time.monotonic() - started < 8
+    answer = answer_of(dropbox, name)
+    assert (answer["state"], answer["pageSetup"]) == ("done", "fallback")
+    assert answer["reason"] == ("the Model tab has no page setup that plots to PDF, so its extents were plotted with "
+                                "DWG To PDF at 1:1")
+    runs = plot_log()
+    assert [r["mode"] for r in runs] == ["saved", "model"]
+    out = runs[1]["answers"][14]
+    assert runs[1]["answers"] == [a if a != "<out>" else out for a in MODEL_ANSWERS[1:]]
+    assert out.endswith("/model.pdf")
+    # asked again, unchanged: the same PDF, and the same reason
+    again = ask(dropbox, entries(dropbox)[("M-101.dwg", "Model")])
+    answer_now(indexer)
+    assert answer_of(dropbox, again)["reason"] == answer["reason"] and len(plot_log()) == 2
+
+
+def test_a_paper_layout_falls_back_with_the_layouts_answers_unchanged(dropbox, tmp_path, make_indexer, plot_log):
+    small_tree(dropbox)  # E-202's Layout1: no plotter saved, A3
+    indexer = make_indexer(plotter=plotter(tmp_path))
+    indexer.scan()
+    name = ask(dropbox, entries(dropbox)[("E-202.dwg", "Layout1")])
+    answer_now(indexer)
+    answer = answer_of(dropbox, name)
+    assert answer["state"] == "done" and answer["reason"] == ("the layout has no page setup that plots to PDF, so it "
+                                                              "was plotted with DWG To PDF at its paper size")
+    run = plot_log()[1]
+    assert run["mode"] == "fallback"
+    assert run["answers"][:13] == ["_Y", "Layout1", "DWG To PDF.pc3", "ISO full bleed A3 (297.00 x 420.00 MM)", "_M",
+                                   "_L", "_N", "_L", "1:1", "", "_Y", "", "_Y"]
+    assert run["answers"][13:16] == ["_N", "_N", "_N"]  # scale lineweights, paper space first, hide paperspace
+    assert run["answers"][16].endswith("/fallback.pdf") and run["answers"][17:] == ["_N", "_Y"]
+
+
+def test_answers_out_of_step_fail_within_seconds_with_a_plain_reason(dropbox, tmp_path, make_indexer, plot_log,
+                                                                       monkeypatch):
+    from vellum_indexer import plot as plot_module
+
+    model_dwg(dropbox)
+    # the Model tab given the paper layout's answers, as the indexer did before #87
+    monkeypatch.setattr(plot_module.AccoreconsolePlotter, "model_mode", "fallback")
+    indexer = make_indexer(plotter=plotter(tmp_path, timeout=30))
+    indexer.scan()
+    name = ask(dropbox, entries(dropbox)[("M-101.dwg", "Model")])
+    started = time.monotonic()
+    answer_now(indexer)
+    assert time.monotonic() - started < 15
+    answer = answer_of(dropbox, name)
+    assert (answer["state"], answer["pdf"]) == ("failed", None)
+    assert answer["reason"] == "AutoCAD stopped at a question the laptop didn't expect while plotting"
+    assert list((tmp_path / "home" / "work").iterdir()) == []
+
+
+def test_a_console_that_writes_end_and_does_not_quit_is_stopped(tmp_path):
+    dwg = make_dxf(tmp_path / "E-301.dwg", [("Layout1", {"DWG_NO": "E-301"})], setups={"Layout1": ARCH_D})
+    started = time.monotonic()
+    result = plotter(tmp_path, "linger", timeout=30).plot(dwg, "Layout1")
+    assert time.monotonic() - started < 15
+    assert result.page_setup == "saved" and result.pdf.startswith(b"%PDF")
+
+
+def test_the_lisp_catches_a_cancelled_plot_and_reports_failed():
+    from fake_plot_console import CALLS_COMMAND, forms_starting
+    from vellum_indexer.plot import parse_info
+
+    script = plot_script("Model", Path("C:/w/model.pdf"), Path("C:/w/model.txt"), "model", "ANSI A", "Inches")
+    assert "*error*" in script and "FAILED" in script
+    assert '"_E" "1:1" "" "_Y" "" "_Y"\n' not in script and '"_A" out "_N" "_Y"' in script
+    # AutoCAD refuses a command inside vl-catch-all-apply or *error* ("bad order function: COMMAND", #87)
+    for form in forms_starting(script, "(vl-catch-all-apply") + forms_starting(script, "(setq *error*"):
+        assert not CALLS_COMMAND.search(form), form
+    _, outcome, _ = parse_info("SETUP\tModel\tNone\tANSI A\t279.40\t215.90\t0\nFAILED\tFunction cancelled\nEND\n")
+    assert outcome == "FAILED"
+
+
+def fake_run(tmp_path: Path, script: str, layout: str = "Layout1") -> tuple[str, str]:
+    """The stand-in console run once on a made-up DWG with ``script``, not left to sit: its report and its output."""
+    import subprocess
+
+    dwg = make_dxf(tmp_path / "E-301.dwg", [(layout, {"DWG_NO": "E-301"})],
+                   setups={layout: {"device": "None", "size": (279.4, 215.9)}})
+    scr = tmp_path / "plot.scr"
+    scr.write_text(script, encoding="utf-8")
+    env = {**os.environ, "VELLUM_FAKE_PLOT_SIT": "0"}
+    env.pop("VELLUM_FAKE_PLOT_LOG", None)
+    done = subprocess.run([sys.executable, str(FAKE), "ok", "/i", str(dwg), "/s", str(scr), "/l", "en-US"],
+                          capture_output=True, text=True, env=env, timeout=60, check=False)
+    info = tmp_path / "plot.txt"
+    return (info.read_text(encoding="utf-8") if info.exists() else ""), done.stdout
+
+
+def wrap_plot(script: str, before: str, after: str) -> str:
+    """The script with its first detailed -PLOT command rewritten as ``before`` + its answers + ``after``."""
+    from fake_plot_console import forms_starting
+
+    plot = next(f for f in forms_starting(script, '(command "_.-PLOT" "_Y"'))
+    return script.replace(plot, before + plot[len("(command "):-1] + after, 1)
+
+
+def test_the_stand_in_refuses_a_command_inside_a_catch_or_an_error_handler_as_autocad_does(tmp_path):
+    out, info = tmp_path / "plot.pdf", tmp_path / "plot.txt"
+    script = plot_script("Layout1", out, info, "fallback", "ANSI full bleed A (8.50 x 11.00 Inches)", "Inches")
+    report, _ = fake_run(tmp_path, script)
+    assert "PLOTTED" in report.splitlines() and out.exists()  # the script as it is plots
+    out.unlink()
+    info.unlink()
+
+    # -PLOT run through vl-catch-all-apply, as ae6cfa5 did: refused, reported FAILED, nothing plotted
+    caught = wrap_plot(script, "(vl-catch-all-apply 'command (list ", "))")
+    report, said = fake_run(tmp_path, caught)
+    assert "bad order function: COMMAND" in said
+    assert "FAILED\tbad order function: COMMAND" in report.splitlines() and "PLOTTED" not in report
+    assert not out.exists()
+    info.unlink()
+
+    # a command in *error*: a cancelled plot's handler stops at it and never finishes the report
+    calling = plot_script("Model", out, info, "fallback", "ANSI full bleed A (8.50 x 11.00 Inches)", "Inches")
+    calling = calling.replace("(setq *error* (lambda (msg)", '(setq *error* (lambda (msg) (command "_.UNDO" "_E")')
+    report, said = fake_run(tmp_path, calling, layout="Model")  # the layout's answers on the Model tab: cancelled
+    assert "bad order function: COMMAND" in said and report == ""
+    assert not out.exists()

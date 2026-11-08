@@ -22,7 +22,8 @@ Plot request format 1, set out in `docs/plot-requests.md`:
 - **The laptop trusts nothing in a request.** It plots only a DWG and layout its own index holds whose entry has the
   request's `id`, using the index's path and layout name, so nothing from a request reaches AutoCAD's script.
 - **The layout's own page setup,** plotted on a copy of the DWG, when its saved plotter writes PDFs; else DWG To PDF
-  at the layout's paper size, said so in the answer. Relative xref, image and underlay paths are made absolute against
+  at the layout's paper size, said so in the answer. A DWG on its Model tab, which has no layout area, falls back to
+  its extents at 1:1 on that sheet (amended for #87). Relative xref, image and underlay paths are made absolute against
   the original's folder on the copy, so the PDF has them. Nothing is ever saved into the DWG.
 - **One plot a turn.** Between plots the indexer takes the watcher's changes and the next file to read, so a backlog
   of plots never holds up the index.
@@ -57,4 +58,5 @@ Plot request format 1, set out in `docs/plot-requests.md`:
   Dropbox.
 - Plots are kept in Dropbox until Zach deletes them; one deleted by hand leaves the index at the next scan.
 - The fallback's prompts are typed for AutoCAD 2026's `-PLOT`; a later AutoCAD that asks them differently fails a
-  fallback plot with a reason, never prints or saves anything, and is seen in the hand test.
+  fallback plot with a reason, never prints or saves anything, and is seen in the hand test. Since #87 that reason comes within
+  seconds: the script catches a cancelled `-PLOT` and the laptop stops a console that hasn't quit after its report.

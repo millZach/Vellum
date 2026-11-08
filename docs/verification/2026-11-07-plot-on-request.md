@@ -59,6 +59,12 @@ Dropbox or the private automated-drawing-generator (ADR-0004).
   - **A layout found later:** a DWG plotted while its title blocks were unread keeps its plot when a later read
     finds its layouts: on its one layout, or on the layout AutoCAD plotted of two.
   - **Cleanup:** a day-old answer whose request has just gone stays for an hour from then.
+- **The Model tab and answers out of step (#87)** (each test failed against the code at 126827a and passes now):
+  the stand-in console walks the script's `-PLOT` answers through AutoCAD 2026's prompts, which differ on the Model
+  tab, and cancels an answer out of step without writing `PLOTTED`, then sits as the real console did. A Model-tab DWG
+  through the fallback is plotted, its extents at 1:1, with exactly the Model tab's answers; a paper layout's fallback
+  answers are unchanged; the Model tab given the paper layout's answers is answered `failed` within seconds with the
+  plain reason, not "timed out"; a console that writes `END` and does not quit is stopped and its PDF kept.
 - **Budgets** (`docs/perf/baselines/laptop-indexer.json`, read by those tests): one plot writes 7 files to Dropbox (the
   PDF, the answer three times: queued, plotting, done; a shard, a thumbnail, the manifest; raised from 6 for the
   queued answer); 1 console run with a page setup, 2 for the fallback;
@@ -75,7 +81,8 @@ After merge, by the manager, on Zach's laptop with the installed indexer (`C:\Us
 
 - [ ] Update the installed indexer: `git pull` in `C:\Users\zache\Projects\Vellum`, then
       `powershell -ExecutionPolicy Bypass -File laptop\scripts\install.ps1` in Zach's own PowerShell (task
-      registration needs his logon session). The log's first new line says `Vellum laptop indexer 1.1.0`, and
+      registration needs his logon session). The log's first new line says `Vellum laptop indexer 1.1.1` (1.1.0
+      before #87), and
       `vellum-indexer where` names the plots folder.
 - [ ] The check-in: `Dropbox\Vellum\Plots\laptop.json` appears within seconds of the start. Note its `seen`; two to
       three minutes later it has moved on.
@@ -96,6 +103,13 @@ After merge, by the manager, on Zach's laptop with the installed indexer (`C:\Us
       shows the xref's linework as AutoCAD's own plot does, `missingReferences` is 0, and the DWG's modified time is
       unchanged. If the DWG has an image or underlay with a relative path, check it shows too. If something is
       missing, note what the answer's `warning` says and what the log says.
+- [ ] A DWG saved on the Model tab (#87): pick a real DWG with no PDF whose index entry's layout is `Model` and
+      whose Model tab has no PDF plotter saved, and request it as above. Within a minute the answer is `done`,
+      `pageSetup` `fallback`, with the reason "the Model tab has no page setup that plots to PDF, so its extents were
+      plotted with DWG To PDF at 1:1", and the PDF holds the model's extents at 1:1 on the DWG To PDF sheet for the
+      Model tab's paper (a large model can run off the sheet: that is the 1:1 Zach chose). If AutoCAD asks something
+      else the answer is `failed`, "AutoCAD stopped at a question the laptop didn't expect while plotting", within
+      seconds, never "timed out", and the log names AutoCAD's message.
 - [ ] A request for a bad path (`"path": "/Projects/Nowhere/X-1.dwg"`, any 16 hex digits as `id`) is answered `failed`,
       "the drawing isn't in the drawing index".
 - [ ] Delete the two test requests by hand (as the Duo would); their answers are deleted an hour later.

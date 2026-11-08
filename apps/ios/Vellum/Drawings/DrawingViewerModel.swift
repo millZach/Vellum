@@ -57,9 +57,10 @@ final class DrawingViewerModel {
     /// shown.
     init(entry: DrawingEntry, plot: PlotProgress? = nil) {
         self.entry = entry
-        pdf = DrawingOpening.pdf(for: entry) ?? plot.flatMap(Self.plotted)
+        let shown = DrawingOpening.pdf(for: entry) ?? plot.flatMap(Self.plotted)
+        pdf = shown
         plotNote = entry.pdf == nil ? plot?.note : nil
-        state = pdf == nil ? .noPDFYet : .opening
+        state = shown == nil ? .noPDFYet : .opening
     }
 
     /// A plot on the Duo as the PDF to show: its path, and the content hash it is kept under.

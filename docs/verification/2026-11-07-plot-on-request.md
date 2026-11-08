@@ -65,7 +65,8 @@ Dropbox or the private automated-drawing-generator (ADR-0004).
   asked twice, plotted once; 30 check-in writes an hour.
 - **Timing** (`scripts/bench.py`, on the made-up 5,000-file Dropbox): from the laptop seeing a request to its `done`
   answer, 0.43 s on Forge, of which 0.26 s in the stand-in console and 0.17 s the indexer's own work, mostly
-  publishing the index. The PR gives the Windows runner's numbers. On the laptop, add AutoCAD's own plot.
+  publishing the index. On `windows-latest` (run 42453869932, the baseline): 0.85 s, of which 0.48 s in the
+  stand-in console and 0.37 s the indexer's own. On the laptop, add AutoCAD's own plot.
 
 ## The hand test on the laptop
 

@@ -167,19 +167,19 @@
     {
       "metric": "plot_request_answered_s",
       "kind": "time",
-      "value": 0.43,
+      "value": 0.85,
       "unit": "s",
       "tolerance": 0.5,
-      "measured": "PR #67 2026-11-07 Forge (Linux), Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in console",
+      "measured": "PR #83 run 42453869932 2026-11-08 windows-latest, Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in console",
       "note": "From the laptop seeing a plot request to its done answer being written, with the stand-in console: read and check the request, answer plotting, copy the DWG, run the console, save the PDF in Dropbox/Vellum/Plots, read it, publish the index, answer done. On the laptop add AutoCAD's own plot, a few seconds to a minute; the watcher sees a request within half a second of Dropbox writing it."
     },
     {
       "metric": "plot_request_overhead_s",
       "kind": "time",
-      "value": 0.17,
+      "value": 0.37,
       "unit": "s",
       "tolerance": 0.5,
-      "measured": "PR #67 2026-11-07 Forge (Linux), Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in console",
+      "measured": "PR #83 run 42453869932 2026-11-08 windows-latest, Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in console",
       "note": "plot_request_answered_s less the console's own time: the indexer's part of answering a plot request, mostly publishing the index."
     }
   ]

@@ -150,8 +150,15 @@ def landscape(width_mm: float, height_mm: float, rotation: int) -> bool:
 # 1 found or 0 not), then either plots and writes "PLOTTED", or writes "UNUSABLE" (mode "saved" and its plotter is not
 # a PDF one) or "NOLAYOUT", then END. MODE "saved" takes the layout's own page setup; "fallback" types a paper layout's
 # detailed -PLOT answers and "model" the Model tab's, which AutoCAD 2026 asks differently (#87). A -PLOT AutoCAD
-# cancels, or one still asking when its answers run out, writes "FAILED" and AutoCAD's message instead of "PLOTTED";
-# any other error writes "FAILED" and END from the *error* handler. A reference is relative unless it starts with a
+# cancels ("; error: Function cancelled") lands in vellum-plot's *error* handler, which writes "FAILED" with AutoCAD's
+# message and END; one still asking when its answers run out (CMDACTIVE) writes "FAILED" and is cancelled with an
+# empty (command). Either way "PLOTTED" is never written for a plot that didn't finish.
+#
+# Why a plain (command ...) and no catch around it: AutoCAD 2026's core console refuses (command ...) called inside
+# vl-catch-all-apply, and inside *error*, failing every plot with "bad order function: COMMAND" (the real console
+# on made-up drawings, #87). So -PLOT runs as a plain (command ...), the form the saved pass had already plotted with,
+# the cancel is caught by *error*, and *error* calls no command at all: it only writes the report and closes it. A
+# reference is relative unless it starts with a
 # drive (``C:``), a backslash or a slash; nested xrefs (``A|B``) resolve from their parent's path, so only top-level
 # ones are changed.
 PLOT_FORMS = [
@@ -191,12 +198,10 @@ PLOT_FORMS = [
                                 f))))))))
       (if img (command "_.-IMAGE" "_R" "*"))
       (princ))""",
-    r"""(defun vellum-plot-run (f answers / r)
-      (setq r (vl-catch-all-apply 'command answers))
-      (cond ((vl-catch-all-error-p r)
-              (write-line (strcat "FAILED\t" (vellum-pclean (vl-catch-all-error-message r))) f))
-            ((= 1 (logand 1 (getvar "CMDACTIVE"))) (write-line "FAILED\tstill asking when the answers ran out" f))
-            (T (write-line "PLOTTED" f))))""",
+    r"""(defun vellum-plot-done (f)
+      (if (= 1 (logand 1 (getvar "CMDACTIVE")))
+        (progn (write-line "FAILED\tstill asking when the answers ran out" f) (command))
+        (write-line "PLOTTED" f)))""",
     r"""(defun vellum-plot (name out info mode sheet units orient folder / f d e dev *error*)
       (setq *error* (lambda (msg)
                       (if f (progn (write-line (strcat "FAILED\t" (vellum-pclean msg)) f) (write-line "END" f)
@@ -219,14 +224,16 @@ PLOT_FORMS = [
           (cond
             ((= mode "saved")
               (if (and (wcmatch (strcase dev) "*.PC3") (wcmatch (strcase dev) "*PDF*"))
-                (vellum-plot-run f (list "_.-PLOT" "_N" name "" "" out "_N" "_Y"))
+                (progn (command "_.-PLOT" "_N" name "" "" out "_N" "_Y") (vellum-plot-done f))
                 (write-line "UNUSABLE" f)))
             ((= mode "model")
-              (vellum-plot-run f (list "_.-PLOT" "_Y" name "DWG To PDF.pc3" sheet units orient "_N" "_E" "1:1" ""
-                                       "_Y" "" "_Y" "_A" out "_N" "_Y")))
+              (command "_.-PLOT" "_Y" name "DWG To PDF.pc3" sheet units orient "_N" "_E" "1:1" "" "_Y" "" "_Y"
+                       "_A" out "_N" "_Y")
+              (vellum-plot-done f))
             (T
-              (vellum-plot-run f (list "_.-PLOT" "_Y" name "DWG To PDF.pc3" sheet units orient "_N" "_L" "1:1" ""
-                                       "_Y" "" "_Y" "_N" "_N" "_N" out "_N" "_Y"))))))
+              (command "_.-PLOT" "_Y" name "DWG To PDF.pc3" sheet units orient "_N" "_L" "1:1" "" "_Y" "" "_Y"
+                       "_N" "_N" "_N" out "_N" "_Y")
+              (vellum-plot-done f)))))
       (write-line "END" f)
       (close f)
       (setq f nil)

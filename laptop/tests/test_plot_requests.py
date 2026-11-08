@@ -172,7 +172,7 @@ def test_the_script_types_only_what_the_indexer_chose_and_never_saves(tmp_path):
     script = plot_script("E-201 Power", tmp_path / "saved.pdf", tmp_path / "saved.txt", folder=origin)
     lines = script.splitlines()
     assert [line.split(" ")[1] for line in lines[:5]] == ["vellum-pclean", "vellum-abs", "vellum-refs",
-                                                          "vellum-plot-run", "vellum-plot"]
+                                                          "vellum-plot-done", "vellum-plot"]
     for line in lines[:5]:
         assert line.startswith("(defun ") and line.count("(") == line.count(")")
     assert lines[5] == (f'(vellum-plot "E-201 Power" "{(tmp_path / "saved.pdf").as_posix()}" '
@@ -1051,10 +1051,62 @@ def test_a_console_that_writes_end_and_does_not_quit_is_stopped(tmp_path):
 
 
 def test_the_lisp_catches_a_cancelled_plot_and_reports_failed():
+    from fake_plot_console import CALLS_COMMAND, forms_starting
     from vellum_indexer.plot import parse_info
 
     script = plot_script("Model", Path("C:/w/model.pdf"), Path("C:/w/model.txt"), "model", "ANSI A", "Inches")
-    assert "vl-catch-all-apply 'command" in script and "FAILED" in script
-    assert '"_E" "1:1" "" "_Y" "" "_Y" "_A" out "_N" "_Y"' in script
+    assert "*error*" in script and "FAILED" in script
+    assert '"_E" "1:1" "" "_Y" "" "_Y"\n' not in script and '"_A" out "_N" "_Y"' in script
+    # AutoCAD refuses a command inside vl-catch-all-apply or *error* ("bad order function: COMMAND", #87)
+    for form in forms_starting(script, "(vl-catch-all-apply") + forms_starting(script, "(setq *error*"):
+        assert not CALLS_COMMAND.search(form), form
     _, outcome, _ = parse_info("SETUP\tModel\tNone\tANSI A\t279.40\t215.90\t0\nFAILED\tFunction cancelled\nEND\n")
     assert outcome == "FAILED"
+
+
+def fake_run(tmp_path: Path, script: str, layout: str = "Layout1") -> tuple[str, str]:
+    """The stand-in console run once on a made-up DWG with ``script``, not left to sit: its report and its output."""
+    import subprocess
+
+    dwg = make_dxf(tmp_path / "E-301.dwg", [(layout, {"DWG_NO": "E-301"})],
+                   setups={layout: {"device": "None", "size": (279.4, 215.9)}})
+    scr = tmp_path / "plot.scr"
+    scr.write_text(script, encoding="utf-8")
+    env = {**os.environ, "VELLUM_FAKE_PLOT_SIT": "0"}
+    env.pop("VELLUM_FAKE_PLOT_LOG", None)
+    done = subprocess.run([sys.executable, str(FAKE), "ok", "/i", str(dwg), "/s", str(scr), "/l", "en-US"],
+                          capture_output=True, text=True, env=env, timeout=60, check=False)
+    info = tmp_path / "plot.txt"
+    return (info.read_text(encoding="utf-8") if info.exists() else ""), done.stdout
+
+
+def wrap_plot(script: str, before: str, after: str) -> str:
+    """The script with its first detailed -PLOT command rewritten as ``before`` + its answers + ``after``."""
+    from fake_plot_console import forms_starting
+
+    plot = next(f for f in forms_starting(script, '(command "_.-PLOT" "_Y"'))
+    return script.replace(plot, before + plot[len("(command "):-1] + after, 1)
+
+
+def test_the_stand_in_refuses_a_command_inside_a_catch_or_an_error_handler_as_autocad_does(tmp_path):
+    out, info = tmp_path / "plot.pdf", tmp_path / "plot.txt"
+    script = plot_script("Layout1", out, info, "fallback", "ANSI full bleed A (8.50 x 11.00 Inches)", "Inches")
+    report, _ = fake_run(tmp_path, script)
+    assert "PLOTTED" in report.splitlines() and out.exists()  # the script as it is plots
+    out.unlink()
+    info.unlink()
+
+    # -PLOT run through vl-catch-all-apply, as ae6cfa5 did: refused, reported FAILED, nothing plotted
+    caught = wrap_plot(script, "(vl-catch-all-apply 'command (list ", "))")
+    report, said = fake_run(tmp_path, caught)
+    assert "bad order function: COMMAND" in said
+    assert "FAILED\tbad order function: COMMAND" in report.splitlines() and "PLOTTED" not in report
+    assert not out.exists()
+    info.unlink()
+
+    # a command in *error*: a cancelled plot's handler stops at it and never finishes the report
+    calling = plot_script("Model", out, info, "fallback", "ANSI full bleed A (8.50 x 11.00 Inches)", "Inches")
+    calling = calling.replace("(setq *error* (lambda (msg)", '(setq *error* (lambda (msg) (command "_.UNDO" "_E")')
+    report, said = fake_run(tmp_path, calling, layout="Model")  # the layout's answers on the Model tab: cancelled
+    assert "bad order function: COMMAND" in said and report == ""
+    assert not out.exists()

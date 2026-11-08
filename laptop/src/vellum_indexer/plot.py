@@ -12,7 +12,12 @@ The plotter is a seam (``Plotter``), as the title block reader is: AutoCAD's con
 - **The fallback.** A layout whose saved plotter is not a PDF one (None, or a printer) is plotted a second time with
   ``DWG To PDF.pc3`` at the layout's paper size, matched to one of that plotter's sheets, with the layout's area, at
   1:1, keeping its plot style. The answer says so. When the paper size matches none of its sheets the plot fails with
-  that reason rather than guessing.
+  that reason rather than guessing. The Model tab has no layout to plot and AutoCAD asks it other questions, so a
+  Model-tab DWG's fallback plots its extents at 1:1 on that sheet, with the Model tab's own answers (#87).
+- **Never waiting on a question out of step.** Should AutoCAD ask something the script did not expect, it cancels the
+  ``-PLOT``; the LISP catches that and reports ``FAILED`` and ``END``, and the plotter stops a console still running
+  a few seconds after its report's ``END``. The plot then fails at once with a plain reason, and the time limit is
+  left for a console that truly hangs.
 - **References on the copy.** The copy sits in a job folder, so an xref, raster image or PDF, DWF or DGN underlay saved
   with a relative path (``..\\Xrefs\\base.dwg``) would no longer resolve. Before plotting, the script makes each such
   path absolute against the original DWG's folder, on the copy only (xrefs re-pathed with ``-XREF Path``, images and
@@ -27,11 +32,14 @@ The plotter is a seam (``Plotter``), as the title block reader is: AutoCAD's con
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import logging
 import re
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -41,6 +49,9 @@ from typing import Protocol
 from vellum_indexer.dwg import BELOW_NORMAL_PRIORITY_CLASS, CREATE_NO_WINDOW, one_line
 
 FALLBACK_DEVICE = "DWG To PDF.pc3"
+OUT_OF_STEP = "AutoCAD stopped at a question the laptop didn't expect while plotting"
+
+log = logging.getLogger("vellum_indexer")
 
 
 class PlotError(Exception):
@@ -112,6 +123,18 @@ def is_pdf_device(device: str) -> bool:
     return d.endswith(".pc3") and "pdf" in d
 
 
+def is_model(layout: str | None) -> bool:
+    """Whether a layout is the Model tab, which AutoCAD's -PLOT asks a sequence of its own for."""
+    return (layout or "").strip().lower() == "model"
+
+
+def fallback_reason(layout: str | None) -> str:
+    """The answer's reason for a plot made with DWG To PDF because the layout's own page setup doesn't plot to PDF."""
+    if is_model(layout):
+        return "the Model tab has no page setup that plots to PDF, so its extents were plotted with DWG To PDF at 1:1"
+    return "the layout has no page setup that plots to PDF, so it was plotted with DWG To PDF at its paper size"
+
+
 def landscape(width_mm: float, height_mm: float, rotation: int) -> bool:
     """Whether the layout prints landscape: its paper wider than tall, unless turned a quarter (rotation 1 or 3)."""
     return (width_mm > height_mm) != (rotation in (1, 3))
@@ -125,8 +148,12 @@ def landscape(width_mm: float, height_mm: float, rotation: int) -> bool:
 # name is the group 1 after its AcDbLayout marker, the first group 1 being its page setup's name), makes relative
 # reference paths absolute against FOLDER (the original DWG's folder) and reports each reference ("REF", kind, path,
 # 1 found or 0 not), then either plots and writes "PLOTTED", or writes "UNUSABLE" (mode "saved" and its plotter is not
-# a PDF one) or "NOLAYOUT", then END. A reference is relative unless it starts with a drive (``C:``), a backslash or
-# a slash; nested xrefs (``A|B``) resolve from their parent's path, so only top-level ones are changed.
+# a PDF one) or "NOLAYOUT", then END. MODE "saved" takes the layout's own page setup; "fallback" types a paper layout's
+# detailed -PLOT answers and "model" the Model tab's, which AutoCAD 2026 asks differently (#87). A -PLOT AutoCAD
+# cancels, or one still asking when its answers run out, writes "FAILED" and AutoCAD's message instead of "PLOTTED";
+# any other error writes "FAILED" and END from the *error* handler. A reference is relative unless it starts with a
+# drive (``C:``), a backslash or a slash; nested xrefs (``A|B``) resolve from their parent's path, so only top-level
+# ones are changed.
 PLOT_FORMS = [
     r"""(defun vellum-pclean (s)
       (while (vl-string-search "\t" s) (setq s (vl-string-subst " " "\t" s)))
@@ -164,7 +191,17 @@ PLOT_FORMS = [
                                 f))))))))
       (if img (command "_.-IMAGE" "_R" "*"))
       (princ))""",
-    r"""(defun vellum-plot (name out info mode sheet units orient folder / f d e dev)
+    r"""(defun vellum-plot-run (f answers / r)
+      (setq r (vl-catch-all-apply 'command answers))
+      (cond ((vl-catch-all-error-p r)
+              (write-line (strcat "FAILED\t" (vellum-pclean (vl-catch-all-error-message r))) f))
+            ((= 1 (logand 1 (getvar "CMDACTIVE"))) (write-line "FAILED\tstill asking when the answers ran out" f))
+            (T (write-line "PLOTTED" f))))""",
+    r"""(defun vellum-plot (name out info mode sheet units orient folder / f d e dev *error*)
+      (setq *error* (lambda (msg)
+                      (if f (progn (write-line (strcat "FAILED\t" (vellum-pclean msg)) f) (write-line "END" f)
+                                   (close f) (setq f nil)))
+                      (princ)))
       (setq f (vl-catch-all-apply 'open (list info "w" "utf8")))
       (if (or (null f) (vl-catch-all-error-p f)) (setq f (open info "w")))
       (if (= name "") (setq name (getvar "CTAB")))
@@ -182,14 +219,17 @@ PLOT_FORMS = [
           (cond
             ((= mode "saved")
               (if (and (wcmatch (strcase dev) "*.PC3") (wcmatch (strcase dev) "*PDF*"))
-                (progn (command "_.-PLOT" "_N" name "" "" out "_N" "_Y") (write-line "PLOTTED" f))
+                (vellum-plot-run f (list "_.-PLOT" "_N" name "" "" out "_N" "_Y"))
                 (write-line "UNUSABLE" f)))
+            ((= mode "model")
+              (vellum-plot-run f (list "_.-PLOT" "_Y" name "DWG To PDF.pc3" sheet units orient "_N" "_E" "1:1" ""
+                                       "_Y" "" "_Y" "_A" out "_N" "_Y")))
             (T
-              (command "_.-PLOT" "_Y" name "DWG To PDF.pc3" sheet units orient "_N" "_L" "1:1" "" "_Y" "" "_Y"
-                       "_N" "_N" "_N" out "_N" "_Y")
-              (write-line "PLOTTED" f)))))
+              (vellum-plot-run f (list "_.-PLOT" "_Y" name "DWG To PDF.pc3" sheet units orient "_N" "_L" "1:1" ""
+                                       "_Y" "" "_Y" "_N" "_N" "_N" out "_N" "_Y"))))))
       (write-line "END" f)
       (close f)
+      (setq f nil)
       (princ))""",
 ]
 PLOT_LISP = "\n".join(one_line(f) for f in PLOT_FORMS)
@@ -235,8 +275,8 @@ class Reference:
 
 
 def parse_info(text: str) -> tuple[SavedSetup | None, str, list[Reference]]:
-    """The plot's report: the layout's saved setup, how it ended ("PLOTTED", "UNUSABLE", "NOLAYOUT"), and the
-    references it found."""
+    """The plot's report: the layout's saved setup, how it ended ("PLOTTED", "UNUSABLE", "NOLAYOUT", or "FAILED" when
+    AutoCAD cancelled the -PLOT), and the references it found."""
     setup, outcome, complete = None, "", False
     refs: list[Reference] = []
     for line in text.splitlines():
@@ -249,7 +289,7 @@ def parse_info(text: str) -> tuple[SavedSetup | None, str, list[Reference]]:
                 setup = SavedSetup(parts[1], parts[2], parts[3], float(parts[4]), float(parts[5]), int(parts[6]))
             except ValueError:
                 setup = None
-        elif parts[0] in ("PLOTTED", "UNUSABLE", "NOLAYOUT"):
+        elif parts[0] in ("PLOTTED", "UNUSABLE", "NOLAYOUT", "FAILED"):
             outcome = parts[0]
         elif parts[0] == "END":
             complete = True
@@ -259,14 +299,18 @@ def parse_info(text: str) -> tuple[SavedSetup | None, str, list[Reference]]:
 
 
 class AccoreconsolePlotter:
-    """Plots through AutoCAD's core console, on a copy of the DWG, at below-normal priority, with a time limit."""
+    """Plots through AutoCAD's core console, on a copy of the DWG, at below-normal priority, with a time limit. A
+    console that has written its report's END but not quit ``after_end`` seconds later is stopped."""
 
     id = "accoreconsole-plot-1"
+    model_mode = "model"  # the script's mode for the Model tab's fallback (its own -PLOT answers)
+    poll = 0.25  # seconds between looks at the report while the console runs
 
-    def __init__(self, command: list[str], work: Path, timeout: float = 300.0):
+    def __init__(self, command: list[str], work: Path, timeout: float = 300.0, after_end: float = 5.0):
         self.command = command
         self.work = work
         self.timeout = timeout
+        self.after_end = after_end
 
     def plot(self, dwg: Path, layout: str | None, work: Path | None = None,
              origin: Path | None = None) -> PlotResult:
@@ -293,12 +337,16 @@ class AccoreconsolePlotter:
                     raise PlotError("AutoCAD made no PDF from the layout's page setup")
                 return PlotResult(pdf, "saved", setup.device, setup.media, setup.layout, len(refs),
                                   sum(not r.found for r in refs))
+            model = is_model(setup.layout)
             sheet = fallback_sheet(setup.width_mm, setup.height_mm)
             if sheet is None:
-                raise PlotError("the layout has no page setup that plots to PDF, and its paper size "
-                                f"({setup.width_mm:.0f} x {setup.height_mm:.0f} mm) isn't one DWG To PDF has")
+                raise PlotError(f"{'the Model tab' if model else 'the layout'} has no page setup that plots to PDF, "
+                                f"and its paper size ({setup.width_mm:.0f} x {setup.height_mm:.0f} mm) isn't one "
+                                "DWG To PDF has")
             orient = "Landscape" if landscape(setup.width_mm, setup.height_mm, setup.rotation) else "Portrait"
-            _, outcome, pdf, refs = self._run(job, copy, setup.layout, "fallback", sheet[0], sheet[1], orient,
+            # the Model tab: its extents at 1:1, with the prompts AutoCAD asks there (#87)
+            mode = self.model_mode if model else "fallback"
+            _, outcome, pdf, refs = self._run(job, copy, setup.layout, mode, sheet[0], sheet[1], orient,
                                               folder=origin)
             if outcome != "PLOTTED" or pdf is None:
                 raise PlotError("AutoCAD made no PDF with DWG To PDF")
@@ -317,14 +365,11 @@ class AccoreconsolePlotter:
         args = [*self.command, "/i", str(copy), "/s", str(script), "/l", "en-US"]
         flags = BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW if sys.platform == "win32" else 0
         try:
-            subprocess.run(args, cwd=job, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=self.timeout, creationflags=flags, check=False)
-        except subprocess.TimeoutExpired as error:
-            minutes = self.timeout / 60
-            limit = f"{minutes:.0f} minutes" if minutes >= 1 else f"{self.timeout:.0f} seconds"
-            raise PlotError(f"timed out: AutoCAD took longer than {limit}, so the plot was stopped") from error
+            console = subprocess.Popen(args, cwd=job, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, creationflags=flags)
         except OSError as error:
             raise PlotError("AutoCAD couldn't be started on the laptop") from error
+        self._wait(console, info)
         try:
             raw = info.read_bytes()
         except OSError:
@@ -334,12 +379,57 @@ class AccoreconsolePlotter:
         except UnicodeDecodeError:
             text = raw.decode("cp1252", errors="replace")
         setup, outcome, refs = parse_info(text)
+        if outcome == "FAILED":
+            said = next((line.split("\t", 1)[1:] for line in text.splitlines() if line.startswith("FAILED")), [])
+            log.warning("AutoCAD cancelled the %s plot: %s", mode, (said or ["no message"])[0].strip())
+            raise PlotError(OUT_OF_STEP)
         pdf = None
         if out.is_file():
             data = out.read_bytes()
             if data.startswith(b"%PDF"):
                 pdf = data
         return setup, outcome, pdf, refs
+
+    def _wait(self, console: subprocess.Popen, info: Path) -> None:
+        """Wait for the console to quit. Once the script's report ends (END), the plot is over whatever AutoCAD does
+        next, so a console still running ``after_end`` seconds later is stopped rather than left to the time limit
+        (after a cancelled -PLOT the real console sits at its prompt). One that never writes END is stopped at the
+        time limit and the plot answered timed out."""
+        started = time.monotonic()
+        ended = None
+        while True:
+            try:
+                console.wait(timeout=self.poll)
+                return
+            except subprocess.TimeoutExpired:
+                pass
+            now = time.monotonic()
+            if ended is None and report_ended(info):
+                ended = now
+            if ended is not None and now - ended >= self.after_end:
+                log.info("AutoCAD's console wrote its report but hadn't quit %.0f s later, so it was stopped",
+                         self.after_end)
+                stop(console)
+                return
+            if ended is None and now - started >= self.timeout:
+                stop(console)
+                minutes = self.timeout / 60
+                limit = f"{minutes:.0f} minutes" if minutes >= 1 else f"{self.timeout:.0f} seconds"
+                raise PlotError(f"timed out: AutoCAD took longer than {limit}, so the plot was stopped")
+
+
+def report_ended(info: Path) -> bool:
+    """Whether the script's report has its END line yet. The report is a few hundred bytes."""
+    try:
+        return b"END" in info.read_bytes().splitlines()
+    except OSError:
+        return False
+
+
+def stop(console: subprocess.Popen) -> None:
+    console.kill()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        console.wait(timeout=10)
 
 
 # --- Where a plot goes -------------------------------------------------------------------------------------------

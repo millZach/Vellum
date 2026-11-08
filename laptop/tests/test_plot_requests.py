@@ -171,12 +171,13 @@ def test_the_script_types_only_what_the_indexer_chose_and_never_saves(tmp_path):
     origin = tmp_path / "Dropbox" / "Projects" / "Made-up" / "CAD"
     script = plot_script("E-201 Power", tmp_path / "saved.pdf", tmp_path / "saved.txt", folder=origin)
     lines = script.splitlines()
-    assert [line.split(" ")[1] for line in lines[:4]] == ["vellum-pclean", "vellum-abs", "vellum-refs", "vellum-plot"]
-    for line in lines[:4]:
+    assert [line.split(" ")[1] for line in lines[:5]] == ["vellum-pclean", "vellum-abs", "vellum-refs",
+                                                          "vellum-plot-run", "vellum-plot"]
+    for line in lines[:5]:
         assert line.startswith("(defun ") and line.count("(") == line.count(")")
-    assert lines[4] == (f'(vellum-plot "E-201 Power" "{(tmp_path / "saved.pdf").as_posix()}" '
+    assert lines[5] == (f'(vellum-plot "E-201 Power" "{(tmp_path / "saved.pdf").as_posix()}" '
                         f'"{(tmp_path / "saved.txt").as_posix()}" "saved" "" "_I" "_L" "{origin.as_posix()}")')
-    assert lines[5:] == ["_.QUIT", "_Y"]
+    assert lines[6:] == ["_.QUIT", "_Y"]
     lowered = script.lower()
     for word in ("qsave", "saveas", "wblock", "(load", "appload", ".lsp", "secureload", "setvar"):
         assert word not in lowered

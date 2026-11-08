@@ -482,8 +482,7 @@ class Indexer:
         self._answer(Answer(name, "done", id=request.id, pdf=plot.path, content_hash=plot.facts.get("contentHash"),
                             page_setup=page_setup,
                             reason=None if page_setup != "fallback" else
-                            "the layout has no page setup that plots to PDF, so it was plotted with DWG To PDF "
-                            "at its paper size",
+                            plot_module.fallback_reason(plot.facts.get("plottedLayout") or layout),
                             missing_references=missing, warning=missing_warning(missing)))
         return True
 
@@ -561,7 +560,9 @@ class Indexer:
         self.state.put_plot(plot)
         self.counters.plots_made += 1
         log.info("Plotted %s (%s) to %s with %s page setup", record.path, layout or "its saved layout", db_pdf,
-                 "its own" if result.page_setup == "saved" else "DWG To PDF at its paper size, as a fallback,")
+                 "its own" if result.page_setup == "saved" else
+                 "DWG To PDF, the Model tab's extents at 1:1, as a fallback," if plot_module.is_model(result.layout)
+                 else "DWG To PDF at its paper size, as a fallback,")
         return plot, result.page_setup
 
     def _drop_missing_plots(self) -> None:

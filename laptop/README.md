@@ -42,7 +42,7 @@ and settings too. Neither touches `Dropbox\Vellum\Index` or `Dropbox\Vellum\Plot
 Zach's laptop), `git pull`, then run `install.ps1` again with no options (settings.toml and the Dropbox sign-in are
 kept): it stops the running task, installs the new version into the same environment, and starts the task again.
 `vellum-indexer where` then names the plots folder, and the log's first line names the version (1.1.0 plots on
-request).
+request; 1.1.1 plots a Model-tab DWG and never waits on a question out of step).
 
 By hand, from a checkout: `python -m pip install -r laptop\requirements.lock` and `python -m pip install --no-deps
 laptop`, then `vellum-indexer where` (prints where everything is), `vellum-indexer scan` (one scan, then exit) or
@@ -223,7 +223,10 @@ and answers beside it. The format, the answers, the naming and the cleanup are
   console runs `-PLOT` on the layout at below-normal priority, stopped after 5 minutes: with the layout's saved
   plotter, paper, area, scale and plot style when that plotter writes PDFs (a `.pc3` with PDF in its name), so the PDF
   is what AutoCAD prints. A layout with no such page setup is plotted again with `DWG To PDF.pc3` on the sheet that
-  matches its paper size, its layout area at 1:1, and the answer says so. The plot answers "No" to saving its
+  matches its paper size, its layout area at 1:1, and the answer says so. A DWG saved on the Model tab is plotted the
+  same way but with its extents at 1:1, since the Model tab has no layout area and AutoCAD asks it other questions.
+  Should AutoCAD ask something the script didn't expect, the plot fails within seconds ("AutoCAD stopped at a question
+  the laptop didn't expect while plotting") rather than wait out the time limit. The plot answers "No" to saving its
   settings, and the console quits without saving; the DWG in the project folder is never opened.
 - **References still found.** Before plotting, the script makes the copy's relative xref, raster image and PDF, DWF
   or DGN underlay paths absolute against the original DWG's folder, on the copy only, so the PDF has them. References

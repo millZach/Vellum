@@ -964,3 +964,96 @@ def test_a_plot_of_a_dwg_with_no_layout_yet_stays_once_its_layouts_are_known(dro
     assert listed[("E-701.dwg", kept_on)]["pairedBy"] == "plotted"
     for other in set(layouts) - {kept_on}:
         assert listed[("E-701.dwg", other)]["pdf"] is None
+
+
+# --- The Model tab and answers out of step (#87) -----------------------------------------------------------------
+
+MODEL_ANSWERS = ["_.-PLOT", "_Y", "Model", "DWG To PDF.pc3", "ANSI full bleed A (8.50 x 11.00 Inches)", "_I", "_L",
+                 "_N", "_E", "1:1", "", "_Y", "", "_Y", "_A", "<out>", "_N", "_Y"]
+# detailed, layout, device, paper, units, orientation, upside down, area, scale, offset, plot styles, style table,
+# lineweights, then the shade plot setting on the Model tab
+
+
+def model_dwg(dropbox: Path) -> Path:
+    """A made-up DWG saved on the Model tab, its title block in model space, with no PDF plotter saved: ANSI A."""
+    dwg = make_dxf(dropbox / PLANT / "CAD" / "M-101.dwg", [("Model", {"DWG_NO": "M-101", "TITLE": "Made-up model"})],
+                   setups={"Model": {"device": "None", "media": "ANSI_A_(11.00_x_8.50_Inches)", "size": (279.4, 215.9)}})
+    return dwg
+
+
+def test_a_model_tab_dwg_falls_back_to_its_extents_at_1_1_with_the_model_tabs_answers(dropbox, tmp_path, make_indexer,
+                                                                                       plot_log):
+    model_dwg(dropbox)
+    indexer = make_indexer(plotter=plotter(tmp_path, timeout=10))
+    indexer.scan()
+    name = ask(dropbox, entries(dropbox)[("M-101.dwg", "Model")])
+    started = time.monotonic()
+    answer_now(indexer)
+    assert time.monotonic() - started < 8
+    answer = answer_of(dropbox, name)
+    assert (answer["state"], answer["pageSetup"]) == ("done", "fallback")
+    assert answer["reason"] == ("the Model tab has no page setup that plots to PDF, so its extents were plotted with "
+                                "DWG To PDF at 1:1")
+    runs = plot_log()
+    assert [r["mode"] for r in runs] == ["saved", "model"]
+    out = runs[1]["answers"][14]
+    assert runs[1]["answers"] == [a if a != "<out>" else out for a in MODEL_ANSWERS[1:]]
+    assert out.endswith("/model.pdf")
+    # asked again, unchanged: the same PDF, and the same reason
+    again = ask(dropbox, entries(dropbox)[("M-101.dwg", "Model")])
+    answer_now(indexer)
+    assert answer_of(dropbox, again)["reason"] == answer["reason"] and len(plot_log()) == 2
+
+
+def test_a_paper_layout_falls_back_with_the_layouts_answers_unchanged(dropbox, tmp_path, make_indexer, plot_log):
+    small_tree(dropbox)  # E-202's Layout1: no plotter saved, A3
+    indexer = make_indexer(plotter=plotter(tmp_path))
+    indexer.scan()
+    name = ask(dropbox, entries(dropbox)[("E-202.dwg", "Layout1")])
+    answer_now(indexer)
+    answer = answer_of(dropbox, name)
+    assert answer["state"] == "done" and answer["reason"] == ("the layout has no page setup that plots to PDF, so it "
+                                                              "was plotted with DWG To PDF at its paper size")
+    run = plot_log()[1]
+    assert run["mode"] == "fallback"
+    assert run["answers"][:13] == ["_Y", "Layout1", "DWG To PDF.pc3", "ISO full bleed A3 (297.00 x 420.00 MM)", "_M",
+                                   "_L", "_N", "_L", "1:1", "", "_Y", "", "_Y"]
+    assert run["answers"][13:16] == ["_N", "_N", "_N"]  # scale lineweights, paper space first, hide paperspace
+    assert run["answers"][16].endswith("/fallback.pdf") and run["answers"][17:] == ["_N", "_Y"]
+
+
+def test_answers_out_of_step_fail_within_seconds_with_a_plain_reason(dropbox, tmp_path, make_indexer, plot_log,
+                                                                       monkeypatch):
+    from vellum_indexer import plot as plot_module
+
+    model_dwg(dropbox)
+    # the Model tab given the paper layout's answers, as the indexer did before #87
+    monkeypatch.setattr(plot_module.AccoreconsolePlotter, "model_mode", "fallback")
+    indexer = make_indexer(plotter=plotter(tmp_path, timeout=30))
+    indexer.scan()
+    name = ask(dropbox, entries(dropbox)[("M-101.dwg", "Model")])
+    started = time.monotonic()
+    answer_now(indexer)
+    assert time.monotonic() - started < 15
+    answer = answer_of(dropbox, name)
+    assert (answer["state"], answer["pdf"]) == ("failed", None)
+    assert answer["reason"] == "AutoCAD stopped at a question the laptop didn't expect while plotting"
+    assert list((tmp_path / "home" / "work").iterdir()) == []
+
+
+def test_a_console_that_writes_end_and_does_not_quit_is_stopped(tmp_path):
+    dwg = make_dxf(tmp_path / "E-301.dwg", [("Layout1", {"DWG_NO": "E-301"})], setups={"Layout1": ARCH_D})
+    started = time.monotonic()
+    result = plotter(tmp_path, "linger", timeout=30).plot(dwg, "Layout1")
+    assert time.monotonic() - started < 15
+    assert result.page_setup == "saved" and result.pdf.startswith(b"%PDF")
+
+
+def test_the_lisp_catches_a_cancelled_plot_and_reports_failed():
+    from vellum_indexer.plot import parse_info
+
+    script = plot_script("Model", Path("C:/w/model.pdf"), Path("C:/w/model.txt"), "model", "ANSI A", "Inches")
+    assert "vl-catch-all-apply 'command" in script and "FAILED" in script
+    assert '"_E" "1:1" "" "_Y" "" "_Y" "_A" out "_N" "_Y"' in script
+    _, outcome, _ = parse_info("SETUP\tModel\tNone\tANSI A\t279.40\t215.90\t0\nFAILED\tFunction cancelled\nEND\n")
+    assert outcome == "FAILED"

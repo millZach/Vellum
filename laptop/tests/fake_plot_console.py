@@ -4,8 +4,16 @@ in plot.py does: reports the setup, makes relative xref, image and underlay path
 folder and reports each one and whether it is there, then plots (writes a made-up PDF at the paper's size) or says
 UNUSABLE.
 
+It answers ``-PLOT`` the way AutoCAD 2026 does. It takes the answers the script's LISP gives ``-PLOT`` for the mode it
+was called with and walks them through the prompts AutoCAD asks, which differ between the Model tab and a paper
+layout (the prompt lists below, the Model tab's taken from the real console, #87). An answer a prompt can't take, or
+too few or too many answers, cancels the function as AutoCAD does: "PLOTTED" is never written. A script whose LISP
+catches that error then writes "FAILED" and "END"; one that doesn't writes neither. Either way the console then sits,
+as the real one did, until it is stopped.
+
 usage: python fake_plot_console.py <mode> /i <copy> /s <script> /l en-US
-mode: ok | hang | nopdf | wrongpdf. Each run is logged, one JSON line, to $VELLUM_FAKE_PLOT_LOG if set.
+mode: ok | hang | nopdf | wrongpdf | linger (plots, writes END, then doesn't quit). Each run is logged, one JSON line,
+to $VELLUM_FAKE_PLOT_LOG if set, with the answers -PLOT was given.
 """
 
 import json
@@ -17,6 +25,78 @@ import time
 
 sys.path[:0] = [str(pathlib.Path(__file__).parent)]
 
+SIT = 60  # how long a console that won't quit sits, in seconds: longer than any test waits
+
+
+def yes_no(a):
+    return a.lstrip("_").upper() in ("", "Y", "N", "YES", "NO")
+
+
+def keyword(*letters):
+    return lambda a: a == "" or a.lstrip("_")[:1].upper() in letters
+
+
+def anything(a):
+    return True
+
+
+def scale(a):
+    return a == "" or a.lstrip("_").upper() in ("F", "FIT") or re.fullmatch(r"[\d.]+\s*[:=]\s*[\d.]+", a) is not None
+
+
+def offset(a):
+    return a == "" or a.lstrip("_").upper() in ("C", "CENTER") or re.fullmatch(r"-?[\d.]+,-?[\d.]+", a) is not None
+
+
+def layout_name(name):
+    return lambda a: a == "" or a.lower() == name.lower()
+
+
+def prompts(detailed, model, name):
+    """AutoCAD 2026's -PLOT prompts after "Detailed plot configuration?", each with what it takes."""
+    if not detailed:
+        return [("Enter a layout name or [?]", layout_name(name)), ("Enter a page setup name", anything),
+                ("Enter an output device name or [?]", anything), ("Enter file name", anything),
+                ("Save changes to page setup [Yes/No]?", yes_no), ("Proceed with plot [Yes/No]", yes_no)]
+    head = [("Enter a layout name or [?]", layout_name(name)), ("Enter an output device name or [?]", anything),
+            ("Enter paper size or [?]", anything), ("Enter paper units [Inches/Millimeters]", keyword("I", "M")),
+            ("Enter drawing orientation [Portrait/Landscape]", keyword("P", "L")),
+            ("Plot upside down? [Yes/No]", yes_no)]
+    if model:
+        middle = [("Enter plot area [Display/Extents/Limits/View/Window]", keyword("D", "E", "L", "V", "W"))]
+    else:
+        middle = [("Enter plot area [Display/Extents/Layout/View/Window]", keyword("D", "E", "L", "V", "W"))]
+    middle += [("Enter plot scale or [Fit]", scale), ("Enter plot offset (x,y) or [Center]", offset),
+               ("Plot with plot styles? [Yes/No]", yes_no), ("Enter plot style table name or [?]", anything),
+               ("Plot with lineweights? [Yes/No]", yes_no)]
+    if model:
+        middle += [("Enter shade plot setting [As displayed/legacy Wireframe/legacy Hidden/Visual styles/Rendered]",
+                    keyword("A", "W", "H", "V", "R"))]
+    else:
+        middle += [("Scale lineweights with plot scale? [Yes/No]", yes_no), ("Plot paper space first? [Yes/No]", yes_no),
+                   ("Hide paperspace objects? [Yes/No]", yes_no)]
+    tail = [("Enter file name", anything), ("Save changes to page setup [Yes/No]?", yes_no),
+            ("Proceed with plot [Yes/No]", yes_no)]
+    return head + middle + tail
+
+
+def plot_answers(script, plot_mode):
+    """The answers the script's vellum-plot gives -PLOT in this mode: the -PLOT list under the cond clause
+    ``((= mode "<mode>") ...``, else the one under ``(T ...``."""
+    clauses = [(m.start(), m.group(1) or "T") for m in re.finditer(r'\(\(= mode "(\w+)"\)|\(T ', script)]
+    lists = []
+    for m in re.finditer(r'"_\.-PLOT"((?: (?:"[^"]*"|[a-z][a-z-]*))*)\)', script):
+        guard = [c for at, c in clauses if at < m.start()]
+        lists.append((guard[-1] if guard else "T", re.findall(r'"[^"]*"|[a-z][a-z-]*', m.group(1))))
+    chosen = [a for g, a in lists if g == plot_mode] or [a for g, a in lists if g == "T"]
+    return chosen[0]
+
+
+def sit():
+    time.sleep(SIT)
+    sys.exit(0)
+
+
 mode, args = sys.argv[1], sys.argv[2:]
 drawing = pathlib.Path(args[args.index("/i") + 1])
 script = pathlib.Path(args[args.index("/s") + 1]).read_text(encoding="utf-8")
@@ -24,13 +104,13 @@ call = re.search(r'^\(vellum-plot ((?:"[^"]*" ?){8})\)$', script, re.M)
 layout, out, info, plot_mode, sheet, units, orient, folder = re.findall(r'"([^"]*)"', call.group(1))
 (drawing.parent / (drawing.stem + ".dwl")).write_text("lock")  # AutoCAD's lock file, beside what it opened
 log = os.environ.get("VELLUM_FAKE_PLOT_LOG")
-if log:
-    with open(log, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"drawing": str(drawing), "layout": layout, "mode": plot_mode, "sheet": sheet,
-                            "units": units, "orient": orient, "folder": folder, "cwd": os.getcwd(),
-                            "script": script}) + "\n")
 if mode == "hang":
-    time.sleep(60)
+    if log:
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"drawing": str(drawing), "layout": layout, "mode": plot_mode, "sheet": sheet,
+                                "units": units, "orient": orient, "folder": folder, "cwd": os.getcwd(),
+                                "script": script, "answers": None}) + "\n")
+    sit()
 
 import ezdxf  # noqa: E402
 
@@ -39,6 +119,8 @@ from makers import make_pdf  # noqa: E402
 doc = ezdxf.readfile(drawing)
 lines = []
 found = None
+answers = None
+cancelled = False
 wanted = layout or doc.layouts.active_layout().name
 for lay in doc.layouts:
     if lay.name.lower() == wanted.lower():
@@ -72,12 +154,33 @@ else:
     if plot_mode == "saved" and not usable:
         lines.append("UNUSABLE")
     else:
-        if mode == "wrongpdf":
-            pathlib.Path(out).write_bytes(b"not a PDF")
-        elif mode != "nopdf":
-            w, h = d.paper_width / 25.4, d.paper_height / 25.4
-            make_pdf(pathlib.Path(out), [(72, 72, 12, f"Made-up plot of {found.name}")], title=found.name,
-                     inches=(max(w, h), min(w, h)) if orient in ("_L", "") else (min(w, h), max(w, h)))
-        lines.append("PLOTTED")
-lines.append("END")
-pathlib.Path(info).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        values = {"name": found.name, "out": out, "sheet": sheet, "units": units, "orient": orient, "dev": dev}
+        given = plot_answers(script, plot_mode)
+        answers = [a[1:-1] if a.startswith('"') else values[a] for a in given]
+        detailed = answers[:1] and answers[0].lstrip("_").upper() in ("Y", "YES")
+        asked = prompts(detailed, found.name.lower() == "model", found.name)
+        cancelled = len(answers) - 1 != len(asked) or not all(
+            takes(answer) for (_, takes), answer in zip(asked, answers[1:], strict=False))
+        if cancelled:  # "; error: Function cancelled"
+            if "vl-catch-all-apply 'command" in script or "*error*" in script:
+                lines.append("FAILED\tFunction cancelled")
+            else:
+                lines = []  # the LISP stopped before it wrote or closed its report
+        else:
+            if mode == "wrongpdf":
+                pathlib.Path(out).write_bytes(b"not a PDF")
+            elif mode != "nopdf":
+                w, h = d.paper_width / 25.4, d.paper_height / 25.4
+                make_pdf(pathlib.Path(out), [(72, 72, 12, f"Made-up plot of {found.name}")], title=found.name,
+                         inches=(max(w, h), min(w, h)) if orient in ("_L", "") else (min(w, h), max(w, h)))
+            lines.append("PLOTTED")
+if log:
+    with open(log, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"drawing": str(drawing), "layout": layout, "mode": plot_mode, "sheet": sheet,
+                            "units": units, "orient": orient, "folder": folder, "cwd": os.getcwd(),
+                            "script": script, "answers": answers}) + "\n")
+if lines:
+    lines.append("END")
+    pathlib.Path(info).write_text("\n".join(lines) + "\n", encoding="utf-8")
+if cancelled or mode == "linger":
+    sit()  # the real console sat after the cancel, its command still waiting

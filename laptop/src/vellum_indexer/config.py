@@ -82,6 +82,8 @@ class Settings:
     dropbox_app_key: str | None = None
     # How often online-only files left unread (drive unplugged, not signed in, a failed download) are tried again.
     retry_unread_minutes: float = 10.0
+    # A plot on request is stopped after this long, and answered failed.
+    plot_timeout_minutes: float = 5.0
 
 
 def default_scratch() -> Path | None:
@@ -115,7 +117,7 @@ def load_settings(home: Path) -> Settings:
     if "dropbox_app_key" in data:
         settings.dropbox_app_key = str(data["dropbox_app_key"]).strip() or None
     for key in ("debounce_seconds", "debounce_max_seconds", "rescan_hours", "scratch_min_free_gb",
-                "retry_unread_minutes"):
+                "retry_unread_minutes", "plot_timeout_minutes"):
         if key in data:
             setattr(settings, key, float(data[key]))
     return settings

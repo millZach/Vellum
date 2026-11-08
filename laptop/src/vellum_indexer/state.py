@@ -28,6 +28,16 @@ CREATE TABLE IF NOT EXISTS files (
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS orphans (name TEXT PRIMARY KEY, since REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS thumbnails (name TEXT PRIMARY KEY, png BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS plots (
+  key TEXT PRIMARY KEY,
+  sheet TEXT NOT NULL,
+  dwg_size INTEGER NOT NULL,
+  dwg_mtime_ns INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  mtime_ns INTEGER NOT NULL,
+  facts TEXT NOT NULL
+);
 """
 
 
@@ -40,6 +50,24 @@ class Record:
     online_only: bool
     reader: str  # what read it: "unread" for an online-only file, else the reader's id ("pdfium-1", "accoreconsole-1")
     facts: dict
+
+
+@dataclass
+class Plot:
+    """A PDF the laptop plotted on request: which sheet it is the plot of (the DWG's key, ``#``, the layout in lower
+    case), the DWG's size and modified time it was plotted from, and the PDF in Dropbox/Vellum/Plots with what was read
+    from it, as for any PDF."""
+
+    sheet: str
+    dwg_size: int
+    dwg_mtime_ns: int
+    path: str
+    size: int
+    mtime_ns: int
+    facts: dict
+
+    def record(self) -> Record:
+        return Record(self.path, "pdf", self.size, self.mtime_ns, False, "pdfium-1", self.facts)
 
 
 class State:
@@ -123,6 +151,25 @@ class State:
     def set_orphans(self, orphans: dict[str, float]) -> None:
         self.db.execute("DELETE FROM orphans")
         self.db.executemany("INSERT INTO orphans VALUES (?, ?)", orphans.items())
+        self.commit()
+
+    # --- Plots made on request (#67), kept in Dropbox/Vellum/Plots, which the scan never walks ---
+
+    def put_plot(self, plot: Plot) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO plots VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (plot.path.lower(), plot.sheet, plot.dwg_size, plot.dwg_mtime_ns, plot.path, plot.size, plot.mtime_ns,
+             json.dumps(plot.facts, sort_keys=True)),
+        )
+        self.commit()
+
+    def plots(self) -> list[Plot]:
+        rows = self.db.execute(
+            "SELECT sheet, dwg_size, dwg_mtime_ns, path, size, mtime_ns, facts FROM plots ORDER BY key").fetchall()
+        return [Plot(r[0], r[1], r[2], r[3], r[4], r[5], json.loads(r[6])) for r in rows]
+
+    def delete_plot(self, path: str) -> None:
+        self.db.execute("DELETE FROM plots WHERE key = ?", (path.lower(),))
         self.commit()
 
     def commit(self) -> None:

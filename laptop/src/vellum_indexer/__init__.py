@@ -3,4 +3,4 @@
 See laptop/README.md, ADR-0017 and docs/drawing-index-format.md.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

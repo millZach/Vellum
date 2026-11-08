@@ -7,7 +7,9 @@ skips), then times a first scan, a rescan with nothing changed, a rescan with on
 watcher makes for one saved PDF. DWGs are read by a stand-in reader (CI has no AutoCAD), so the first scan's time is
 the PDF reading, thumbnails, listing and publishing, not AutoCAD's. Then 200 online-only PDFs are read through a
 scripted Dropbox (no network): downloaded to a scratch folder, read and deleted, then rescanned with nothing to
-download. Writes {"measurements": [...]} for
+download. Last, a plot request for one DWG is answered through a stand-in for AutoCAD's console
+(tests/fake_plot_console.py): the time from the laptop seeing the request to its "done" answer, and that time less the
+console's own. Writes {"measurements": [...]} for
 apps/ios/Scripts/perf-compare.py, and prints the counts beside the times.
 """
 
@@ -36,7 +38,7 @@ from makers import make_dwg_with_preview, title_block_pdf, touch  # noqa: E402
 class StandInReader:
     id = "bench-1"
 
-    def read(self, path: Path) -> list[BlockInsert]:
+    def read(self, path: Path, work: Path | None = None) -> list[BlockInsert]:
         return [BlockInsert("Layout1", "TB", {"DWG_NO": path.stem, "TITLE": f"Made-up drawing {path.stem}",
                                               "REV": "A", "SCALE": '1/4" = 1\'-0"', "DATE": "2026-11-07"})]
 
@@ -107,6 +109,47 @@ def online_only_pass(tmp: Path, results: dict) -> None:
     state.close()
 
 
+def plot_request_pass(root: Path, indexer: Indexer, results: dict) -> None:
+    """One plot request answered on the 5,000-file index, through the stand-in console."""
+    import subprocess
+
+    from vellum_indexer.index import entry_id
+    from vellum_indexer.plot import AccoreconsolePlotter
+
+    fake = [sys.executable, str(HERE.parent / "tests" / "fake_plot_console.py"), "ok"]
+    work = root.parent / "home" / "work"
+    plotter = AccoreconsolePlotter(fake, work)
+    console = []
+    real_run = plotter._run
+
+    def timed_run(*args, **kwargs):
+        t0 = time.perf_counter()
+        try:
+            return real_run(*args, **kwargs)
+        finally:
+            console.append(time.perf_counter() - t0)
+
+    plotter._run = timed_run
+    indexer.plotter = plotter
+    dwg = "/Projects/Made-up Project 07/CAD/Bench plot.dwg"
+    request = root / "Vellum" / "Plots" / "requests" / "B0000000-0000-4000-8000-000000000001.json"
+    request.parent.mkdir(parents=True, exist_ok=True)
+    request.write_text(json.dumps({"format": 1, "id": entry_id(dwg, "Layout1"), "path": dwg, "layout": "Layout1",
+                                   "asked": "2026-11-07T12:00:00Z"}))
+    subprocess.run([sys.executable, "-c", "import ezdxf"], check=True)  # warm the disk cache, as a running laptop is
+    indexer.writer.counts = WriteCounts()
+    indexer.plot_wanted.set()
+    t0 = time.perf_counter()
+    indexer.answer_plot_requests()
+    results["plot_request_answered_s"] = time.perf_counter() - t0
+    results["plot_request_overhead_s"] = results["plot_request_answered_s"] - sum(console)
+    answer = json.loads(request.with_name(request.stem + ".answer.json").read_text())
+    print(f"plot_request_answered_s: {results['plot_request_answered_s']:.3f} s ({sum(console):.3f} s in the stand-in "
+          f"console, {len(console)} run(s)); plot_request_overhead_s: {results['plot_request_overhead_s']:.3f} s; "
+          f"answer {answer['state']} ({answer['pageSetup']}), index files written {indexer.writer.counts.files}")
+    assert answer["state"] == "done", answer
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--files", type=int, default=5000)
@@ -117,6 +160,11 @@ def main() -> int:
         root = tmp / "Dropbox"
         started = time.perf_counter()
         changed = build(root, args.files)
+        import ezdxf
+
+        doc = ezdxf.new("R2018")
+        doc.layouts.get("Layout1").dxf_layout.dxf.plot_configuration_file = "DWG To PDF.pc3"
+        doc.saveas(root / "Projects" / "Made-up Project 07" / "CAD" / "Bench plot.dwg")
         files_made = sum(1 for q in root.rglob("*") if q.is_file())
         print(f"Made {files_made} made-up files in {time.perf_counter() - started:.1f} s")
         state = State(tmp / "home" / "state.sqlite")
@@ -152,6 +200,7 @@ def main() -> int:
         db = "/" + changed.relative_to(root).as_posix()
         c, w = timed("update_one_pdf_saved_s", lambda: indexer.update({db}))
         assert c.files_read == 1
+        plot_request_pass(root, indexer, results)
         online_only_pass(tmp, results)
         manifest = json.loads((root / "Vellum" / "Index" / "index.json").read_text())
         print(f"Index: {manifest['drawings']} drawings in {len(manifest['shards'])} shards, manifest "

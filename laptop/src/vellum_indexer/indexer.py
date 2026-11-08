@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterable
@@ -24,17 +26,22 @@ from pathlib import Path
 from vellum_indexer import dwg as dwg_module
 from vellum_indexer import fields, files
 from vellum_indexer import pdf as pdf_module
+from vellum_indexer import plot as plot_module
 from vellum_indexer.dropbox_api import DropboxError
-from vellum_indexer.index import IndexWriter, build_entries, content_name
+from vellum_indexer.index import IndexWriter, atomic_write, build_entries, content_name, entry_id, sheets_of
+from vellum_indexer.plot_requests import Answer, NotYet, PlotFolder, PlotRequest, Refused
 from vellum_indexer.projects import ProjectFinder
-from vellum_indexer.scratch import Downloader, Unavailable
-from vellum_indexer.state import Record, State
+from vellum_indexer.scratch import Downloader, Unavailable, is_inside
+from vellum_indexer.state import Plot, Record, State
 
 log = logging.getLogger("vellum_indexer")
 
 PDF_READER_ID = "pdfium-1"
 UNREAD = "unread"
 INDEX_FOLDER = ("Vellum", "Index")
+# Plot requests are looked for when the watcher sees one arrive, and this often anyway in case a notice was lost.
+PLOT_LOOK_SECONDS = 60.0
+PLOT_ARRIVING_SECONDS = 2.0
 
 
 @dataclass
@@ -46,6 +53,8 @@ class Counters:
     downloaded: int = 0
     thumbnails_made: int = 0
     removed: int = 0
+    plots_made: int = 0
+    plot_answers: int = 0
 
     @property
     def files_read(self) -> int:
@@ -68,6 +77,7 @@ class Indexer:
         progress_seconds: float = 30.0,
         publish_every_seconds: float = 600.0,
         downloader: Downloader | None = None,
+        plotter: plot_module.Plotter | None = None,
     ):
         self.root = root
         self.state = state
@@ -86,6 +96,14 @@ class Indexer:
         self.writer = IndexWriter(self.index_folder)
         self.counters = Counters()
         self.downloader = downloader
+        self.plotter = plotter or plot_module.NoPlotter()
+        self.plots_root = root.joinpath(*plot_module.PLOTS_FOLDER)
+        self.plot_folder = PlotFolder(self.plots_root)
+        self.plot_wanted = threading.Event()  # set by the watcher when a request arrives
+        self.plot_wanted.set()  # look once at the start: requests may have come while the laptop was off
+        self.next_plot_look = 0.0
+        self._plotting = False
+        self.check_in = None  # the watcher's check-in thread, while it runs
         if downloader is not None:
             downloader.dropbox_root = root  # a scratch folder inside Dropbox is refused
             downloader.clean()  # copies and work folders a crash left behind
@@ -226,11 +244,13 @@ class Indexer:
     def scan(self) -> None:
         """Rescan all of Dropbox: list it, read what changed, drop what is gone, publish."""
         started = time.monotonic()
+        self._drop_missing_plots()
         to_read, _ = self._gather({"/"}, set())
         log.info("Listed %d drawings and PDFs in %.1f s; %d to read", self.counters.stat_files,
                  time.monotonic() - started, len(to_read))
         self._work(to_read)
         self.publish()
+        self.answer_plot_requests()
         log.info("Scan done in %.1f s", time.monotonic() - started)
 
     def update(self, paths: Iterable[str], folders: Iterable[str] = ()) -> set[str]:
@@ -274,6 +294,8 @@ class Indexer:
                 for facts in files.walk(self.root, self.rules, start=folder, attributes=self.attributes,
                                         on_error=failed):
                     self.counters.stat_files += 1
+                    if self.counters.stat_files % 256 == 0:
+                        self.answer_plot_requests()  # even while a first scan lists all of Dropbox
                     k = files.key(facts.path)
                     present.add(k)
                     if self.needs_read(facts):
@@ -313,6 +335,7 @@ class Indexer:
         urgent = 0
         last_log = last_publish = time.monotonic()
         while queue:
+            self.answer_plot_requests()  # a plot request goes ahead of every file waiting to be read
             if self.poll_changes is not None:
                 fresh_batch = self.poll_changes()
                 if fresh_batch is not None:
@@ -361,7 +384,7 @@ class Indexer:
 
     def publish(self) -> dict | None:
         records = dict(self.state.records())
-        entries = build_entries(records, self.projects)
+        entries = build_entries(records, self.projects, self.state.plots())
         previous_raw = self.state.meta("manifest")
         previous = json.loads(previous_raw) if previous_raw else self._manifest_in_dropbox()
         manifest = self.writer.publish(entries, previous, self.state.thumbnail)
@@ -376,3 +399,146 @@ class Indexer:
         self.state.drop_thumbnails_except(kept)
         self.state.commit()
         return manifest
+
+    # --- Plotting on request (#67, docs/plot-requests.md) ---
+
+    def plots_due(self) -> bool:
+        return self.plot_wanted.is_set() or time.monotonic() >= self.next_plot_look
+
+    def answer_plot_requests(self) -> int:
+        """Answer every plot request waiting in Dropbox/Vellum/Plots/requests, one plot at a time, oldest first.
+        Cheap when none is due: a flag and a clock. Returns how many were answered."""
+        if self._plotting or not self.plots_due():
+            return 0
+        self._plotting = True
+        try:
+            self.plot_wanted.clear()
+            answered = 0
+            arriving = False
+            for name, path in self.plot_folder.pending():
+                result = self._answer_one(name, path)
+                answered += result is True
+                arriving |= result is None
+            self.plot_folder.clean()
+            # a request still arriving is looked at again in a couple of seconds
+            self.next_plot_look = time.monotonic() + (PLOT_ARRIVING_SECONDS if arriving else PLOT_LOOK_SECONDS)
+            return answered
+        finally:
+            self._plotting = False
+        self.check_in = None  # the watcher's check-in thread, while it runs
+
+    def _answer(self, answer: Answer) -> None:
+        try:
+            self.plot_folder.answer(answer)
+            self.counters.plot_answers += 1
+        except OSError as error:
+            log.warning("Could not answer plot request %s: %s", answer.request, error)
+
+    def _answer_one(self, name: str, path: Path) -> bool | None:
+        """True once answered; None for a request still arriving."""
+        try:
+            request = self.plot_folder.read(name, path)
+        except NotYet:
+            return None
+        except Refused as refused:
+            log.info("Refused plot request %s: %s", name, refused)
+            self._answer(Answer(name, "failed", reason=str(refused)))
+            return True
+        try:
+            dwg_key, record, layout = self._entry_of(request)
+        except Refused as refused:
+            log.info("Refused plot request %s: %s", name, refused)
+            self._answer(Answer(name, "failed", id=request.id, reason=str(refused)))
+            return True
+        self._answer(Answer(name, "plotting", id=request.id))
+        try:
+            plot, page_setup = self._plot(dwg_key, record, layout)
+        except Refused as failed:
+            log.warning("Could not plot %s (%s): %s", record.path, layout or "its saved layout", failed)
+            self._answer(Answer(name, "failed", id=request.id, reason=str(failed)))
+            return True
+        self.publish()  # the index lists the PDF before the answer says done, so the Duo finds it there
+        self._answer(Answer(name, "done", id=request.id, pdf=plot.path, content_hash=plot.facts.get("contentHash"),
+                            page_setup=page_setup,
+                            reason=None if page_setup != "fallback" else
+                            "the layout has no page setup that plots to PDF, so it was plotted with DWG To PDF "
+                            "at its paper size"))
+        return True
+
+    def _entry_of(self, request: PlotRequest) -> tuple[str, Record, str | None]:
+        """The DWG and layout a request names, from what the index holds: the request must name an entry's id, its
+        DWG's path and its layout exactly, and from here on only the index's own path and layout are used."""
+        key = files.key(request.path)
+        record = self.state.get(key)
+        if record is None or record.kind != "dwg" or self.rules.skips_file(record.path):
+            raise Refused("the drawing isn't in the drawing index")
+        for sheet in sheets_of(record):
+            layout = sheet.layout or None
+            if (entry_id(record.path, layout) == request.id
+                    and (layout or "").lower() == (request.layout or "").lower()):
+                return key, record, layout
+        raise Refused("the request doesn't match the drawing index (the drawing's layouts may have changed)")
+
+    def _plot(self, dwg_key: str, record: Record, layout: str | None) -> tuple[Plot, str]:
+        sheet = f"{dwg_key}#{(layout or '').lower()}"
+        found, _ = files.look_up(self.root, [record.path], self.attributes)  # from the listing: no stat, no open
+        facts = found.get(record.path)
+        if facts is None:
+            raise Refused("the DWG isn't in Dropbox any more")
+        for plot in self.state.plots():  # asked twice (two taps, two Duos): the same DWG gives the same plot
+            if (plot.sheet == sheet and (plot.dwg_size, plot.dwg_mtime_ns) == (facts.size, facts.mtime_ns)
+                    and files.local_path(self.root, plot.path).is_file()):
+                return plot, plot.facts.get("pageSetup") or "saved"
+        copy = None
+        work = None
+        if facts.online_only:
+            if self.downloader is None:
+                raise Refused("the DWG is online-only, and the laptop isn't set up to download it")
+            try:
+                copy = self.downloader.fetch(facts.path, facts.size)
+            except Unavailable as error:
+                raise Refused(f"the DWG is online-only, and the laptop can't download it now: {error}") from None
+            except DropboxError:
+                raise Refused("the DWG is online-only, and its download from Dropbox failed") from None
+            self.counters.downloaded += 1
+            local, work = copy, self.downloader.work
+        else:
+            local = files.local_path(self.root, facts.path)
+            if not is_inside(local, self.root):
+                raise Refused("the DWG isn't in Dropbox")
+        try:
+            try:
+                result = self.plotter.plot(local, layout, work) if work else self.plotter.plot(local, layout)
+            except plot_module.PlotError as error:
+                raise Refused(str(error)) from None
+        finally:
+            if copy is not None:
+                Downloader.done(copy)
+        project = self.projects.project_of(record.path)
+        db_pdf = plot_module.plot_name(project.name, record.path, layout, facts.mtime_ns)
+        dest = files.local_path(self.root, db_pdf)
+        if not is_inside(dest, self.plots_root):
+            raise Refused("the plot's name would put it outside Dropbox/Vellum/Plots")
+        try:
+            atomic_write(dest, result.pdf)
+            st = os.stat(dest)
+            read = self._read("pdf", dest)
+        except OSError as error:
+            raise Refused(f"the PDF couldn't be saved in Dropbox/Vellum/Plots ({error.strerror or error})") from None
+        read["pageSetup"] = result.page_setup
+        plot = Plot(sheet, facts.size, facts.mtime_ns, db_pdf, st.st_size, st.st_mtime_ns, read)
+        self.state.put_plot(plot)
+        self.counters.plots_made += 1
+        log.info("Plotted %s (%s) to %s with %s page setup", record.path, layout or "its saved layout", db_pdf,
+                 "its own" if result.page_setup == "saved" else "DWG To PDF at its paper size, as a fallback,")
+        return plot, result.page_setup
+
+    def _drop_missing_plots(self) -> None:
+        """Forget plots whose PDF is no longer in Dropbox/Vellum/Plots (deleted there by hand), from the listing."""
+        plots = self.state.plots()
+        if not plots:
+            return
+        found, _ = files.look_up(self.root, [p.path for p in plots], self.attributes)
+        for plot in plots:
+            if plot.path in found and found[plot.path] is None:
+                self.state.delete_plot(plot.path)

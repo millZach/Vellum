@@ -91,9 +91,9 @@ the same bytes and the same name.
 | `number`, `title`, `revision`, `scale`, `date` | Title block fields as written in the title block (not parsed), each `null` when unknown. `scale` is text such as `1/4" = 1'-0"`, `1:20`, `NTS` or `AS NOTED`; the Duo parses it (an AS NOTED drawing asks for its scale before it is placed). |
 | `fieldsFrom` | Where the fields came from: `dwg` (its title block attributes, with any it lacks from the PDF), `pdf` (the PDF's first page text), `name` (only a drawing number, from the file name), or `null`. |
 | `dwg` | The DWG, or `null`. `read` is `false` only while the file is online-only on the laptop and has not been downloaded and read yet (the external drive unplugged, the laptop not signed in to Dropbox, or a failed download waiting to be retried). |
-| `pdf` | The PDF shown for it, or `null`. `contentHash` is Dropbox's content hash, `pages` the page count, `paperInches` the first page's width and height in inches as it is viewed (a page turned by `/Rotate` 90° reports its turned size); all three are `null` while `read` is `false`. |
-| `otherPdfs` | Paths of other PDFs plotted from the same layout (older plots), newest first after `pdf`. |
-| `pairedBy` | Why `pdf` belongs to `dwg`: `metadata`, `name` or `number` (laptop/README.md, "Pairing"), or `null`. |
+| `pdf` | The PDF shown for it, or `null`. Its `path` is in the project folder, or under `/Vellum/Plots` for a plot made on request. `contentHash` is Dropbox's content hash, `pages` the page count, `paperInches` the first page's width and height in inches as it is viewed (a page turned by `/Rotate` 90° reports its turned size); all three are `null` while `read` is `false`. |
+| `otherPdfs` | Paths of other PDFs plotted from the same layout (older plots), newest first after `pdf`. A plot made on request is listed with the rest, by its modified time, so a re-plot of a changed DWG is `pdf` and the older plot moves here. |
+| `pairedBy` | Why `pdf` belongs to `dwg`: `metadata`, `name` or `number` (laptop/README.md, "Pairing"), `plotted` (the laptop plotted it on request, into `/Vellum/Plots`: `docs/plot-requests.md`), or `null`. A reader treats a value it does not know as paired. |
 | `thumbnail` | Its file in `thumbnails/`, or `null`: the PDF's first page, else the DWG's saved preview. |
 
 ## What the Duo's markers read (#68)

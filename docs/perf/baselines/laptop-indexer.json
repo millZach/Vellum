@@ -117,6 +117,69 @@
       "tolerance": 0.5,
       "measured": "PR #74 run 42362227818 2026-11-07 windows-latest, Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in DWG reader",
       "note": "The watcher's update for one saved PDF, after its 2-second debounce: one listing lookup, one PDF read, publish. A saved PDF is in the index about 2.3 s after Dropbox finishes writing it."
+    },
+    {
+      "metric": "dropbox_files_written_one_plot",
+      "kind": "count",
+      "value": 6,
+      "unit": "files",
+      "tolerance": 0,
+      "measured": "PR #67 2026-11-07 laptop/tests made-up Dropbox, stand-in console (tests/fake_plot_console.py)",
+      "note": "One plot request answered: the PDF in Dropbox/Vellum/Plots, the answer twice (plotting, then done), and the index's changed shard, the PDF's thumbnail and the manifest. Nothing else is uploaded."
+    },
+    {
+      "metric": "plot_console_runs_with_page_setup",
+      "kind": "count",
+      "value": 1,
+      "unit": "runs",
+      "tolerance": 0,
+      "measured": "PR #67 2026-11-07 laptop/tests made-up Dropbox, stand-in console (tests/fake_plot_console.py)",
+      "note": "A layout whose saved plotter writes PDFs is plotted in one run of AutoCAD's core console."
+    },
+    {
+      "metric": "plot_console_runs_fallback",
+      "kind": "count",
+      "value": 2,
+      "unit": "runs",
+      "tolerance": 0,
+      "measured": "PR #67 2026-11-07 laptop/tests made-up Dropbox, stand-in console (tests/fake_plot_console.py)",
+      "note": "A layout with no PDF page setup takes two runs: the first reads its saved setup and finds it unusable, the second plots with DWG To PDF at its paper size."
+    },
+    {
+      "metric": "plot_console_runs_asked_twice",
+      "kind": "count",
+      "value": 1,
+      "unit": "plots",
+      "tolerance": 0,
+      "measured": "PR #67 2026-11-07 laptop/tests made-up Dropbox, stand-in console (tests/fake_plot_console.py)",
+      "note": "The same drawing asked for twice (two taps, two Duos) before or after it is plotted is plotted once; both answers name the same PDF."
+    },
+    {
+      "metric": "check_in_writes_per_hour",
+      "kind": "count",
+      "value": 30,
+      "unit": "files",
+      "tolerance": 0,
+      "measured": "PR #67 2026-11-07 laptop/tests made-up Dropbox, stand-in console (tests/fake_plot_console.py)",
+      "note": "The check-in (Dropbox/Vellum/Plots/laptop.json, about 100 bytes) is rewritten every 2 minutes while the indexer runs: 30 small uploads an hour, so the Duo can say \"Waiting for the laptop\" within 5 minutes of it going off."
+    },
+    {
+      "metric": "plot_request_answered_s",
+      "kind": "time",
+      "value": 0.43,
+      "unit": "s",
+      "tolerance": 0.5,
+      "measured": "PR #67 2026-11-07 Forge (Linux), Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in console",
+      "note": "From the laptop seeing a plot request to its done answer being written, with the stand-in console: read and check the request, answer plotting, copy the DWG, run the console, save the PDF in Dropbox/Vellum/Plots, read it, publish the index, answer done. On the laptop add AutoCAD's own plot, a few seconds to a minute; the watcher sees a request within half a second of Dropbox writing it."
+    },
+    {
+      "metric": "plot_request_overhead_s",
+      "kind": "time",
+      "value": 0.17,
+      "unit": "s",
+      "tolerance": 0.5,
+      "measured": "PR #67 2026-11-07 Forge (Linux), Python 3.12, made-up 5,000-file Dropbox (laptop/scripts/bench.py), stand-in console",
+      "note": "plot_request_answered_s less the console's own time: the indexer's part of answering a plot request, mostly publishing the index."
     }
   ]
 }

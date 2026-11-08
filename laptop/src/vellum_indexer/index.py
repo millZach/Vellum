@@ -26,7 +26,7 @@ from vellum_indexer.fields import Sheet, TitleBlock, number_from_file_name
 from vellum_indexer.pairing import Candidate, pair
 from vellum_indexer.pdf import THUMBNAIL_BOX
 from vellum_indexer.projects import ProjectFinder
-from vellum_indexer.state import Record
+from vellum_indexer.state import Plot, Record
 
 FORMAT = 1
 MANIFEST = "index.json"
@@ -69,9 +69,13 @@ def sheets_of(record: Record) -> list[Sheet]:
     return sheets or [Sheet("", TitleBlock())]
 
 
-def build_entries(records: dict[str, Record], projects: ProjectFinder) -> list[dict]:
+PLOTTED = "plotted"
+
+
+def build_entries(records: dict[str, Record], projects: ProjectFinder, plotted: list[Plot] | None = None) -> list[dict]:
     """Every drawing: each DWG layout's title block (a sheet) with the PDF plotted from it if any, then each PDF
-    with no DWG."""
+    with no DWG. ``plotted`` are the PDFs the laptop plotted on request, in Dropbox/Vellum/Plots: each is its sheet's
+    PDF, ``pairedBy`` "plotted", the newest of its sheet's PDFs shown and the rest in ``otherPdfs``."""
     project_of = {k: projects.project_of(r.path) for k, r in records.items()}
     dwgs = [k for k, r in records.items() if r.kind == "dwg"]
     pdfs = [k for k, r in records.items() if r.kind == "pdf"]
@@ -96,6 +100,13 @@ def build_entries(records: dict[str, Record], projects: ProjectFinder) -> list[d
     plots: dict[str, list[tuple[str, str]]] = {}
     for pdf_key, p in pairs.items():
         plots.setdefault(p.dwg_key, []).append((pdf_key, p.rule))
+    if plotted:
+        records = dict(records)
+        for plot in plotted:
+            if plot.sheet in sheets:
+                key = plot.path.lower()
+                records[key] = plot.record()
+                plots.setdefault(plot.sheet, []).append((key, PLOTTED))
 
     entries = []
     for sheet_key, (dwg_key, sheet) in sheets.items():

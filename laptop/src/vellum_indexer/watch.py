@@ -2,7 +2,8 @@
 
 Changes are gathered until the folder has been quiet for ``quiet`` seconds (2 by default), or for at most
 ``max_wait`` seconds (30) while changes keep coming, then handed to the indexer at once. Changes inside
-Dropbox/Vellum (the index itself, canvases) are not drawings and are left out by the skip rules.
+Dropbox/Vellum (the index itself, canvases) are not drawings and are left out by the skip rules, except a plot request
+arriving in Dropbox/Vellum/Plots/requests: that is not debounced, and is answered ahead of anything waiting.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from vellum_indexer import files
+from vellum_indexer.plot_requests import request_name
 
 log = logging.getLogger("vellum_indexer")
 
@@ -51,13 +53,19 @@ class Debouncer:
             return out
 
 
-class DropboxEvents:
-    """Turns watchdog's events into Dropbox paths for the debouncer, keeping only what the indexer cares about."""
+PLOT_REQUESTS = "/vellum/plots/requests/"
 
-    def __init__(self, root: Path, rules: files.SkipRules, debouncer: Debouncer):
+
+class DropboxEvents:
+    """Turns watchdog's events into Dropbox paths for the debouncer, keeping only what the indexer cares about. A plot
+    request arriving calls ``on_plot_request`` at once."""
+
+    def __init__(self, root: Path, rules: files.SkipRules, debouncer: Debouncer,
+                 on_plot_request: Callable[[], None] | None = None):
         self.root = root
         self.rules = rules
         self.debouncer = debouncer
+        self.on_plot_request = on_plot_request
 
     def _db(self, raw: str | bytes) -> str | None:
         path = Path(raw.decode() if isinstance(raw, bytes) else raw)
@@ -71,6 +79,12 @@ class DropboxEvents:
         for raw in [src] + ([dest] if dest else []):
             db = self._db(raw)
             if db is None or db == "/":
+                continue
+            lower = db.lower()
+            if lower.startswith(PLOT_REQUESTS):
+                if (not is_directory and event_type != "deleted" and "/" not in lower[len(PLOT_REQUESTS):]
+                        and request_name(db.rsplit("/", 1)[1]) is not None and self.on_plot_request):
+                    self.on_plot_request()
                 continue
             if is_directory:
                 if event_type == "modified" or self.rules.skips_folder(db):
@@ -95,23 +109,36 @@ def watch(
     rescan_hours: float,
     stop: threading.Event | None = None,
     retry_minutes: float = 10.0,
+    check_in_seconds: float | None = None,
 ) -> None:
     """Scan, then watch until ``stop`` is set, updating the index from each debounced batch of changes."""
     from watchdog.observers import Observer
 
+    from vellum_indexer import __version__
+    from vellum_indexer.plot_requests import CHECK_IN_SECONDS, CheckIn
+
     stop = stop or threading.Event()
     debouncer = Debouncer(quiet, max_wait)
-    handler = DropboxEvents(indexer.root, indexer.rules, debouncer)
+    handler = DropboxEvents(indexer.root, indexer.rules, debouncer, on_plot_request=indexer.plot_wanted.set)
     observer = Observer()
     observer.schedule(handler, str(indexer.root), recursive=True)
     observer.start()  # before the scan, so nothing changed during it is missed
     log.info("Watching %s", indexer.root)
     indexer.poll_changes = lambda: debouncer.take() if debouncer.due() else None
+    check_in = CheckIn(indexer.plot_folder, __version__, check_in_seconds or CHECK_IN_SECONDS)
+    check_in.start()
+    indexer.check_in = check_in
     try:
+        indexer.answer_plot_requests()  # requests that came while the laptop was off, before the scan's listing
         indexer.scan()
         next_rescan = time.monotonic() + rescan_hours * 3600
         next_retry = time.monotonic() + retry_minutes * 60
-        while not stop.wait(0.5):
+        while not stop.is_set():
+            indexer.plot_wanted.wait(0.5)  # wakes at once for a plot request, else every half second
+            if stop.is_set():
+                break
+            if indexer.plots_due():
+                indexer.answer_plot_requests()
             if debouncer.due():
                 paths, folders = debouncer.take()
                 started = time.monotonic()
@@ -131,5 +158,6 @@ def watch(
                 observer.start()
                 indexer.scan()
     finally:
+        check_in.close()
         observer.stop()
         observer.join(timeout=5)

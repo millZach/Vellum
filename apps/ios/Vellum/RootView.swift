@@ -32,23 +32,29 @@ struct RootView: View {
             }
         }
         .background(WindowAppearance(style: (AppearanceSetting(rawValue: appearance) ?? .default).interfaceStyle))
-        // A plot that came in while Zach was elsewhere calls him back to it (#70), at the top of whichever tab is
-        // showing. It takes its own room at the top rather than floating over the screen, so it never covers a control:
-        // every screen's title row, buttons and search field, and an open canvas's top bar and rails (which lay
-        // themselves out from the safe area), move down below it while it shows, folded and unfolded. The canvas itself
-        // ignores the safe area, so it isn't resized.
-        .safeAreaInset(edge: .top, spacing: 0) {
+        // A plot that came in while Zach was elsewhere calls him back to it (#70): floating at the top of whichever tab
+        // is showing, shifted right into the free space beside the screen's title row and clear of its buttons and of
+        // the tab rail (Zach, 2026-11-08). Nothing on the screen moves for it. Where it goes on each screen is
+        // `PlotBannerPlace`.
+        .overlay {
             if let entry = drawings.plotBanner {
-                PlotBanner(entry: entry,
-                           view: {
-                               selection = .drawings
-                               drawings.viewBanner()
-                           },
-                           dismiss: { drawings.plotBanner = nil })
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                GeometryReader { proxy in
+                    let place = PlotBannerPlace(size: proxy.size, safe: proxy.safeAreaInsets, tab: selection,
+                                                canvasOpen: canvases.openEditor != nil,
+                                                placingSheet: canvases.openEditor?.placingSheet != nil)
+                    PlotBanner(entry: entry,
+                               view: {
+                                   selection = .drawings
+                                   drawings.viewBanner()
+                               },
+                               dismiss: { drawings.plotBanner = nil })
+                        .frame(maxWidth: place.maxWidth, alignment: .trailing)
+                        .padding(.top, place.top)
+                        .padding(.trailing, place.trailing)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
+                .ignoresSafeArea()
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.2), value: drawings.plotBanner?.id)

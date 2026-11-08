@@ -179,7 +179,9 @@ struct PlotBanner: View {
             Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).foregroundStyle(DrawingIndexColors.ok)
             Text("\(Text(entry.number ?? entry.name).bold()) is plotted and ready to view")
                 .font(.system(size: 13))
-                .lineLimit(1)
+                // One line where there is room; two on the cover screen, so it keeps clear of the rails.
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             Button(action: view) { Text("View").bold() }
                 .buttonStyle(ChromePrimaryButtonStyle())
                 .font(.system(size: 13))
@@ -196,5 +198,49 @@ struct PlotBanner: View {
         .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("plot-banner")
+    }
+}
+
+/// Where the plot banner floats on each screen (#70, Zach on 2026-11-08: "Keep it at the top, but shift it right so it
+/// never covers the + or other buttons"), from the layouts in the captures. It is always right-aligned against the tab
+/// rail, which floats at the right edge, with nothing on the screen moved for it.
+///
+/// - Unfolded, on the Canvases list, the Drawings tab, Jobs and Meetings: at the top, right of the list column (the
+///   Canvases list's + ends about 350 pt in, the Drawings search column at 388), in the space above the preview or the
+///   viewer, where there is no control.
+/// - On an open canvas, unfolded or folded: under its top bar, whose actions (Add sheet, Record, Send) fill the top
+///   right, and clear of the tool rail on the left; lower again while the sheet-placing pill shows.
+/// - Folded, the cover screen has no free space beside a title row wide enough for it, so it sits under the title row:
+///   over the top of the Canvases list's first row, and over the Drawings search field. On Jobs and Meetings, which have
+///   nothing at the top, it stays at the top.
+struct PlotBannerPlace {
+    let top: CGFloat
+    let trailing: CGFloat
+    let maxWidth: CGFloat
+
+    init(size: CGSize, safe: EdgeInsets, tab: AppTab, canvasOpen: Bool, placingSheet: Bool) {
+        let folded = size.width < 700
+        trailing = max(92, safe.trailing + 8)
+        let leading: CGFloat
+        if tab == .canvases, canvasOpen {
+            // The canvas's top bar ends about 50 pt down unfolded, and wraps taller folded; the tool rail is 60 wide.
+            top = safe.top + (folded ? 104 : 60) + (placingSheet ? 52 : 0)
+            leading = safe.leading + 76
+        } else if !folded {
+            top = safe.top + 8
+            leading = 400
+        } else if tab == .canvases {
+            // Under the list's title row: its 14 pt margin and the 34 pt row.
+            top = safe.top + 56
+            leading = 16
+        } else if tab == .drawings {
+            // Under the large "Drawings" title.
+            top = safe.top + 66
+            leading = 16
+        } else {
+            top = safe.top + 8
+            leading = 16
+        }
+        maxWidth = max(200, size.width - trailing - leading)
     }
 }

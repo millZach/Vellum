@@ -277,7 +277,7 @@ The Duo waiting for its open plot requests: it sends each from the sync outbox, 
 _Avoid_: polling, poller, plot queue
 
 **Plot banner**:
-"E-201 is plotted and ready to view", with View, at the top of whichever tab is showing when a plot Zach asked for comes in and he isn't looking at that drawing in the drawing viewer. It takes its own room there, moving the screen's controls down, so it never covers one. View opens the drawing in the viewer.
+"E-201 is plotted and ready to view", with View, at the top of whichever tab is showing when a plot Zach asked for comes in and he isn't looking at that drawing in the drawing viewer. It floats there, shifted right of the title row's buttons and clear of the tab rail (under the top bar on a canvas; under the title row on the folded cover screen). View opens the drawing in the viewer.
 _Avoid_: notification, toast (a toast goes by itself)
 
 **Check-in**:

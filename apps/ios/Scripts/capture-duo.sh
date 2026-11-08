@@ -248,7 +248,7 @@ drawing_captures() {
 # (`--ui-plot`, Vellum/Drawings/DrawingIndexSetup.swift): plotting on the laptop, waiting for the laptop (its check-in
 # 12 minutes old), queued on this Duo (offline), the laptop's reason when it won't plot it, the viewer filled in with
 # the plot and its one line about missing references, and the banner at the top of the Canvases list after leaving
-# the viewer, with the list's + button and title row moved down clear of it.
+# the viewer, right of the list's + button, then the same folded, under the list's title row.
 viewer_captures() {
   data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
   rm -rf "$data/Documents/capture-index" "$data/Documents/viewer.txt"
@@ -269,6 +269,16 @@ viewer_captures() {
     capture viewer-plot-filled "$@" --ui-viewer E-201 --ui-plot done-warning
     # The banner over the Canvases list, clear of its + (new canvas) button and every other control.
     capture plot-banner-canvases-list "$@" --ui-reset --ui-seed-list --ui-viewer E-201 --ui-plot done --ui-plot-leave
+    # The same, folded (the cover screen, display 1): under the list's title row.
+    xcrun simctl spawn "$udid" "$tool" -position=closed -duration=0.3 -wait >/dev/null
+    sleep 1
+    xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+    xcrun simctl launch "$udid" "$bundle" "$@" --ui-reset --ui-seed-list --ui-viewer E-201 --ui-plot done --ui-plot-leave >/dev/null
+    sleep "$WAIT"
+    file="$out/folded-plot-banner-canvases-list-$appearance.png"
+    xcrun simctl io "$udid" screenshot --display=1 "$file"
+    printf '%s ' "$file"; sips -g pixelWidth -g pixelHeight "$file" | tail -2 | tr '\n' ' '; echo
+    xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
     WAIT=$saved_wait
   done
   appearance=light

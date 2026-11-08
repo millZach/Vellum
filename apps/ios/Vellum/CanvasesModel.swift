@@ -166,13 +166,26 @@ final class CanvasesModel {
     /// For debug launches that open their own canvas.
     func finishLaunch() { hasLaunched = true }
 
-    func newCanvas() async {
+    /// Makes a canvas and opens it: empty, or (Open in a new canvas from the drawing viewer, #69) named `name` with a
+    /// sheet already in its middle, its PDF and the sheet saved before the canvas is listed, and the view on the sheet.
+    func newCanvas(name: String? = nil, with pending: CanvasEditor.PendingSheet? = nil) async {
         guard let library else { return }
+        let sheet = pending?.sheet, pdf = pending?.pdf, keptName = pending?.keptName
         do {
-            let made = try await Task.detached { try library.create() }.value
+            let made = try await Task.detached { () -> CanvasSummary in
+                if let sheet, let pdf, let keptName {
+                    return try library.create(name: name, sheet: sheet, pdf: pdf, keptName: keptName)
+                }
+                return try library.create(name: name)
+            }.value
             await refresh()
             selection = made.id
-            await open(made.id)
+            var startingView: CanvasEditor.StartingView?
+            if let size = sheet?.size {
+                startingView = .region(CanvasRect(origin: CanvasPoint(x: -size.width / 2, y: -size.height / 2),
+                                                  size: size))
+            }
+            await open(made.id, startingView: startingView)
         } catch {
             problem = "The new canvas could not be made: \(error.localizedDescription)"
         }
@@ -199,6 +212,29 @@ final class CanvasesModel {
         } catch {
             problem = "That canvas could not be opened: \(error)"
         }
+    }
+
+    // MARK: From the drawing viewer (#69)
+
+    /// Place on a canvas: opens the canvas picked (closing the one open, if another), where the sheet waits as a
+    /// true-size outline for a tap, exactly as Add sheet's last step leaves it.
+    func place(_ pending: CanvasEditor.PendingSheet, on id: UUID) async {
+        testEditor = nil
+        if openEditor?.canvasID != id {
+            if openEditor != nil { closeCanvas() }
+            await open(id)
+        }
+        guard let editor = openEditor, editor.canvasID == id else { return }
+        editor.cancelPlacing()
+        editor.beginPlacing(pending)
+    }
+
+    /// Open in a new canvas: closes the canvas open, if one is, and makes a canvas named after the drawing with the
+    /// sheet in its middle, at its scale, as one step (`newCanvas`).
+    func openNewCanvas(named name: String, with pending: CanvasEditor.PendingSheet) async {
+        testEditor = nil
+        if openEditor != nil { closeCanvas() }
+        await newCanvas(name: name, with: pending)
     }
 
     /// Opens the test canvas, built off the main thread, over whatever canvas is open, or closes it and goes back to

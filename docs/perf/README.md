@@ -16,7 +16,7 @@ One JSON file per area, so work on different areas never conflicts:
 | Canvas rendering, input and eraser | `baselines/canvas-rendering.json` | #21 |
 | Saving ink on the Duo | `baselines/storage.json` | #9 |
 | Dropbox | `baselines/dropbox.json` | #20, #10 |
-| Placed sheets: tiles drawn and kept, PDF downloads | `baselines/sheets.json` | #11 |
+| Placed sheets: tiles drawn and kept, PDF downloads, and the drawing viewer's time to its first page | `baselines/sheets.json` | #11, #69 |
 | Syncing canvases to Dropbox: requests and bytes per sync, the folder check and re-upload after a deleted folder, leaving a canvas | `baselines/sync.json` | #12, #37 |
 | The laptop indexer: files read and index files written per rescan and per change, updates per folder copy, scan timings on a made-up 5,000-file Dropbox | `baselines/laptop-indexer.json` | #66 |
 | The Duo's copy of the drawing index and its search: requests and bytes per refresh, thumbnails per refresh and per row, the search's memory and entries looked at per keystroke on a made-up 20,000-drawing index, and its load, keystroke and full-scan times | `baselines/drawing-index.json` | #68 |

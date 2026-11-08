@@ -23,7 +23,8 @@ struct RootView: View {
                         CanvasesTab(model: canvases)
                             .environment(canvases)
                     } else if tab == .drawings {
-                        DrawingsScreen(index: drawings)
+                        DrawingsScreen(index: drawings,
+                                       handoff: DrawingHandoff(canvases: canvases, showCanvases: { selection = .canvases }))
                     } else {
                         PlaceholderScreen(tab: tab)
                     }

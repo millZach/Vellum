@@ -105,7 +105,7 @@ benchmark() {
 
 # PART splits the work between CI jobs (the captures job outgrew its 45 minutes with #8): "captures" runs every capture
 # and the Debug benchmark, "sheets" the sheet captures (#11, their own job so the captures job stays under its
-# hour), the sync captures (#12) and the drawing tools' captures (#40), "release-benchmark" only the optimised build's benchmark; unset, it runs them all.
+# hour), the drawing viewer's (#69), the sync captures (#12) and the drawing tools' captures (#40), "release-benchmark" only the optimised build's benchmark; unset, it runs them all.
 part=${PART:-all}
 
 # Placing sheets (#11), in light and dark, on the made-up Dropbox (`--ui-dropbox sheets`) and made-up PDFs
@@ -222,8 +222,46 @@ drawing_captures() {
   done
 }
 
+# The drawing viewer (#69), in light and dark, on the laptop indexer's made-up index served by a made-up Dropbox that
+# holds a made-up PDF at each PDF path it names (`--ui-index fixture --ui-viewer`, Vellum/Drawings/DrawingIndexSetup.swift):
+# M-501's three pages open in the viewer beside the list; the Place on a canvas picker over made-up canvases, newest
+# first; and the Canvases tab after picking the newest, the 1/4" M-101 waiting as a true-size outline for a tap. Then,
+# in light, the time from a tap to the first page of a made-up twelve-page E-size set already on the Duo, three opens,
+# into viewer-timing.json for perf-compare.py. viewer.txt logs what each step did.
+viewer_captures() {
+  data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
+  rm -rf "$data/Documents/capture-index" "$data/Documents/viewer.txt"
+  mkdir -p "$data/Documents"
+  cp -R ../../laptop/tests/fixtures/drawing-index "$data/Documents/capture-index"
+  for appearance in light dark; do
+    xcrun simctl ui "$udid" appearance "$appearance"
+    saved_wait=${WAIT:-6}; WAIT=${VIEWER_WAIT:-9}
+    set -- --ui-tab drawings --ui-dropbox folders --ui-index fixture
+    capture viewer "$@" --ui-viewer M-501
+    capture viewer-picker "$@" --ui-reset --ui-seed-list --ui-viewer M-101 --ui-viewer-step picker
+    capture viewer-placing "$@" --ui-reset --ui-seed-list --ui-viewer M-101 --ui-viewer-step place
+    WAIT=$saved_wait
+  done
+  appearance=light
+  xcrun simctl ui "$udid" appearance light
+  xcrun simctl spawn "$udid" "$tool" -position=open -duration=0.3 -wait >/dev/null
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+  rm -f "$data/Documents/viewer-timing.json"
+  xcrun simctl launch "$udid" "$bundle" --ui-tab drawings --ui-dropbox folders --ui-index fixture --ui-viewer-timing >/dev/null
+  waited=0
+  while [ "$waited" -lt 150 ] && ! grep -q '^done' "$data/Documents/viewer.txt" 2>/dev/null; do
+    sleep 3; waited=$((waited + 3))
+  done
+  shot viewer-e-size
+  cp "$data/Documents/viewer-timing.json" "$out/viewer-timing.json" 2>/dev/null || true
+  echo "The drawing viewer (made-up index and PDFs):"
+  cat "$data/Documents/viewer.txt" 2>/dev/null | tee "$out/viewer.txt" || echo "The app wrote no viewer.txt"
+  xcrun simctl terminate "$udid" "$bundle" >/dev/null 2>&1 || true
+}
+
 if [ "$part" = sheets ]; then
   sheet_captures
+  viewer_captures
   sync_captures
   drawing_captures
   exit 0

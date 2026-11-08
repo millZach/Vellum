@@ -44,10 +44,13 @@ public struct DropboxHTTPRequest: Sendable, Equatable {
 public struct DropboxHTTPResponse: Sendable, Equatable {
     public var status: Int
     public var body: Data
+    /// The reply's headers, their names in lower case. Only a download's `dropbox-api-result` is read (#69).
+    public var headers: [String: String]
 
-    public init(status: Int, body: Data) {
+    public init(status: Int, body: Data, headers: [String: String] = [:]) {
         self.status = status
         self.body = body
+        self.headers = headers
     }
 }
 
@@ -55,6 +58,17 @@ public struct DropboxHTTPResponse: Sendable, Equatable {
 /// connection; tests answer from a script.
 public protocol DropboxTransport: Sendable {
     func send(_ request: DropboxHTTPRequest) async throws -> DropboxHTTPResponse
+    /// Sends one request, telling `progress` how much of the reply has come, from 0 to 1, as it comes: for a large
+    /// PDF's download (#69). A transport that can't tell sends it as `send(_:)` does and says nothing.
+    func send(_ request: DropboxHTTPRequest, progress: @escaping @Sendable (Double) -> Void) async throws
+        -> DropboxHTTPResponse
+}
+
+extension DropboxTransport {
+    public func send(_ request: DropboxHTTPRequest, progress: @escaping @Sendable (Double) -> Void) async throws
+        -> DropboxHTTPResponse {
+        try await send(request)
+    }
 }
 
 /// Where the tokens are kept: the iOS Keychain in the app, memory in tests. Never UserDefaults or a file.

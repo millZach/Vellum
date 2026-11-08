@@ -74,18 +74,51 @@ struct CachesListingStore: DropboxListingStore {
 }
 
 /// Sends VellumCore's Dropbox requests with an ephemeral URLSession, so no reply carrying a token is cached on disk.
-/// No connection becomes `DropboxError.offline`.
+/// No connection becomes `DropboxError.offline`. A download that reports progress (a drawing's PDF, #69) goes to a
+/// temporary file rather than memory as it comes, and is read back once whole.
 struct URLSessionDropboxTransport: DropboxTransport {
     private let session = URLSession(configuration: .ephemeral)
 
     func send(_ request: DropboxHTTPRequest) async throws -> DropboxHTTPResponse {
+        try await Self.mapErrors {
+            let (data, response) = try await session.data(for: urlRequest(request))
+            return Self.response(response, data)
+        }
+    }
+
+    func send(_ request: DropboxHTTPRequest, progress: @escaping @Sendable (Double) -> Void) async throws
+        -> DropboxHTTPResponse {
+        try await Self.mapErrors {
+            let delegate = DownloadProgress(progress)
+            let (file, response) = try await session.download(for: urlRequest(request), delegate: delegate)
+            defer { try? FileManager.default.removeItem(at: file) }
+            let data = try Data(contentsOf: file)
+            progress(1)
+            return Self.response(response, data)
+        }
+    }
+
+    private func urlRequest(_ request: DropboxHTTPRequest) -> URLRequest {
         var urlRequest = URLRequest(url: request.url, timeoutInterval: 30)
         urlRequest.httpMethod = request.method
         urlRequest.httpBody = request.body
         for (name, value) in request.headers { urlRequest.setValue(value, forHTTPHeaderField: name) }
+        return urlRequest
+    }
+
+    /// The status, the body and the headers, their names in lower case.
+    private static func response(_ response: URLResponse, _ data: Data) -> DropboxHTTPResponse {
+        let http = response as? HTTPURLResponse
+        var headers: [String: String] = [:]
+        for (name, value) in http?.allHeaderFields ?? [:] {
+            if let name = name as? String, let value = value as? String { headers[name.lowercased()] = value }
+        }
+        return DropboxHTTPResponse(status: http?.statusCode ?? 0, body: data, headers: headers)
+    }
+
+    private static func mapErrors(_ send: () async throws -> DropboxHTTPResponse) async throws -> DropboxHTTPResponse {
         do {
-            let (data, response) = try await session.data(for: urlRequest)
-            return DropboxHTTPResponse(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
+            return try await send()
         } catch let error as URLError {
             switch error.code {
             case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff,
@@ -98,6 +131,34 @@ struct URLSessionDropboxTransport: DropboxTransport {
             }
         }
     }
+}
+
+/// Tells a download's progress as it comes, at most once per percent.
+private final class DownloadProgress: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let report: @Sendable (Double) -> Void
+    private let lock = NSLock()
+    private var observation: NSKeyValueObservation?
+    private var told = -1.0
+
+    init(_ report: @escaping @Sendable (Double) -> Void) { self.report = report }
+
+    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+        let observation = task.progress.observe(\.fractionCompleted, options: [.new]) { [weak self] progress, _ in
+            self?.tell(progress.fractionCompleted)
+        }
+        lock.withLock { self.observation = observation }
+    }
+
+    private func tell(_ fraction: Double) {
+        let shouldTell: Bool = lock.withLock {
+            guard fraction >= told + 0.01 || (fraction >= 1 && told < 1) else { return false }
+            told = fraction
+            return true
+        }
+        if shouldTell { report(min(max(fraction, 0), 1)) }
+    }
+
+    deinit { observation?.invalidate() }
 }
 
 #if DEBUG

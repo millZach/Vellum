@@ -28,3 +28,7 @@ Syncing canvases adds three endpoints to `DropboxSession`, each one request, ren
 ## Amendment (#37): listing `Vellum/` for the folder check, and strict conflicts
 
 The sync engine's folder check (ADR-0003's #37 amendment) uses the two listing endpoints the Drawings tab already does, recursively and without the kept listings: `files/list_folder` on `Vellum/` with `recursive` on, following `has_more`, the first time (a path not found means no `Vellum/`), then `files/list_folder/continue` with the cursor kept in the sync ledger, which answers what changed since, deletions included. A `reset`, or the folder gone, means list it again. An upload in `update` mode now sends `strict_conflict`, so a file removed in Dropbox is a conflict rather than written as new; `add` and `overwrite` keep it off, so a sheet's PDF already there with the same bytes is left as it is. No new secret.
+
+## Amendment (#69): a download's metadata and progress
+
+A reply now carries its headers (names in lower case) beside its status and body, so a download by path (`downloadPDF(path:progress:)`) reads the content hash Dropbox gives in `Dropbox-API-Result` rather than hashing a large PDF on the Duo. A transport may also tell a download's progress; the app's does, writing the download to a temporary file as it comes and reading it back once whole, so a large PDF shows how much has come. Everything else is one request as before.

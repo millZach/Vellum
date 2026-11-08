@@ -197,6 +197,36 @@ extension DropboxSession {
         return response.body
     }
 
+    /// A drawing's PDF at `path` as it is now (`files/download`, one request), with the content hash Dropbox gives for
+    /// exactly those bytes in the reply's `Dropbox-API-Result` (#69): the drawing index names its PDF by path and the
+    /// hash it had when the laptop read it, so the bytes that came down are kept under the hash Dropbox says they have,
+    /// even if the PDF changed since. `progress` hears how much of it has come. Nil when nothing is at `path`.
+    public func downloadPDF(path: String, progress: (@Sendable (Double) -> Void)? = nil) async throws(DropboxError)
+        -> DropboxDownload? {
+        let started = generation
+        guard isSignedIn else { throw .notSignedIn }
+        guard let header = Self.apiArgument(["path": path]) else { throw .unexpectedReply }
+        let response = try await authorized(started: started, acceptingConflict: true, progress: progress) { tokens in
+            DropboxHTTPRequest(url: DropboxEndpoint.download, headers: [
+                "Authorization": "Bearer \(tokens.accessToken)",
+                "Dropbox-API-Arg": header,
+            ])
+        }
+        if response.status == 409 {
+            guard Self.summary(response).contains("not_found") else { throw .unexpectedReply }
+            return nil
+        }
+        struct Result: Decodable {
+            let content_hash: String?
+            let size: Int?
+        }
+        let result = response.headers["dropbox-api-result"].flatMap {
+            try? JSONDecoder().decode(Result.self, from: Data($0.utf8))
+        }
+        if let size = result?.size, size != response.body.count { throw .unexpectedReply }
+        return DropboxDownload(bytes: response.body, contentHash: result?.content_hash)
+    }
+
     /// What changed under the listed folder since `cursor` (`files/list_folder/continue`, following its paging), in
     /// Dropbox's order, deletions included; nil when Dropbox can't say (the cursor was reset, or the folder is gone),
     /// so the folder has to be listed again (#37).
@@ -274,5 +304,16 @@ extension DropboxSession {
             }
         }
         return out
+    }
+}
+
+/// A file downloaded whole, with the content hash Dropbox gave for its bytes, or nil when the reply didn't say.
+public struct DropboxDownload: Sendable, Equatable {
+    public var bytes: Data
+    public var contentHash: String?
+
+    public init(bytes: Data, contentHash: String?) {
+        self.bytes = bytes
+        self.contentHash = contentHash
     }
 }

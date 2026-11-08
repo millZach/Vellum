@@ -143,8 +143,11 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Capture placing sheets, the sync status and the drawing tools unfolded, in light and dark
+      - name: Capture placing sheets, the drawing viewer, the sync status and the drawing tools unfolded, in light and dark
         run: PART=sheets sh apps/ios/Scripts/capture-duo.sh .build-captures
+      - name: Compare the drawing viewer's time to first page with the baseline
+        if: always()
+        run: python3 apps/ios/Scripts/perf-compare.py sheets apps/ios/.build-captures/viewer-timing.json
       - name: Keep the captures
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -24,6 +24,57 @@ enum MadeUpPDF {
                            size: data(index).count, contentHash: file.contentHash, rev: "madeup\(index)")
     }
 
+    /// A made-up set of E-size (44 × 34) pages for the viewer's time to first page (#69): on each, a border, a title
+    /// block with an invented number, and a dense made-up plan of some 3,000 lines, as a busy plotted sheet has.
+    static func eSizeSet(pages: Int) -> Data {
+        let bounds = CGRect(x: 0, y: 0, width: 44 * 72, height: 34 * 72)
+        let renderer = UIGraphicsPDFRenderer(bounds: bounds)
+        return renderer.pdfData { context in
+            var seed: UInt64 = 2026_1107
+            func next() -> CGFloat {
+                seed = seed &* 6364136223846793005 &+ 1442695040888963407
+                return CGFloat(Double(seed >> 40) / Double(1 << 24))
+            }
+            let font = UIFont(name: "Helvetica", size: 14) ?? UIFont.systemFont(ofSize: 14)
+            for page in 0..<pages {
+                context.beginPage()
+                let c = context.cgContext
+                c.setStrokeColor(UIColor.black.cgColor)
+                c.setLineWidth(3)
+                c.stroke(bounds.insetBy(dx: 36, dy: 36))
+                c.stroke(CGRect(x: bounds.maxX - 36 - 7 * 72, y: bounds.maxY - 36 - 3 * 72, width: 7 * 72, height: 3 * 72))
+                c.setLineWidth(0.8)
+                let plan = CGRect(x: 72, y: 72, width: bounds.width - 9 * 72, height: bounds.height - 2 * 72)
+                // Walls: a grid of rooms.
+                for i in 0...30 {
+                    let x = plan.minX + plan.width * CGFloat(i) / 30
+                    let y = plan.minY + plan.height * CGFloat(i) / 30
+                    c.move(to: CGPoint(x: x, y: plan.minY)); c.addLine(to: CGPoint(x: x, y: plan.maxY))
+                    c.move(to: CGPoint(x: plan.minX, y: y)); c.addLine(to: CGPoint(x: plan.maxX, y: y))
+                }
+                // Equipment and runs: short lines and small circles scattered over it.
+                for _ in 0..<2_800 {
+                    let x = plan.minX + next() * plan.width, y = plan.minY + next() * plan.height
+                    c.move(to: CGPoint(x: x, y: y))
+                    c.addLine(to: CGPoint(x: x + (next() - 0.5) * 60, y: y + (next() - 0.5) * 60))
+                }
+                c.strokePath()
+                for _ in 0..<300 {
+                    let x = plan.minX + next() * plan.width, y = plan.minY + next() * plan.height
+                    c.strokeEllipse(in: CGRect(x: x, y: y, width: 9, height: 9))
+                }
+                for i in 0..<120 {
+                    let x = plan.minX + next() * plan.width, y = plan.minY + next() * plan.height
+                    ("TAG-\(page + 1)\(i)" as NSString).draw(at: CGPoint(x: x, y: y),
+                                                         withAttributes: [.font: font, .foregroundColor: UIColor.black])
+                }
+                let title = "X-90\(page + 1)  MADE-UP E-SIZE SET (EXAMPLE)  SCALE: 1/8\" = 1'-0\""
+                (title as NSString).draw(at: CGPoint(x: bounds.maxX - 36 - 6.8 * 72, y: bounds.maxY - 36 - 1.5 * 72),
+                                         withAttributes: [.font: font, .foregroundColor: UIColor.black])
+            }
+        }
+    }
+
     private static func draw(_ file: MadeUpSheets.File) -> Data {
         let first = file.pages[0].paper
         let renderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: first.width.inches * 72,
@@ -130,7 +181,7 @@ enum DebugSheetSource {
 
     static func pending(file index: Int, page: Int, scale: Sheet.Scale? = nil) async -> CanvasEditor.PendingSheet? {
         let file = MadeUpPDF.dropboxFile(index)
-        guard let pdfs = try? SheetPDFs.inCaches(),
+        guard let pdfs = SheetPDFs.app,
               let url = try? await pdfs.pdf(for: file, download: { MadeUpPDF.data(index) }) else { return nil }
         let reader = SheetPDFReader(url: url)
         guard let info = await reader.info(page: page) else { return nil }
@@ -146,10 +197,10 @@ enum DebugSheetSource {
         }
         log("read \(info.reading.sheetNumber ?? "no number") \(info.reading.caption), placed at \(chosen), "
               + "areas \(info.reading.areas(placedAt: chosen).map(\.label)), invertsBadly \(invertsBadly)")
-        let sheet = Sheet(paper: info.paper, scale: chosen,
-                          page: SheetPage(file: file.keptName, name: file.name, path: file.path, index: page,
-                                          number: info.reading.sheetNumber),
-                          areas: info.reading.areas(placedAt: chosen), invertsBadly: invertsBadly)
+        let sheet = info.reading.sheet(placedAt: chosen,
+                                       page: SheetPage(file: file.keptName, name: file.name, path: file.path,
+                                                       index: page, number: info.reading.sheetNumber),
+                                       invertsBadly: invertsBadly)
         return CanvasEditor.PendingSheet(sheet: sheet, pdf: url, keptName: file.keptName)
     }
 }

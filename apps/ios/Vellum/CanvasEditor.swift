@@ -172,6 +172,12 @@ final class CanvasEditor {
         case .region(let rect):
             viewport.fit(rect, insets: Self.chromeInsets)
         }
+        // A sheet handed over before the view had a size (Place on a canvas from the drawing viewer, #69) is shown
+        // now, as Add sheet shows one.
+        if let placing = placingSheet {
+            fitForPlacing(placing.sheet)
+            onPlacingChange?()
+        }
     }
 
     /// Starts a stroke where the Pencil touched down, with the pen, colour, weight and zoom as they are now; nil when
@@ -506,10 +512,13 @@ final class CanvasEditor {
 
     /// What a sheet covers on the canvas, for the confirm step and the outline: `144'-0" × 96'-0"` in the canvas
     /// units, or for an NTS sheet its paper at printed size.
-    func covers(_ sheet: Sheet) -> String {
+    func covers(_ sheet: Sheet) -> String { Self.covers(sheet, units: canvas.units) }
+
+    /// What a sheet covers on a canvas in `units`, for a canvas not open yet (the drawing viewer, #69).
+    static func covers(_ sheet: Sheet, units: CanvasUnits) -> String {
         if sheet.isNotToScale { return "\(sheet.paper.name) at printed size" }
         let size = sheet.size
-        return "\(canvas.units.format(size.width)) × \(canvas.units.format(size.height))"
+        return "\(units.format(size.width)) × \(units.format(size.height))"
     }
 
     /// Starts placing a confirmed sheet: the view zooms out to show where it could go beside everything else, and a
@@ -518,13 +527,20 @@ final class CanvasEditor {
         select(.empty)
         placingSheet = pending
         toolStep = .placeSheet
-        let size = pending.sheet.size
+        // Before the view has a size there is nothing to fit to: `viewDidResize` fits it once there is.
+        guard hasPlacedView else { return }
+        fitForPlacing(pending.sheet)
+        onPlacingChange?()
+    }
+
+    /// Zooms out to show where a waiting sheet could go beside everything else.
+    private func fitForPlacing(_ sheet: Sheet) {
+        let size = sheet.size
         let centre = viewport.centre
         let room = CanvasRect(origin: CanvasPoint(x: centre.x - size.width * 0.8, y: centre.y - size.height * 0.8),
                               size: CanvasSize(width: size.width * 1.6, height: size.height * 1.6))
         viewport.fit(CanvasRect.union([room] + [extents].compactMap { $0 }) ?? room, insets: Self.chromeInsets,
                      fill: 0.92)
-        onPlacingChange?()
     }
 
     /// The sheet waiting to be placed, centred on a canvas point, as it would go there.

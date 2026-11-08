@@ -260,6 +260,10 @@ _Avoid_: cache (the system may clear Caches; the copy is not there), local index
 A short label on a row of the Drawings tab's search saying what opening that drawing will meet: "No PDF yet" (a DWG with no plot), "PDF only · no DWG", "Not read yet" (its file is an online-only file the laptop indexer has not read yet; a row with no title block fields shows its file name and folder instead) and, offline, "Not on this Duo" (its PDF has never been downloaded to the Duo).
 _Avoid_: badge, tag (a tag is the number shown while drawing), status
 
+**Drawing viewer**:
+What a tap on a row of the Drawings tab's search opens: the drawing's PDF, its pages and zoom, with its number, title, rev and scale from the drawing index, and **Place on a canvas** (an existing canvas, newest first, or a new one) and **Open in a new canvas**. Just looking makes no canvas. Its PDF is downloaded once into the same Duo copy Add sheet uses, so it opens offline after; offline, a drawing whose PDF was never opened on the Duo doesn't open and its row says "Not on this Duo". Placing from it goes through Add sheet's confirm step on the page shown, prefilled with the index's scale for Zach to confirm; an AS NOTED drawing (or one whose scale can't be read) asks for its scale; an NTS drawing is an NTS sheet. On an existing canvas the sheet then waits as a true-size outline for a tap; on a new canvas it is placed in the middle, saved with the canvas before the canvas is listed.
+_Avoid_: preview, reader, PDF view
+
 **Plot**:
 The PDF a drawing's DWG was plotted to, which the drawing index pairs with it: by the PDF's plot metadata naming the DWG, by the same name nearby, or by the same drawing number in the same project. A drawing with none has no PDF yet; a PDF with no DWG is "PDF only, no DWG".
 _Avoid_: print, export, sheet (a sheet is a placed PDF page)

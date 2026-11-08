@@ -23,10 +23,7 @@ public struct DropboxFile: Codable, Sendable, Equatable, Hashable, Identifiable 
     }
 
     /// The name the PDF is kept under on the Duo: its content hash, kept to letters, digits, `-` and `_`.
-    public var keptName: String {
-        let safe = contentHash.filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
-        return safe.isEmpty ? "pdf-" + String(rev.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }) : safe
-    }
+    public var keptName: String { SheetPDFs.keptName(contentHash: contentHash, rev: rev) }
 
     /// Whether a file name is a PDF's.
     static func isPDF(_ name: String) -> Bool { name.lowercased().hasSuffix(".pdf") }

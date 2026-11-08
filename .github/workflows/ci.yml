@@ -102,9 +102,9 @@ jobs:
   # Evidence, not part of the merge bar: four captures jobs on the iPhone Duo simulator (iOS 27.1), unfolded, in light and
   # dark, each on its own runner and simulator so that none nears its hour. Until #80 they were two jobs, "Duo simulator
   # captures" (now tabs and canvas) and "Duo sheet and sync captures" (now sheets and sync), which reached 50 and 58
-  # minutes. Each is about 25 minutes on a typical runner and about 32 on a slow one: about 1 minute building the Debug
-  # app, 4 to 6 booting the simulator, the rest capturing. A new capture goes in the job of its kind (capture-duo.sh's
-  # PART says which).
+  # minutes. On #80's run they took 27 to 35 minutes on runners slower than usual: about 1 minute building the Debug app,
+  # 4 to 7 booting the simulator, 21 to 27 capturing. A new capture goes in the job of its kind (capture-duo.sh's PART
+  # says which).
 
   # Every tab, the Canvases list and a kill-and-reopen, the Drawings tab's Dropbox states and its drawing search unfolded
   # and folded, and the Home Screen with Vellum's icon.

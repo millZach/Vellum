@@ -353,6 +353,143 @@ final class DrawingOpeningTests: XCTestCase {
         XCTAssertEqual(downloads.value, 1)
     }
 
+    // MARK: Found again by its path (review of #77)
+
+    /// An entry whose PDF is at `path`, with `hash` as the index has it.
+    private func indexed(path: String, hash: String?) -> DrawingEntry {
+        DrawingEntry(id: "e-210", path: "/Made-up/E-210.dwg", name: "E-210.dwg", number: "E-210", scale: "1:20",
+                     dwg: .init(path: "/Made-up/E-210.dwg"),
+                     pdf: .init(path: path, size: 99, contentHash: hash, pages: 1, paperInches: [36, 24]))
+    }
+
+    private func openedOnceThenOffline(indexHash: String?) async throws {
+        let pdfs = try tempPDFs()
+        let bytes = Data("%PDF-1.4 made-up, plotted again since the index".utf8)
+        let now = DropboxContentHash.of([UInt8](bytes))
+        let entry = indexed(path: "/Made-up/PDF/E-210.pdf", hash: indexHash)
+        let downloads = DownloadCounter()
+        let download: @Sendable () async throws -> DropboxDownload = {
+            downloads.add()
+            return DropboxDownload(bytes: bytes, contentHash: now)
+        }
+        // Never opened: online it downloads, offline it doesn't open.
+        XCTAssertEqual(DrawingOpening.decide(entry, online: false, pdfsOnThisDuo: [], pdfPathsOnThisDuo: pdfs.keptPaths()),
+                       .notOnThisDuo(DrawingOpening.pdf(for: entry)!))
+        let first = try await pdfs.pdf(at: entry.pdf!.path, contentHash: indexHash, size: 99, download: download)
+        XCTAssertEqual(first.keptName, now)
+        // Opened once: kept under the hash Dropbox gave, found by its path, online and off, with no second download.
+        let hashes = Set([now]), paths = pdfs.keptPaths()
+        XCTAssertEqual(paths, ["/made-up/pdf/e-210.pdf"])
+        let pdf = DrawingOpening.pdf(for: entry)!
+        XCTAssertEqual(DrawingOpening.decide(entry, online: false, pdfsOnThisDuo: hashes, pdfPathsOnThisDuo: paths),
+                       .openKept(pdf))
+        XCTAssertEqual(DrawingOpening.decide(entry, online: true, pdfsOnThisDuo: hashes, pdfPathsOnThisDuo: paths),
+                       .openKept(pdf))
+        XCTAssertFalse(DrawingMarker.of(entry, online: false, pdfsOnThisDuo: hashes, pdfPathsOnThisDuo: paths)
+            .contains(.notOnThisDuo))
+        let again = try await pdfs.pdf(at: "/made-up/PDF/E-210.PDF", contentHash: indexHash, size: 99, download: download)
+        XCTAssertEqual(again, first)
+        XCTAssertEqual(downloads.value, 1)
+        // A fresh cache over the same folder, as after a relaunch, remembers the path too.
+        let relaunched = SheetPDFs(folder: pdfs.folder)
+        XCTAssertEqual(relaunched.keptPaths(), paths)
+        XCTAssertEqual(relaunched.keptName(forPath: "/Made-up/PDF/E-210.pdf"), now)
+        let afterRelaunch = try await relaunched.pdf(at: entry.pdf!.path, contentHash: indexHash, size: 99,
+                                                     download: download)
+        XCTAssertEqual(afterRelaunch, first)
+        XCTAssertEqual(downloads.value, 1)
+    }
+
+    func testAPDFOpenedOnceWithAStaleIndexHashOpensAgainOfflineByItsPath() async throws {
+        try await openedOnceThenOffline(indexHash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+    }
+
+    func testAPDFOpenedOnceWithNoIndexHashOpensAgainOfflineByItsPath() async throws {
+        try await openedOnceThenOffline(indexHash: nil)
+    }
+
+    /// Add sheet and the viewer asking for one path at once start one download between them.
+    func testAddSheetAndTheViewerAskingForOnePathAtOnceShareOneDownload() async throws {
+        let pdfs = try tempPDFs()
+        let bytes = Data(repeating: 0x25, count: 2048)
+        let hash = DropboxContentHash.of([UInt8](bytes))
+        let file = DropboxFile(id: "id:1", name: "E-210.pdf", path: "/Made-up/PDF/E-210.pdf", size: bytes.count,
+                               contentHash: hash, rev: "r1")
+        let downloads = DownloadCounter()
+        async let fromAddSheet = pdfs.pdf(for: file) {
+            downloads.add()
+            try await Task.sleep(nanoseconds: 100_000_000)
+            return bytes
+        }
+        async let fromViewer = pdfs.pdf(at: "/made-up/pdf/e-210.pdf", contentHash: hash, size: bytes.count) {
+            downloads.add()
+            try await Task.sleep(nanoseconds: 100_000_000)
+            return DropboxDownload(bytes: bytes, contentHash: hash)
+        }
+        let (url, kept) = try await (fromAddSheet, fromViewer)
+        XCTAssertEqual(url, kept.url)
+        XCTAssertEqual(kept.keptName, file.keptName)
+        XCTAssertEqual(downloads.value, 1)
+        XCTAssertEqual(pdfs.bytesDownloaded, bytes.count)
+    }
+
+    // MARK: Zach confirms the scale (review of #77)
+
+    func testPlacingFromTheViewerConfirmsThePrefilledIndexScaleOrAsks() {
+        let quarter = Sheet.Scale.drawn(.architectural(inchesPerFoot: 0.25))
+        XCTAssertEqual(DrawingOpening.confirmation(for: IndexFixture.entry("M-101")).prefilled, quarter)
+        XCTAssertFalse(DrawingOpening.confirmation(for: IndexFixture.entry("M-101")).asks)
+        XCTAssertEqual(DrawingOpening.confirmation(for: IndexFixture.entry("E-210")).prefilled, .drawn(.ratio(20)))
+        XCTAssertEqual(DrawingOpening.confirmation(for: IndexFixture.entry("I-301")).prefilled, .notToScale)
+        XCTAssertNil(DrawingOpening.confirmation(for: IndexFixture.entry("M-501")).prefilled)
+        XCTAssertTrue(DrawingOpening.confirmation(for: IndexFixture.entry("M-501")).asks)
+        var unreadable = IndexFixture.entry("M-101")
+        unreadable.scale = "1/4 = 1"
+        XCTAssertTrue(DrawingOpening.confirmation(for: unreadable).asks)
+    }
+
+    // MARK: A new canvas with its sheet (review of #77)
+
+    func testANewCanvasIsMadeWithItsSheetSavedBeforeItIsListed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("vellum-new-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let library = CanvasLibrary(root: root.appendingPathComponent("Canvases"))
+        let pdf = root.appendingPathComponent("E-210.pdf")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let bytes = Data("%PDF-1.4 made-up E-210".utf8)
+        try bytes.write(to: pdf)
+        let reading = SheetReading.read([.at(31, 22.6, "SCALE: 1:20", width: 2.4, height: 0.14)], paper: .inches(36, by: 24))
+        let sheet = reading.sheet(placedAt: .drawn(.ratio(20)),
+                                  page: SheetPage(file: "madeupe210", name: "E-210.pdf", path: "/Made-up/E-210.pdf", index: 0),
+                                  invertsBadly: false)
+        let made = try library.create(name: "E-210 Pump house power plan", sheet: sheet, pdf: pdf, keptName: "madeupe210")
+        XCTAssertEqual(try library.list().map(\.id), [made.id])
+        XCTAssertEqual(made.name, "E-210 Pump house power plan")
+        let store = try library.openInk(made.id)
+        defer { store.closeFiles() }
+        let placed = try XCTUnwrap(store.session.sheets.first)
+        XCTAssertEqual(store.session.sheets.count, 1)
+        XCTAssertEqual(placed.scale, .drawn(.ratio(20)))
+        XCTAssertEqual(placed.size, CanvasSize(width: .inches(720), height: .inches(480)))
+        // In the middle of the canvas.
+        XCTAssertEqual(placed.origin, CanvasPoint(x: .inches(-360), y: .inches(-240)))
+        XCTAssertEqual(try Data(contentsOf: library.sheetPDF(named: "madeupe210", in: made.id)), bytes)
+        // Nothing half made is left beside it.
+        let names = try FileManager.default.contentsOfDirectory(atPath: library.root.path)
+        XCTAssertEqual(names, [made.id.uuidString])
+    }
+
+    func testANewCanvasWhoseSheetCantBeSavedIsNeverListed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("vellum-new-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let library = CanvasLibrary(root: root.appendingPathComponent("Canvases"))
+        let sheet = Sheet(paper: .inches(36, by: 24), scale: .drawn(.ratio(20)))
+        XCTAssertThrowsError(try library.create(name: "E-210", sheet: sheet, pdf: root.appendingPathComponent("gone.pdf"),
+                                                keptName: "gone"))
+        XCTAssertEqual(try library.list(), [])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.root.path), [])
+    }
+
     func testADownloadThroughTheSessionReadsTheHashDropboxGives() async throws {
         let dropbox = MadeUpDropbox()
         let bytes = [UInt8]("%PDF-1.4 made-up E-210".utf8)

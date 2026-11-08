@@ -92,6 +92,16 @@ enum DebugDrawingIndex {
 @MainActor
 enum DebugDrawingViewer {
     private static var drove = false
+    /// The confirm step the viewer last opened.
+    static weak var asked: AddSheetModel?
+
+    /// Waits for the confirm step to read its page, logs what it starts on, and taps its Place.
+    private static func confirm() async {
+        try? await Task.sleep(for: .seconds(1.5))
+        guard let asked else { return log("no confirm step") }
+        log("confirm step: \(asked.placeLabel), starting on \(asked.prefilled?.description ?? "a scale to pick")")
+        await asked.debugConfirm()
+    }
 
     static func log(_ line: String) {
         print("viewer: " + line)
@@ -117,14 +127,16 @@ enum DebugDrawingViewer {
             for _ in 0..<100 where canvases.summaries.isEmpty { try? await Task.sleep(for: .milliseconds(50)) }
             guard let newest = canvases.summaries.first else { return log("no canvas to place on") }
             log("placing on \(newest.name)")
-            await view.go(.canvas(newest.id, name: newest.name, units: newest.units))
+            view.go(.canvas(newest.id, name: newest.name, units: newest.units))
+            await confirm()
             for _ in 0..<60 where canvases.openEditor?.placingSheet == nil { try? await Task.sleep(for: .milliseconds(50)) }
             if let pending = canvases.openEditor?.placingSheet {
                 log("waiting to place \(pending.sheet.page?.title ?? "?") at \(pending.sheet.scale), covering "
                     + "\(canvases.openEditor?.covers(pending.sheet) ?? "?"), areas \(pending.sheet.areas.map(\.label))")
             }
         case "new":
-            await view.go(.newCanvas)
+            view.go(.newCanvas)
+            await confirm()
             guard let canvases = view.handoff?.canvases else { return }
             for _ in 0..<60 where canvases.openEditor?.sheets.isEmpty ?? true { try? await Task.sleep(for: .milliseconds(50)) }
             if let editor = canvases.openEditor, let sheet = editor.sheets.first {

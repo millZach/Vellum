@@ -93,6 +93,35 @@ public struct CanvasLibrary: Sendable {
     /// Makes a new, empty canvas. A blank or missing name becomes the next free "Untitled canvas" name.
     @discardableResult
     public func create(name: String? = nil, units: CanvasUnits = .default, now: Date = Date()) throws -> CanvasSummary {
+        try create(name: name, units: units, now: now, fill: nil)
+    }
+
+    /// Makes a canvas with a sheet already on it, centred on the origin, for Open in a new canvas from the drawing
+    /// viewer (#69): the sheet's PDF is kept in its `sheets` folder and the sheet is in its ink log, both written and
+    /// flushed inside the hidden folder the canvas is built in, before it is moved into place. So the canvas is never
+    /// listed without its sheet, and a crash leaves either nothing or the whole canvas.
+    public func create(name: String?, units: CanvasUnits = .default, now: Date = Date(), sheet: Sheet, pdf: URL,
+                       keptName: String) throws -> CanvasSummary {
+        try create(name: name, units: units, now: now) { building in
+            guard let bytes = try DurableFile.read(pdf) else { throw CocoaError(.fileNoSuchFile) }
+            let sheets = building.appendingPathComponent(Self.sheetsFolderName, isDirectory: true)
+            try FileManager.default.createDirectory(at: sheets, withIntermediateDirectories: true)
+            try DurableFile.writeAtomically(bytes, to: sheets.appendingPathComponent(keptName + ".pdf"))
+            try DurableFile.flushFolder(building)
+            var centred = sheet
+            let size = sheet.size
+            centred.origin = CanvasPoint(x: -size.width / 2, y: -size.height / 2)
+            var session = InkSession()
+            _ = session.addSheet(centred)
+            let store = try InkStore(folder: building)
+            defer { store.closeFiles() }
+            try store.append(session.takeEvents())
+            try store.flush()
+        }
+    }
+
+    private func create(name: String?, units: CanvasUnits, now: Date,
+                        fill: ((URL) throws -> Void)?) throws -> CanvasSummary {
         try ensureRoot()
         let existing = (try? list().map(\.name)) ?? []
         let id = UUID()
@@ -103,7 +132,7 @@ public struct CanvasLibrary: Sendable {
         try FileManager.default.createDirectory(at: building, withIntermediateDirectories: true)
         do {
             try writeManifest(manifest, in: building)
-            _ = try InkStore(folder: building)
+            if let fill { try fill(building) } else { _ = try InkStore(folder: building) }
             try FileManager.default.moveItem(at: building, to: folder(for: id))
             try DurableFile.flushFolder(root)
         } catch {

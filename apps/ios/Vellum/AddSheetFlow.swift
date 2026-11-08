@@ -42,8 +42,11 @@ final class AddSheetModel {
     private(set) var confirmOnly: (file: DropboxFile, page: Int)?
     /// The confirm step's place button: Place sheet, or from the viewer where the sheet goes.
     private(set) var placeLabel = "Place sheet"
-    /// The confirm step asks for the scale whatever the title block says: the drawing index's scale needs asking.
-    private(set) var mustAsk = false
+    /// From the viewer: the drawing index's scale the confirm step starts on, for Zach to confirm with one tap (#69,
+    /// ADR-0002); nil when it asks for one (AS NOTED, or a scale Vellum can't read).
+    private(set) var prefilled: Sheet.Scale?
+    /// From the viewer: the index's scale text, as the confirm step names it.
+    private(set) var indexScaleText: String?
     /// The sheet number a page is placed with when none is read off it: the drawing index's.
     @ObservationIgnored private var fallbackNumber: String?
 
@@ -51,7 +54,7 @@ final class AddSheetModel {
         self.dropbox = dropbox
         self.units = units
         self.covers = covers
-        pdfs = try? SheetPDFs.inCaches()
+        pdfs = SheetPDFs.app
     }
 
     /// Lists a folder's folders and PDFs; kept, so going back shows it at once.
@@ -114,17 +117,20 @@ final class AddSheetModel {
         onPlace?(CanvasEditor.PendingSheet(sheet: sheet, pdf: url, keptName: file.keptName))
     }
 
-    /// Opens straight on the confirm step for a page of a drawing's PDF already on the Duo, to ask its scale before it
-    /// is placed (#69: an AS NOTED drawing, or one whose index scale Vellum can't read), with today's question; Place
-    /// hands the sheet on as Add sheet's does.
-    func confirm(_ pdf: DrawingOpening.PDF, kept: KeptPDF, page: Int, number: String?, placeLabel: String) {
+    /// Opens straight on the confirm step for a page of a drawing's PDF already on the Duo (#69): prefilled with the
+    /// index's scale, so Zach confirms it with one tap or changes it, or for AS NOTED or a scale Vellum can't read,
+    /// asking for one to be picked or typed, as Add sheet's own step does. Place hands the sheet on as Add sheet's does.
+    /// `page` is the page the viewer showed when Place was tapped, taken once.
+    func confirm(_ pdf: DrawingOpening.PDF, kept: KeptPDF, page: Int, number: String?, indexScale: String?,
+                 confirmation: DrawingOpening.Confirmation, placeLabel: String) {
         let file = DropboxFile(id: "kept:" + kept.keptName, name: pdf.name, path: pdf.path, size: pdf.size ?? 0,
                                contentHash: kept.keptName, rev: "")
         readers[file.id] = SheetPDFReader(url: kept.url)
         urls[file.id] = kept.url
         fallbackNumber = number
         self.placeLabel = placeLabel
-        mustAsk = true
+        prefilled = confirmation.prefilled
+        indexScaleText = indexScale
         confirmOnly = (file, page)
     }
 
@@ -135,6 +141,16 @@ final class AddSheetModel {
     }
 
     #if DEBUG
+    /// For the viewer's captures (#69): Place on the confirm step it opened on, at the scale it starts on.
+    func debugConfirm() async {
+        guard let only = confirmOnly else { return }
+        let file = only.file, page = only.page
+        guard let reader = await reader(for: file),
+              let info = await reader.info(page: page),
+              let scale = prefilled ?? info.reading.suggestedScale else { return }
+        await place(file, page: page, info: info, scale: scale)
+    }
+
     /// Opens a folder, a PDF and a page in turn, for the captures, through the same steps a tap takes.
     func debugGo(to folder: String, file name: String?, page: Int?) async {
         path = [.folder(folder)]
@@ -406,7 +422,8 @@ private struct ConfirmSheet: View {
             guard let reader = await model.reader(for: file) else { return }
             let read = await reader.info(page: page)
             info = read
-            if let read { picked = read.reading.suggestedScale }
+            if let read { picked = model.confirmOnly == nil ? read.reading.suggestedScale
+                                                            : model.prefilled ?? read.reading.suggestedScale }
             thumbnail = await reader.thumbnail(page: page, side: 660)?.image
         }
     }
@@ -416,10 +433,19 @@ private struct ConfirmSheet: View {
     }
 
     /// Whether Zach picks or types the scale: Vellum can't tell, or he asked to change it.
-    private func asks(_ info: SheetPDFReader.PageInfo) -> Bool { info.reading.asksForScale || changing || model.mustAsk }
+    private func asks(_ info: SheetPDFReader.PageInfo) -> Bool {
+        if changing { return true }
+        return model.confirmOnly == nil ? info.reading.asksForScale : model.prefilled == nil
+    }
+
+    /// The scale it goes on at unless Zach picks another: the one read off the title block, or from the viewer the
+    /// drawing index's.
+    private func suggested(_ info: SheetPDFReader.PageInfo) -> Sheet.Scale? {
+        model.confirmOnly == nil ? info.reading.suggestedScale : model.prefilled
+    }
 
     private func chosen(_ info: SheetPDFReader.PageInfo) -> Sheet.Scale? {
-        asks(info) ? picked : info.reading.suggestedScale
+        asks(info) ? picked : suggested(info)
     }
 
     private func coverage(_ info: SheetPDFReader.PageInfo, _ scale: Sheet.Scale) -> String {
@@ -428,6 +454,35 @@ private struct ConfirmSheet: View {
 
     @ViewBuilder
     private func explanation(_ info: SheetPDFReader.PageInfo) -> some View {
+        if model.confirmOnly != nil {
+            indexExplanation(info)
+        } else {
+            readExplanation(info)
+        }
+    }
+
+    /// From the viewer: what the drawing index's title block fields say about the scale.
+    @ViewBuilder
+    private func indexExplanation(_ info: SheetPDFReader.PageInfo) -> some View {
+        switch model.prefilled {
+        case .drawn(let scale)?:
+            Text("The title block says **SCALE: \(scale.description)**.")
+        case .notToScale?:
+            Text("The title block says **NTS**. It goes on at its printed size (\(info.paper.name)), and lengths on it read as printed inches marked NTS.")
+        case nil:
+            if info.reading.titleBlock == .asNoted || (model.indexScaleText ?? "").uppercased().contains("NOTED") {
+                Text("The title block says **AS NOTED**. Pick the scale the sheet goes on at. Each detail that says another scale becomes a scale area, where Measure and Dimension read its own scale.")
+            } else if let text = model.indexScaleText, !text.isEmpty {
+                Text("The title block says **\(text)**, so Vellum can't tell the scale. Type it or pick one:")
+            } else {
+                Text("The drawing index has no scale for this drawing. Type one or pick one:")
+            }
+        }
+        if changing { Text("Pick the scale to use instead:").font(.callout) }
+    }
+
+    @ViewBuilder
+    private func readExplanation(_ info: SheetPDFReader.PageInfo) -> some View {
         let reading = info.reading
         switch reading.titleBlock {
         case .scale(let scale) where !reading.asksForScale:
@@ -445,7 +500,7 @@ private struct ConfirmSheet: View {
         case .scale, .notToScale:
             Text("This sheet has several scales. Pick the scale the sheet goes on at; details at other scales become scale areas.")
         }
-        if changing || model.mustAsk, !reading.asksForScale { Text("Pick the scale to use instead:").font(.callout) }
+        if changing, !reading.asksForScale { Text("Pick the scale to use instead:").font(.callout) }
     }
 
     private func picker(_ info: SheetPDFReader.PageInfo) -> some View {
@@ -481,7 +536,7 @@ private struct ConfirmSheet: View {
         HStack(spacing: 10) {
             Button("Cancel") { model.close?() }
                 .buttonStyle(.bordered)
-            if !asks(info), info.reading.suggestedScale != nil {
+            if !asks(info), suggested(info) != nil {
                 Button("Change scale") { changing = true }
                     .buttonStyle(.bordered)
             }

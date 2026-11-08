@@ -32,6 +32,9 @@
       "note": "The same 36 x 24 sheet turned 45 degrees and seen at 2 points per inch on the unfolded Duo: only the tiles the view really touches on the paper, 28 of the 36 in the square round the view at that angle; an upright sheet takes 24 (#44)." },
     { "metric": "sheet_markup_points_inspected", "kind": "count", "value": 360, "unit": "points", "tolerance": 0,
       "measured": "feat/rotate-sheet 2026-11-04 VellumCore SheetRotateTests (deterministic)",
-      "note": "Choosing the markups that come along, which happens once at the start of a turn, move or scale change (#44): of 1,003 strokes of 120 points on the sheet, only the 3 whose cached bounds cross its edge have their points read." }
+      "note": "Choosing the markups that come along, which happens once at the start of a turn, move or scale change (#44): of 1,003 strokes of 120 points on the sheet, only the 3 whose cached bounds cross its edge have their points read." },
+    { "metric": "viewer_first_page_ms_debug", "kind": "time", "value": 90.3, "unit": "ms", "tolerance": 0.5,
+      "measured": "feat/drawing-viewer fd3961c 2026-11-08 run 42425474253 (Duo sheet and sync captures), xcode-27 image, Xcode 27.2, iPhone Duo simulator iOS 27.1, Debug build (one sample: the median of three opens, 229.4, 84.2 and 90.3 ms)",
+      "note": "The drawing viewer's time from a tap to the first tile of its first page drawn (#69), for a made-up twelve-page E-size (44 x 34) set of about 1 MB already kept in SheetPDFs, so no download: the decision, opening the PDF off the main thread, the viewer's layout and one 512-pixel tile. The median of three opens in one launch, the first cold. Compared by perf-compare.py sheets in the Duo sheet and sync captures job, at 50% while it rests on one sample; the upper quartile of more runs replaces it, as for the other Debug timings." }
   ]
 }

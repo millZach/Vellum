@@ -27,7 +27,6 @@ struct DrawingViewerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var picking = false
     @State private var asking: AddSheetModel?
-    @State private var handing = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,7 +47,11 @@ struct DrawingViewerView: View {
             PlaceOnCanvasPicker(model: model, canvases: handoff?.canvases.summaries ?? [],
                                 pick: { choice in
                                     picking = false
-                                    Task { await go(choice) }
+                                    // The picker's sheet goes before the confirm step's comes up.
+                                    Task {
+                                        try? await Task.sleep(for: .milliseconds(350))
+                                        go(choice)
+                                    }
                                 },
                                 cancel: { picking = false })
         }
@@ -64,7 +67,8 @@ struct DrawingViewerView: View {
 
     private var header: some View {
         let text = DrawingRowText(model.entry)
-        let markers = DrawingMarker.of(model.entry, online: index.online, pdfsOnThisDuo: index.pdfsOnThisDuo)
+        let markers = DrawingMarker.of(model.entry, online: index.online, pdfsOnThisDuo: index.pdfsOnThisDuo,
+                                      pdfPathsOnThisDuo: index.pdfPathsOnThisDuo)
             .filter { $0 != .notOnThisDuo || !model.isReady }
         return VStack(alignment: .leading, spacing: 3) {
             if full {
@@ -79,14 +83,11 @@ struct DrawingViewerView: View {
                 if let number = text.number { Text(number).font(.system(size: 17, weight: .bold)) }
                 Text(text.title).font(.system(size: 17, weight: .semibold)).lineLimit(1)
             }
-            DrawingFlow(spacing: 10) {
-                if let revision = model.entry.revision { meta("Rev", revision) }
-                if let scale = model.entry.scale { meta("Scale", scale) }
-                if let date = model.entry.date { Text(date) }
-                if let project = model.entry.project { Text(project) }
-            }
-            .font(.system(size: 12.5))
-            .foregroundStyle(.secondary)
+            // One run of text, so it wraps as a sentence and the lines under it never overlap it.
+            metaLine
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(model.pdf?.path ?? model.entry.path)
                 .font(.system(size: 12.5))
                 .foregroundStyle(.secondary)
@@ -105,6 +106,18 @@ struct DrawingViewerView: View {
 
     private func meta(_ label: String, _ value: String) -> Text {
         Text("\(label) \(Text(value).fontWeight(.semibold).foregroundStyle(.primary))")
+    }
+
+    /// Rev, scale, date and project, with only the parts the entry has.
+    private var metaLine: Text {
+        var parts: [Text] = []
+        if let revision = model.entry.revision { parts.append(meta("Rev", revision)) }
+        if let scale = model.entry.scale { parts.append(meta("Scale", scale)) }
+        if let date = model.entry.date { parts.append(Text(date)) }
+        if let project = model.entry.project { parts.append(Text(project)) }
+        guard var line = parts.first else { return Text("") }
+        for part in parts.dropFirst() { line = Text("\(line)   \(part)") }
+        return line
     }
 
     private var tools: some View {
@@ -222,7 +235,7 @@ struct DrawingViewerView: View {
             .buttonStyle(.bordered)
             .accessibilityHint("Pick a canvas, then tap where the sheet goes")
             Button {
-                Task { await go(.newCanvas) }
+                go(.newCanvas)
             } label: {
                 Text("Open in a new canvas").bold()
             }
@@ -230,7 +243,7 @@ struct DrawingViewerView: View {
             .accessibilityHint("Makes a canvas named after the drawing, with the sheet in its middle at its scale")
         }
         .font(.system(size: 14))
-        .disabled(!model.isReady || handing || handoff == nil)
+        .disabled(!model.isReady || handoff == nil)
         .fixedSize()
         return Group {
             if folded {
@@ -250,18 +263,13 @@ struct DrawingViewerView: View {
         case canvas(UUID, name: String, units: CanvasUnits)
     }
 
-    /// Place on a canvas, or Open in a new canvas: at the index's scale, or for AS NOTED (or a scale Vellum can't read)
-    /// after asking, with Add sheet's own question; then to the canvas.
-    func go(_ choice: Choice) async {
-        guard let handoff, !handing else { return }
-        handing = true
-        defer { handing = false }
-        if let scale = model.indexScale {
-            guard let pending = await model.pendingSheet(at: scale) else { return }
-            hand(pending, to: choice, handoff)
-            return
-        }
-        guard let pdf = model.pdf, let kept = model.kept else { return }
+    /// Place on a canvas, or Open in a new canvas, through Add sheet's own confirm step (ADR-0002: Vellum reads the
+    /// scale and Zach confirms it): prefilled with the index's scale, so a right one is one tap, or for AS NOTED (or a
+    /// scale Vellum can't read) asking for one. The page is the one shown when the button was tapped, taken once here
+    /// and the only page passed on, so turning the page meanwhile can't mix two pages into one sheet.
+    func go(_ choice: Choice) {
+        guard let handoff, let pdf = model.pdf, let kept = model.kept, model.isReady else { return }
+        let page = model.page
         let units: CanvasUnits
         let label: String
         switch choice {
@@ -273,13 +281,17 @@ struct DrawingViewerView: View {
             label = "Place on “\(name)”"
         }
         let ask = AddSheetModel(dropbox: .app, units: units, covers: { CanvasEditor.covers($0, units: units) })
-        ask.confirm(pdf, kept: kept, page: model.page, number: model.entry.number, placeLabel: label)
+        ask.confirm(pdf, kept: kept, page: page, number: model.entry.number, indexScale: model.entry.scale,
+                    confirmation: DrawingOpening.confirmation(for: model.entry), placeLabel: label)
         ask.onPlace = { pending in
             asking = nil
             hand(pending, to: choice, handoff)
         }
         ask.close = { asking = nil }
         asking = ask
+        #if DEBUG
+        DebugDrawingViewer.asked = ask
+        #endif
     }
 
     private func hand(_ pending: CanvasEditor.PendingSheet, to choice: Choice, _ handoff: DrawingHandoff) {

@@ -55,6 +55,8 @@ final class DrawingIndexModel {
     private(set) var limit = DrawingIndexModel.page
     /// Content hashes of the PDFs kept on the Duo (`SheetPDFs`), for "Not on this Duo".
     private(set) var pdfsOnThisDuo: Set<String> = []
+    /// The lower-cased Dropbox paths those PDFs came from, so one opened under a stale or missing index hash is found.
+    private(set) var pdfPathsOnThisDuo: Set<String> = []
     /// The row picked on the unfolded screen.
     var selection: String?
     /// The drawing open in the viewer (#69); nil when none is.
@@ -220,14 +222,15 @@ final class DrawingIndexModel {
             : nil
     }
 
-    /// The content hashes of the PDFs kept on the Duo, read off the main thread.
+    /// The content hashes of the PDFs kept on the Duo, and the Dropbox paths they came from, read off the main thread.
     func notePDFsOnThisDuo() async {
-        let hashes = await Task.detached(priority: .utility) { () -> Set<String> in
-            guard let folder = try? SheetPDFs.inCaches().folder,
-                  let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return [] }
-            return Set(names.filter { $0.hasSuffix(".pdf") }.map { String($0.dropLast(4)) })
+        let (hashes, paths) = await Task.detached(priority: .utility) { () -> (Set<String>, Set<String>) in
+            guard let pdfs = SheetPDFs.app,
+                  let names = try? FileManager.default.contentsOfDirectory(atPath: pdfs.folder.path) else { return ([], []) }
+            return (Set(names.filter { $0.hasSuffix(".pdf") }.map { String($0.dropLast(4)) }), pdfs.keptPaths())
         }.value
         if hashes != pdfsOnThisDuo { pdfsOnThisDuo = hashes }
+        if paths != pdfPathsOnThisDuo { pdfPathsOnThisDuo = paths }
     }
 
     // MARK: Opening a drawing (#69)
@@ -237,7 +240,8 @@ final class DrawingIndexModel {
     func open(_ entry: DrawingEntry) {
         selection = entry.id
         openProblem = nil
-        if case .notOnThisDuo = DrawingOpening.decide(entry, online: online, pdfsOnThisDuo: pdfsOnThisDuo) {
+        if case .notOnThisDuo = DrawingOpening.decide(entry, online: online, pdfsOnThisDuo: pdfsOnThisDuo,
+                                                         pdfPathsOnThisDuo: pdfPathsOnThisDuo) {
             openProblem = DrawingOpening.notOnThisDuoText(number: entry.number ?? entry.name)
             closeViewer()
             return

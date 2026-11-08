@@ -206,7 +206,8 @@ struct DrawingRow: View {
         let text = DrawingRowText(entry)
         let query = model.resultQuery
         let selected = unfolded && (model.viewer?.entry.id ?? model.selection) == entry.id
-        let markers = DrawingMarker.of(entry, online: model.online, pdfsOnThisDuo: model.pdfsOnThisDuo)
+        let markers = DrawingMarker.of(entry, online: model.online, pdfsOnThisDuo: model.pdfsOnThisDuo,
+                                      pdfPathsOnThisDuo: model.pdfPathsOnThisDuo)
         let content = HStack(alignment: .center, spacing: 12) {
             DrawingThumbnailView(model: model, name: entry.thumbnail, width: unfolded ? 56 : 62, height: unfolded ? 38 : 42)
             VStack(alignment: .leading, spacing: 1) {
@@ -405,7 +406,8 @@ struct DrawingDetailPane: View {
 
     private func details(_ entry: DrawingEntry) -> some View {
         let text = DrawingRowText(entry)
-        let markers = DrawingMarker.of(entry, online: model.online, pdfsOnThisDuo: model.pdfsOnThisDuo)
+        let markers = DrawingMarker.of(entry, online: model.online, pdfsOnThisDuo: model.pdfsOnThisDuo,
+                                      pdfPathsOnThisDuo: model.pdfPathsOnThisDuo)
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 16) {

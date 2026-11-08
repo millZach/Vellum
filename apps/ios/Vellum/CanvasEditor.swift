@@ -543,16 +543,6 @@ final class CanvasEditor {
                      fill: 0.92)
     }
 
-    /// Places a sheet centred on a canvas point at once, with no tap, as one undo step: Open in a new canvas from the
-    /// drawing viewer (#69), which puts the drawing in the middle of its new canvas. Its PDF is kept in the canvas folder
-    /// first, as `placeSheet(centredAt:)` does; if it can't be, the sheet waits for a tap and the canvas says why.
-    func place(_ pending: PendingSheet, centredAt point: CanvasPoint) async -> Sheet? {
-        select(.empty)
-        placingSheet = pending
-        toolStep = .placeSheet
-        return await placeSheet(centredAt: point)
-    }
-
     /// The sheet waiting to be placed, centred on a canvas point, as it would go there.
     func sheetToPlace(centredAt point: CanvasPoint) -> Sheet? {
         guard var sheet = placingSheet?.sheet else { return nil }

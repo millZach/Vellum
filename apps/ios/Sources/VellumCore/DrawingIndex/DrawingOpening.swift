@@ -50,9 +50,12 @@ public enum DrawingOpening {
 
     /// Decides a tap. `pdfsOnThisDuo` holds the kept names of the PDFs in `SheetPDFs`, as `DrawingMarker` reads them, so
     /// the viewer refuses exactly the rows marked "Not on this Duo".
-    public static func decide(_ entry: DrawingEntry, online: Bool, pdfsOnThisDuo: Set<String>) -> Decision {
-        guard let pdf = pdf(for: entry) else { return .noPDFYet }
-        if let kept = pdf.keptName, pdfsOnThisDuo.contains(kept) { return .openKept(pdf) }
+    /// `pdfPathsOnThisDuo` holds the lower-cased Dropbox paths those PDFs came from (`SheetPDFs.keptPaths()`), so a
+    /// PDF opened once opens again, offline too, when the index's hash is stale or missing.
+    public static func decide(_ entry: DrawingEntry, online: Bool, pdfsOnThisDuo: Set<String>,
+                              pdfPathsOnThisDuo: Set<String> = []) -> Decision {
+        guard let indexed = entry.pdf, let pdf = pdf(for: entry) else { return .noPDFYet }
+        if DrawingMarker.isOnThisDuo(indexed, pdfsOnThisDuo, pdfPathsOnThisDuo) { return .openKept(pdf) }
         return online ? .download(pdf) : .notOnThisDuo(pdf)
     }
 
@@ -77,6 +80,20 @@ public enum DrawingOpening {
         case .notToScale: return .notToScale
         case .cantTell: return nil
         }
+    }
+
+    /// How placing from the viewer asks for the scale, with Add sheet's own confirm step (ADR-0002: Vellum reads the
+    /// scale and Zach confirms it): prefilled with the index's scale, so a right one is one tap; or, for AS NOTED or a
+    /// scale Vellum can't read, nothing prefilled, asking for one to be picked or typed.
+    public struct Confirmation: Hashable, Sendable {
+        /// The scale the confirm step starts on, from the index; nil when it asks.
+        public var prefilled: Sheet.Scale?
+        /// Whether it asks for a scale to be picked or typed.
+        public var asks: Bool { prefilled == nil }
+    }
+
+    public static func confirmation(for entry: DrawingEntry) -> Confirmation {
+        Confirmation(prefilled: scale(indexText: entry.scale))
     }
 
     // MARK: The sheet it becomes

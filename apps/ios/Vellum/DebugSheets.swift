@@ -181,7 +181,7 @@ enum DebugSheetSource {
 
     static func pending(file index: Int, page: Int, scale: Sheet.Scale? = nil) async -> CanvasEditor.PendingSheet? {
         let file = MadeUpPDF.dropboxFile(index)
-        guard let pdfs = try? SheetPDFs.inCaches(),
+        guard let pdfs = SheetPDFs.app,
               let url = try? await pdfs.pdf(for: file, download: { MadeUpPDF.data(index) }) else { return nil }
         let reader = SheetPDFReader(url: url)
         guard let info = await reader.info(page: page) else { return nil }

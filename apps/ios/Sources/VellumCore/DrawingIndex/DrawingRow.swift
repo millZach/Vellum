@@ -23,16 +23,25 @@ public enum DrawingMarker: String, CaseIterable, Sendable, Hashable {
     }
 
     /// The markers an entry shows. `online` is whether the Duo has a connection now; `pdfsOnThisDuo` the content hashes
-    /// of the PDFs kept on the Duo (`SheetPDFs`, named by Dropbox's content hash).
-    public static func of(_ entry: DrawingEntry, online: Bool, pdfsOnThisDuo: Set<String>) -> [DrawingMarker] {
+    /// of the PDFs kept on the Duo (`SheetPDFs`, named by Dropbox's content hash); `pdfPathsOnThisDuo` the lower-cased
+    /// Dropbox paths they were downloaded from (#69), so a PDF opened once is found even when the index's hash is stale
+    /// or missing.
+    public static func of(_ entry: DrawingEntry, online: Bool, pdfsOnThisDuo: Set<String>,
+                          pdfPathsOnThisDuo: Set<String> = []) -> [DrawingMarker] {
         var markers: [DrawingMarker] = []
         if entry.dwg != nil, entry.pdf == nil { markers.append(.noPDFYet) }
         if entry.pdf != nil, entry.dwg == nil { markers.append(.pdfOnly) }
         if entry.dwg?.read == false || entry.pdf?.read == false { markers.append(.notReadYet) }
-        if !online, let pdf = entry.pdf, !(pdf.contentHash.map(pdfsOnThisDuo.contains) ?? false) {
+        if !online, let pdf = entry.pdf, !isOnThisDuo(pdf, pdfsOnThisDuo, pdfPathsOnThisDuo) {
             markers.append(.notOnThisDuo)
         }
         return markers
+    }
+
+    /// Whether an entry's PDF is kept on the Duo: by the index's hash, or by the path it was downloaded from.
+    static func isOnThisDuo(_ pdf: DrawingEntry.PDF, _ hashes: Set<String>, _ paths: Set<String>) -> Bool {
+        if let hash = pdf.contentHash, hashes.contains(SheetPDFs.keptName(contentHash: hash, rev: "")) { return true }
+        return paths.contains(pdf.path.lowercased())
     }
 }
 

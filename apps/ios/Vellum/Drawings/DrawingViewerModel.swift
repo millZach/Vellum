@@ -130,15 +130,6 @@ final class DrawingViewerModel {
     /// The drawing scale the index gives, or nil when Vellum asks for it first (AS NOTED, unreadable).
     var indexScale: Sheet.Scale? { DrawingOpening.scale(indexText: entry.scale) }
 
-    /// The page shown as a sheet waiting to be placed at `scale`, worked out off the main thread as Add sheet does.
-    func pendingSheet(at scale: Sheet.Scale) async -> CanvasEditor.PendingSheet? {
-        guard let pdf, let kept, let reader, let info = await reader.info(page: page) else { return nil }
-        let invertsBadly = await reader.invertsBadly(page: page)
-        let sheet = DrawingOpening.sheet(entry, pdf: pdf, keptName: kept.keptName, page: page, reading: info.reading,
-                                         scale: scale, invertsBadly: invertsBadly)
-        return CanvasEditor.PendingSheet(sheet: sheet, pdf: kept.url, keptName: kept.keptName)
-    }
-
     /// What the viewer's foot says about placing it: the scale it opens at and what it covers on a new canvas, or that
     /// Zach picks the scale.
     var placingNote: String {

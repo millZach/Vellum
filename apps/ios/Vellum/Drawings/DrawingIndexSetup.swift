@@ -32,8 +32,9 @@ enum DrawingIndexSetup {
 /// - `--ui-plot <laptop>` (#70): the plot watch keeps its requests in memory, and a made-up laptop answers them on the
 ///   made-up Dropbox as the laptop indexer would: `plotting` (queued, then plotting, never done), `waiting` (its
 ///   check-in 12 minutes old, never answering), `queued` (the Duo goes offline before the drawing opens), `failed` (the
-///   laptop's reason), `done` (queued, plotting, then a made-up PDF) and `done-warning` (the same, with 2 references
-///   missing). Use with `--ui-viewer E-201`, the fixture's DWG with no PDF. `--ui-plot-leave` switches to the Canvases
+///   laptop's reason), `done` (queued, plotting, then a made-up PDF), `done-warning` (the same, with 2 references
+///   missing) and `done-fitted` (the same, plotted to fit the page, not to scale, as a Model-tab DWG's fallback is,
+///   #92). Use with `--ui-viewer E-201`, the fixture's DWG with no PDF. `--ui-plot-leave` switches to the Canvases
 ///   tab once the request is asked, so the banner calls Zach back when the plot is in.
 ///
 /// Use with `--ui-dropbox folders`, so the Drawings tab is signed in.
@@ -268,7 +269,13 @@ enum DebugPlotLaptop {
                 object["contentHash"] = DropboxContentHash.of([UInt8](pdf))
                 object["pageSetup"] = "saved"
                 object["missingReferences"] = mode == "done-warning" ? 2 : 0
+                object["fitted"] = mode == "done-fitted"
                 if mode == "done-warning" { object["warning"] = "2 references couldn't be found, so the PDF is missing them" }
+                if mode == "done-fitted" {
+                    object["pageSetup"] = "fallback"
+                    object["reason"] = "the Model tab has no page setup that plots to PDF, so its extents were plotted "
+                        + "with DWG To PDF to fit the page, not to scale"
+                }
             }
         }
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else { return }

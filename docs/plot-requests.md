@@ -67,7 +67,8 @@ before it is looked up.
  "pageSetup": "saved",
  "reason": null,
  "missingReferences": 0,
- "warning": null
+ "warning": null,
+ "fitted": false
 }
 ```
 
@@ -81,6 +82,7 @@ before it is looked up.
 | `reason` | On `failed`, why, in plain words to show Zach as it is. On a `fallback` `done`, a sentence saying so. Else `null`. |
 | `missingReferences` | On `done`: how many of the DWG's xrefs, raster images and PDF, DWF or DGN underlays couldn't be found, so are missing from the PDF (0 when all were found). Else `null`. |
 | `warning` | On `done` with references missing, a sentence to show Zach as it is: "2 references couldn't be found, so the PDF is missing them". Else `null`. The PDF is still the layout's plot. |
+| `fitted` | On `done`: `true` when the plot was fitted to the page, not to scale (the Model tab's fallback, below), so the Duo places it as an NTS sheet and says "Plotted to fit, not to scale"; `false` for any other plot. Else `null`. A laptop before indexer 1.1.2 doesn't write it, and a Duo reads its answer as a plot to scale (#92). |
 
 ### The states
 
@@ -123,7 +125,9 @@ isn't in the drawing index", "the request doesn't match the drawing index (the d
   `failed` ("the laptop couldn't handle this request") and the next is taken.
 - A request with a `done` or `failed` answer is never plotted again. One answered only `plotting` (the laptop stopped
   part way) is plotted again.
-- The same layout asked for again while its DWG is unchanged gets the PDF already plotted, without plotting again.
+- The same layout asked for again while its DWG is unchanged gets the PDF already plotted, without plotting again,
+  except a Model-tab plot indexer 1.1.1 made at 1:1 (#87), which ran off its sheet: that is plotted again, fitted
+  (#92), and kept as an older plot.
 - A request that does not parse yet and is under 10 seconds old is left for a moment, in case it is still arriving;
   after that it is answered `failed`.
 
@@ -142,9 +146,14 @@ isn't in the drawing index", "the request doesn't match the drawing index (the d
   `fallback` and its `reason` says so ("the layout has no page setup that plots to PDF, so it was plotted with DWG
   To PDF at its paper size"). A paper size none of those sheets match fails, rather than guess a scale.
 - **The Model tab's fallback.** A DWG plotted on its Model tab whose saved plotter is not a PDF one is plotted with
-  `DWG To PDF.pc3` on the sheet matching the Model tab's saved paper, its **extents at 1:1** (Zach's decision on
-  #87), the plot style and lineweights kept and the offset left as saved, shade plot "As displayed". The reason
-  says so: "the Model tab has no page setup that plots to PDF, so its extents were plotted with DWG To PDF at 1:1".
+  `DWG To PDF.pc3` on the sheet matching the Model tab's saved paper, its **extents fitted to the page, not to
+  scale** (scale Fit; Zach's decision on #92, which replaced #87's 1:1 after a real Model-tab drawing ran off its
+  sheet), the plot style and lineweights kept and the offset left as saved, shade plot "As displayed". The reason
+  says so: "the Model tab has no page setup that plots to PDF, so its extents were plotted with DWG To PDF to fit the
+  page, not to scale", and the answer's `fitted` is `true`. The prompts and answers in order: detailed `Y`, the
+  layout `Model`, `DWG To PDF.pc3`, the sheet, its units, the orientation, upside down `N`, area `E` (Extents),
+  scale `F` (Fit), the offset left as saved, plot styles `Y`, the style table left as saved, lineweights `Y`, shade
+  plot `A` (As displayed), the file name, save changes `N`, proceed `Y`.
   AutoCAD's `-PLOT` asks the Model tab other questions than a layout (no "Scale lineweights", "Plot paper space
   first" or "Hide paperspace objects", a shade plot setting instead, and Limits rather than Layout among the plot
   areas), so the Model tab has its own answers.
@@ -171,14 +180,15 @@ isn't in the drawing index", "the request doesn't match the drawing index (the d
 - `<8 hex>` is the first 8 hex digits of the SHA-256 of the DWG's path in lower case, `#`, the layout in lower case,
   `#` and the SHA-256 of the DWG's bytes: two DWGs of one name in different folders of a project never clash, and a
   re-plot of a changed DWG is a new file beside the older plot, never over it, even when both were saved within the
-  same second.
+  same second. A plot fitted to the page adds `#fit` to that text (#92), so a fitted re-plot of the DWG version a
+  1:1 plot was made of never takes its name; a plot to scale adds nothing and keeps the name it always had.
 - Characters Windows or Dropbox refuse (`<>:"/\|?*` and control characters) become `_`; leading dots and `~$`, and
   trailing dots and spaces, are dropped; reserved names (`CON`, `NUL`, …) get a leading `_`.
 
 Example: `/Vellum/Plots/Made-up Plant Upgrade/E-202 - Layout1 - 2026-09-21 141500 - 5c0e1d2a.pdf`.
 
 **In the index** (no format change): the plot is the entry's `pdf`, `pairedBy` `"plotted"`, with its content hash,
-pages, paper size and a thumbnail as for any PDF. The newest PDF of a layout is its `pdf`, so a re-plot of a changed
+pages, paper size and a thumbnail as for any PDF, and `"fitted": true` when it was fitted to the page (#92). The newest PDF of a layout is its `pdf`, so a re-plot of a changed
 DWG takes the older plot's place and the older one moves to `otherPdfs`. A plot deleted from `Dropbox/Vellum/Plots`
 leaves the index at the next scan. The laptop never deletes a plot.
 

@@ -16,13 +16,17 @@ public enum DrawingOpening {
         public var size: Int?
         /// Its page count, when the index knows it.
         public var pages: Int?
+        /// Whether it is a plot the laptop fitted to the page, not to scale (#92), from the index or the plot's answer:
+        /// it is placed as an NTS sheet.
+        public var fitted: Bool
 
-        public init(path: String, name: String, contentHash: String?, size: Int?, pages: Int?) {
+        public init(path: String, name: String, contentHash: String?, size: Int?, pages: Int?, fitted: Bool = false) {
             self.path = path
             self.name = name
             self.contentHash = contentHash
             self.size = size
             self.pages = pages
+            self.fitted = fitted
         }
 
         /// The name it is kept under on the Duo, when the index gives its hash.
@@ -33,7 +37,22 @@ public enum DrawingOpening {
     public static func pdf(for entry: DrawingEntry) -> PDF? {
         guard let pdf = entry.pdf else { return nil }
         let name = pdf.path.split(separator: "/").last.map(String.init) ?? pdf.path
-        return PDF(path: pdf.path, name: name, contentHash: pdf.contentHash, size: pdf.size, pages: pdf.pages)
+        return PDF(path: pdf.path, name: name, contentHash: pdf.contentHash, size: pdf.size, pages: pdf.pages,
+                   fitted: pdf.fitted == true)
+    }
+
+    /// The plot the Duo has of a DWG the index lists with no PDF yet (#70), as the PDF to show, once it is done.
+    public static func pdf(plotted plot: PlotProgress) -> PDF? {
+        guard plot.stage == .done, let path = plot.pdfPath else { return nil }
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        return PDF(path: path, name: name, contentHash: plot.contentHash, size: nil, pages: nil, fitted: plot.fitted)
+    }
+
+    /// The viewer's one line about the PDF shown: the plot's own note while the PDF is that plot, else for a plot the
+    /// index marks fitted, "Plotted to fit, not to scale" (#92).
+    public static func note(for pdf: PDF?, plot: PlotProgress?) -> String? {
+        if let note = plot?.note(forPDFAt: pdf?.path) { return note }
+        return pdf?.fitted == true ? PlotAnswer.fittedNote : nil
     }
 
     /// What a tap on a row does.
@@ -68,6 +87,12 @@ public enum DrawingOpening {
 
     // MARK: The scale
 
+    /// The scale text placing reads and the viewer's header shows for the PDF shown: `NTS` for a plot fitted to the page
+    /// (#92), which no title block scale fits, else the index's `scale`.
+    public static func scaleText(for entry: DrawingEntry, pdf: PDF?) -> String? {
+        pdf?.fitted == true ? "NTS" : entry.scale
+    }
+
     /// The drawing scale the index entry's `scale` text gives, as the title block writes it: `1/4" = 1'-0"`, `1" = 20'`,
     /// `1:20`, `NTS`. Nil when Vellum must ask for the scale before the sheet is placed: AS NOTED (or AS SHOWN, AS
     /// INDICATED, VARIES), a blank, or text it can't read whole (ADR-0002). It never guesses from part of the text.
@@ -92,8 +117,14 @@ public enum DrawingOpening {
         public var asks: Bool { prefilled == nil }
     }
 
+    /// For the entry's own PDF; a fitted one (#92) starts on NTS.
     public static func confirmation(for entry: DrawingEntry) -> Confirmation {
-        Confirmation(prefilled: scale(indexText: entry.scale))
+        confirmation(for: entry, pdf: pdf(for: entry))
+    }
+
+    /// For the PDF shown, which may be a plot the index doesn't list yet; a fitted one (#92) starts on NTS.
+    public static func confirmation(for entry: DrawingEntry, pdf: PDF?) -> Confirmation {
+        Confirmation(prefilled: scale(indexText: scaleText(for: entry, pdf: pdf)))
     }
 
     // MARK: The sheet it becomes

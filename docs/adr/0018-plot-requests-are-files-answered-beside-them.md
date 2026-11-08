@@ -23,7 +23,8 @@ Plot request format 1, set out in `docs/plot-requests.md`:
   request's `id`, using the index's path and layout name, so nothing from a request reaches AutoCAD's script.
 - **The layout's own page setup,** plotted on a copy of the DWG, when its saved plotter writes PDFs; else DWG To PDF
   at the layout's paper size, said so in the answer. A DWG on its Model tab, which has no layout area, falls back to
-  its extents at 1:1 on that sheet (amended for #87). Relative xref, image and underlay paths are made absolute against
+  its extents on that sheet (amended for #87), fitted to the page, not to scale (amended for #92), and the answer and
+  the index mark that plot `fitted`. Relative xref, image and underlay paths are made absolute against
   the original's folder on the copy, so the PDF has them. Nothing is ever saved into the DWG.
 - **One plot a turn.** Between plots the indexer takes the watcher's changes and the next file to read, so a backlog
   of plots never holds up the index.
@@ -36,6 +37,27 @@ Plot request format 1, set out in `docs/plot-requests.md`:
   `server_modified`.
 - **The Duo deletes its request once it has read a final answer; the laptop never deletes a request,** and deletes an
   answer an hour after it first sees the request gone.
+
+## Amendment (#92): a Model-tab plot is fitted to the page, not to scale
+
+#87's fallback plotted a Model-tab DWG's extents at 1:1, and the laptop hand test on 1.1.1 showed a real Model-tab
+drawing cut off on its 8.5 x 11 sheet. Zach's decision (2026-11-08): **"Fit to page, not to scale: Extents fitted to
+the sheet; the Duo says "plotted to fit, not to scale" and places it as an NTS sheet, so no measuring off it."**
+
+- The Model tab's `-PLOT` answers `_F` (Fit) to the scale prompt instead of `1:1`; every other answer is #87's, and
+  paper layouts and a saved page setup are unchanged.
+- **The signal is one boolean, `fitted`,** chosen as the smallest change both old readers ignore: on a `done` answer
+  (`true` for a fitted plot, `false` for any other, `null` before `done`), and on the index entry's `pdf` (`true` only
+  for a fitted plot, absent on every other PDF, so no other shard changes). `pageSetup` could not carry it: a
+  paper layout's fallback is also `fallback` and is to scale. A new value for `scale` could not either, since `scale`
+  is the title block's text, which an older Duo would show and parse as written. The format stays 1: an older Duo
+  ignores the key and reads everything else as before, and an older laptop's answers and index, having no `fitted`,
+  read as plots to scale.
+- The Duo places a fitted plot as an NTS sheet, through the same path as an index `scale` of `NTS`, and its viewer
+  says "Plotted to fit, not to scale" in place of the fallback line.
+- A plot 1.1.1 made of the Model tab at 1:1 (`fallback`, Model, not `fitted`) is never handed out again: the next
+  request for it plots again, fitted. The fitted plot's name carries `fit` in its 8 hex digits' hash, so it never
+  takes the 1:1 plot's name; it becomes the entry's `pdf` and the 1:1 plot moves to `otherPdfs`.
 
 ## Considered options
 

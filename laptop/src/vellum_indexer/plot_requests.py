@@ -129,6 +129,7 @@ class Answer:
     reason: str | None = None
     missing_references: int | None = None  # on done: xrefs, images and underlays that couldn't be found
     warning: str | None = None  # on done: what Zach should know about the PDF, in plain words
+    fitted: bool | None = None  # on done: whether it was plotted to fit the page, not to scale (#92)
     updated: str = ""
 
     def to_json(self) -> dict:
@@ -144,6 +145,7 @@ class Answer:
             "reason": self.reason,
             "missingReferences": self.missing_references,
             "warning": self.warning,
+            "fitted": self.fitted if self.state == "done" else None,
         }
 
 

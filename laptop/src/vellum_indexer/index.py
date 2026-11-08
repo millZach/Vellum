@@ -60,6 +60,8 @@ def _file(record: Record) -> dict:
         out["contentHash"] = facts.get("contentHash")
         out["pages"] = facts.get("pages")
         out["paperInches"] = facts.get("paperInches")
+        if facts.get("fitted"):  # a plot to fit the page, not to scale (#92); absent on every other PDF
+            out["fitted"] = True
     return out
 
 

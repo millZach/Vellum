@@ -159,9 +159,12 @@ public struct DrawingEntry: Codable, Equatable, Hashable, Sendable, Identifiable
         public var pages: Int?
         /// The first page's width and height in inches as it is viewed.
         public var paperInches: [Double]?
+        /// True for a plot the laptop fitted to the page, not to scale (a Model-tab DWG's fallback, #92), which is placed
+        /// as an NTS sheet whatever the title block says; absent on every other PDF, and in an index from before 1.1.2.
+        public var fitted: Bool?
 
         public init(path: String, size: Int? = nil, modified: String? = nil, read: Bool = true,
-                    contentHash: String? = nil, pages: Int? = nil, paperInches: [Double]? = nil) {
+                    contentHash: String? = nil, pages: Int? = nil, paperInches: [Double]? = nil, fitted: Bool? = nil) {
             self.path = path
             self.size = size
             self.modified = modified
@@ -169,6 +172,7 @@ public struct DrawingEntry: Codable, Equatable, Hashable, Sendable, Identifiable
             self.contentHash = contentHash
             self.pages = pages
             self.paperInches = paperInches
+            self.fitted = fitted
         }
     }
 

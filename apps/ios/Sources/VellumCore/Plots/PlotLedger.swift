@@ -42,12 +42,15 @@ public struct PlottedPDF: Codable, Hashable, Sendable {
     public var keptName: String
     /// `PlotAnswer.note`: its warning or fallback line.
     public var note: String?
+    /// `PlotAnswer.fitted`: true for a plot fitted to the page, not to scale (#92); nil in a ledger from before.
+    public var fitted: Bool?
 
-    public init(path: String, contentHash: String?, keptName: String, note: String?) {
+    public init(path: String, contentHash: String?, keptName: String, note: String?, fitted: Bool? = nil) {
         self.path = path
         self.contentHash = contentHash
         self.keptName = keptName
         self.note = note
+        self.fitted = fitted
     }
 }
 

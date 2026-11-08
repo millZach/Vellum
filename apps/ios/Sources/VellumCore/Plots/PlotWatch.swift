@@ -343,7 +343,8 @@ public actor PlotWatch {
             }
             publish()
             try mayGo()
-            plotted = PlottedPDF(path: path, contentHash: answer.contentHash, keptName: keptName, note: answer.note)
+            plotted = PlottedPDF(path: path, contentHash: answer.contentHash, keptName: keptName, note: answer.note,
+                                 fitted: answer.fitted)
         }
         let path = open.request.dropboxPath
         if PlotRequestFormat.isRequestPath(path) { _ = try await session.delete(path) }
@@ -365,7 +366,7 @@ public actor PlotWatch {
                                  now: now())
         return PlotProgress(entry: open.request.id, request: open.request.request, stage: stage,
                             pdfPath: open.answer?.pdf, contentHash: open.answer?.contentHash, keptName: open.keptName,
-                            note: open.answer?.note)
+                            note: open.answer?.note, fitted: open.answer?.isFitted ?? false)
     }
 
     private func snapshot() -> [String: PlotProgress] {
@@ -378,7 +379,8 @@ public actor PlotWatch {
         }
         for (entry, plot) in ledger.plotted {
             out[entry] = PlotProgress(entry: entry, request: "", stage: .done, pdfPath: plot.path,
-                                      contentHash: plot.contentHash, keptName: plot.keptName, note: plot.note)
+                                      contentHash: plot.contentHash, keptName: plot.keptName, note: plot.note,
+                                      fitted: plot.fitted == true)
         }
         // Oldest first, so an entry's newest request has the last word.
         for open in ledger.open { out[open.request.id] = progress(of: open) }

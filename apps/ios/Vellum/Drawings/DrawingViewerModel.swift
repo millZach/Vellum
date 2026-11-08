@@ -32,7 +32,8 @@ final class DrawingViewerModel {
     let entry: DrawingEntry
     /// The entry's PDF, or the plot the laptop made of it (#70); nil while it waits for one.
     private(set) var pdf: DrawingOpening.PDF?
-    /// The laptop's one line about its plot (missing references, the fallback page setup), when it had one.
+    /// The laptop's one line about its plot (missing references, the fallback page setup, or that it was plotted to fit,
+    /// not to scale), when it had one.
     private(set) var plotNote: String?
     private(set) var state: State
     /// The page shown, counting from 0.
@@ -57,26 +58,20 @@ final class DrawingViewerModel {
     /// shown.
     init(entry: DrawingEntry, plot: PlotProgress? = nil) {
         self.entry = entry
-        let shown = DrawingOpening.pdf(for: entry) ?? plot.flatMap(Self.plotted)
+        let shown = DrawingOpening.pdf(for: entry) ?? plot.flatMap(DrawingOpening.pdf(plotted:))
         pdf = shown
-        // The plot's note stays while the PDF shown is that plot, however the drawing was opened (#70).
-        plotNote = plot?.note(forPDFAt: shown?.path)
+        // The plot's note stays while the PDF shown is that plot, however the drawing was opened (#70); a plot the
+        // index marks fitted says so (#92).
+        plotNote = DrawingOpening.note(for: shown, plot: plot)
         state = shown == nil ? .noPDFYet : .opening
-    }
-
-    /// A plot on the Duo as the PDF to show: its path, and the content hash it is kept under.
-    private static func plotted(_ plot: PlotProgress) -> DrawingOpening.PDF? {
-        guard plot.stage == .done, let path = plot.pdfPath else { return nil }
-        let name = path.split(separator: "/").last.map(String.init) ?? path
-        return DrawingOpening.PDF(path: path, name: name, contentHash: plot.contentHash, size: nil, pages: nil)
     }
 
     /// The laptop's plot came in while this viewer waited for it: it fills in, from the copy the plot watch kept, with no
     /// download.
     func plotArrived(_ plot: PlotProgress, session: DropboxSession?) {
-        guard state == .noPDFYet, let pdf = Self.plotted(plot) else { return }
+        guard state == .noPDFYet, let pdf = DrawingOpening.pdf(plotted: plot) else { return }
         self.pdf = pdf
-        plotNote = plot.note(forPDFAt: pdf.path)
+        plotNote = DrawingOpening.note(for: pdf, plot: plot)
         state = .opening
         Task { await open(session: session) }
     }
@@ -152,8 +147,12 @@ final class DrawingViewerModel {
 
     // MARK: Placing
 
-    /// The drawing scale the index gives, or nil when Vellum asks for it first (AS NOTED, unreadable).
-    var indexScale: Sheet.Scale? { DrawingOpening.scale(indexText: entry.scale) }
+    /// The scale text placing reads and the header shows: the index's, or NTS for a plot fitted to the page (#92).
+    var scaleText: String? { DrawingOpening.scaleText(for: entry, pdf: pdf) }
+
+    /// The drawing scale the index gives (NTS for a fitted plot), or nil when Vellum asks for it first (AS NOTED,
+    /// unreadable).
+    var indexScale: Sheet.Scale? { DrawingOpening.scale(indexText: scaleText) }
 
     /// What the viewer's foot says about placing it: the scale it opens at and what it covers on a new canvas, or that
     /// Zach picks the scale.

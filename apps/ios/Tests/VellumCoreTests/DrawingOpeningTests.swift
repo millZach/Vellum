@@ -235,6 +235,96 @@ final class DrawingOpeningTests: XCTestCase {
         XCTAssertEqual(fromSearch.sheet.areas, [])
     }
 
+    // MARK: A plot fitted to the page (#92)
+
+    /// A made-up Model-tab DWG's entry whose title block says 1/4" = 1'-0", with its plot on an 11" × 8.5" sheet, fitted
+    /// to the page or not.
+    private func modelTabEntry(fitted: Bool?) -> DrawingEntry {
+        DrawingEntry(id: "0123456789abcdef", path: "/Projects/Made-up/CAD/M-101.dwg", name: "M-101.dwg", layout: "Model",
+                     number: "M-101", title: "Made-up model", scale: "1/4\" = 1'-0\"",
+                     dwg: .init(path: "/Projects/Made-up/CAD/M-101.dwg"),
+                     pdf: .init(path: "/Vellum/Plots/Made-up/M-101 - Model - 2026-11-08 120000 - 0a1b2c3d.pdf",
+                                size: 4096, contentHash: "madeup" + String(repeating: "0", count: 54) + "0101",
+                                pages: 1, paperInches: [11, 8.5], fitted: fitted),
+                     pairedBy: "plotted")
+    }
+
+    func testAFittedPlotPlacesAsAnNTSSheetAndItsLengthsReadPrintedMarkedNTS() {
+        let entry = modelTabEntry(fitted: true)
+        let pdf = DrawingOpening.pdf(for: entry)!
+        XCTAssertTrue(pdf.fitted)
+        // The header's scale and the confirm step are an NTS drawing's, whatever the title block says.
+        XCTAssertEqual(DrawingOpening.scaleText(for: entry, pdf: pdf), "NTS")
+        XCTAssertEqual(DrawingOpening.confirmation(for: entry).prefilled, .notToScale)
+        XCTAssertEqual(DrawingOpening.confirmation(for: entry, pdf: pdf).prefilled, .notToScale)
+        XCTAssertFalse(DrawingOpening.confirmation(for: entry).asks)
+        XCTAssertEqual(DrawingOpening.note(for: pdf, plot: nil), "Plotted to fit, not to scale")
+
+        let reading = SheetReading.read([], paper: .inches(11, by: 8.5))
+        let sheet = DrawingOpening.sheet(entry, pdf: pdf, keptName: pdf.keptName!, page: 0, reading: reading,
+                                         scale: DrawingOpening.confirmation(for: entry).prefilled!, invertsBadly: false)
+        XCTAssertEqual(sheet.scale, .notToScale)
+        XCTAssertTrue(sheet.isNotToScale)
+        // On the canvas at its printed size: 11" × 8.5", one printed inch a canvas inch.
+        XCTAssertEqual(sheet.size, CanvasSize(width: .inches(11), height: .inches(8.5)))
+        XCTAssertEqual(sheet.canvasPerPrinted, 1)
+        XCTAssertEqual(sheet.areas, [])
+        // A printed 3 1/2" reads 3 1/2" NTS, never 14'-0".
+        let placed = Sheet(paper: sheet.paper, scale: sheet.scale, origin: CanvasPoint(x: .feet(10), y: .feet(5)),
+                           page: sheet.page)
+        let canvas = Canvas(sheets: [placed])
+        let measure = canvas.measure(from: placed.canvasPoint(at: PaperPoint(x: .inches(1), y: .inches(1))),
+                                     to: placed.canvasPoint(at: PaperPoint(x: .inches(4.5), y: .inches(1))))
+        XCTAssertNil(measure.realLength)
+        XCTAssertEqual(measure, .notToScale(.inches(3.5)))
+        XCTAssertEqual(canvas.format(measure), "3 1/2\" NTS")
+    }
+
+    func testAPlotNotFittedPlacesAtItsTitleBlocksScaleAsBefore() {
+        let quarter = Sheet.Scale.drawn(.architectural(inchesPerFoot: 0.25))
+        for fitted in [false, nil] as [Bool?] {
+            let entry = modelTabEntry(fitted: fitted)
+            let pdf = DrawingOpening.pdf(for: entry)!
+            XCTAssertFalse(pdf.fitted)
+            XCTAssertEqual(DrawingOpening.scaleText(for: entry, pdf: pdf), "1/4\" = 1'-0\"")
+            XCTAssertEqual(DrawingOpening.confirmation(for: entry).prefilled, quarter)
+            XCTAssertNil(DrawingOpening.note(for: pdf, plot: nil))
+            let reading = SheetReading.read([], paper: .inches(11, by: 8.5))
+            let sheet = DrawingOpening.sheet(entry, pdf: pdf, keptName: pdf.keptName!, page: 0, reading: reading,
+                                             scale: quarter, invertsBadly: false)
+            // 11" × 8.5" at 48 real inches a printed inch: 44'-0" × 34'-0".
+            XCTAssertEqual(sheet.size, CanvasSize(width: .feet(44), height: .feet(34)))
+            let canvas = Canvas(sheets: [sheet])
+            let measure = canvas.measure(from: sheet.canvasPoint(at: PaperPoint(x: .inches(1), y: .inches(1))),
+                                         to: sheet.canvasPoint(at: PaperPoint(x: .inches(4.5), y: .inches(1))))
+            XCTAssertEqual(measure, .real(.feet(14)))
+        }
+    }
+
+    func testTheIndexsFittedMarkIsReadAndAnIndexWithoutItReadsAsBefore() throws {
+        func shard(_ pdf: String) -> [UInt8] {
+            Array(("{\"format\":1,\"project\":null,\"projectPath\":null,\"drawings\":[{\"id\":\"0123456789abcdef\","
+                + "\"path\":\"/Projects/Made-up/CAD/M-101.dwg\",\"name\":\"M-101.dwg\",\"layout\":\"Model\","
+                + "\"scale\":\"1/4\\\" = 1'-0\\\"\",\"dwg\":{\"path\":\"/Projects/Made-up/CAD/M-101.dwg\",\"read\":true},"
+                + "\"pdf\":\(pdf),\"otherPdfs\":[\"/Vellum/Plots/Made-up/M-101 - Model - old.pdf\"],"
+                + "\"pairedBy\":\"plotted\"}]}").utf8)
+        }
+        let fitted = try DrawingIndexFormat.shard(from: shard(
+            "{\"path\":\"/Vellum/Plots/Made-up/M-101 - Model - new.pdf\",\"read\":true,\"pages\":1,\"fitted\":true}"))
+        let entry = try XCTUnwrap(fitted.drawings.first)
+        XCTAssertEqual(entry.pdf?.fitted, true)
+        XCTAssertEqual(entry.otherPdfs, ["/Vellum/Plots/Made-up/M-101 - Model - old.pdf"])
+        XCTAssertEqual(DrawingOpening.confirmation(for: entry).prefilled, .notToScale)
+        let before = try DrawingIndexFormat.shard(from: shard(
+            "{\"path\":\"/Vellum/Plots/Made-up/M-101 - Model - old.pdf\",\"read\":true,\"pages\":1}"))
+        let old = try XCTUnwrap(before.drawings.first)
+        XCTAssertNil(old.pdf?.fitted)
+        XCTAssertEqual(old.scale, "1/4\" = 1'-0\"")
+        XCTAssertEqual(DrawingOpening.confirmation(for: old).prefilled, .drawn(.architectural(inchesPerFoot: 0.25)))
+        // Every entry of the laptop's fixture index, written before #92, reads unfitted.
+        XCTAssertTrue(IndexFixture.entries.allSatisfy { $0.pdf?.fitted == nil })
+    }
+
     func testAnASNotedDrawingAsksAndGivenAnEighthLandsTheSameFromSearchAsFromAddSheet() {
         let page = MadeUpSheets.detailSheet
         let reading = SheetReading.read(page.texts, paper: page.paper)

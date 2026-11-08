@@ -247,7 +247,8 @@ drawing_captures() {
 # Then a DWG with no PDF yet (#70), E-201, with a made-up laptop answering its plot request on the made-up Dropbox
 # (`--ui-plot`, Vellum/Drawings/DrawingIndexSetup.swift): plotting on the laptop, waiting for the laptop (its check-in
 # 12 minutes old), queued on this Duo (offline), the laptop's reason when it won't plot it, the viewer filled in with
-# the plot and its one line about missing references, and the banner at the top of the Canvases list after leaving
+# the plot and its one line about missing references, the same with a plot fitted to the page (#92: "Plotted to fit,
+# not to scale", the header's scale NTS), and the banner at the top of the Canvases list after leaving
 # the viewer, right of the list's + button, then the same folded, under the list's title row.
 viewer_captures() {
   data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
@@ -267,6 +268,7 @@ viewer_captures() {
     capture viewer-plot-queued "$@" --ui-viewer E-201 --ui-plot queued
     capture viewer-plot-failed "$@" --ui-viewer E-201 --ui-plot failed
     capture viewer-plot-filled "$@" --ui-viewer E-201 --ui-plot done-warning
+    capture viewer-plot-fitted "$@" --ui-viewer E-201 --ui-plot done-fitted
     # The banner over the Canvases list, clear of its + (new canvas) button and every other control.
     capture plot-banner-canvases-list "$@" --ui-reset --ui-seed-list --ui-viewer E-201 --ui-plot done --ui-plot-leave
     # The same, folded (the cover screen, display 1): under the list's title row.

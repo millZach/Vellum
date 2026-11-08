@@ -200,6 +200,13 @@ class PlotFolder:
                 pass
         return gone
 
+    def make_requests_folder(self) -> None:
+        """Make ``requests/`` if it is not there, so the Duo's first request lands in a folder already watched."""
+        try:
+            self.requests.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            log.warning("Could not make %s: %s", self.requests, error)
+
     def check_in(self, version: str) -> None:
         body = {"format": FORMAT, "seen": now_iso(), "indexer": version, "every": CHECK_IN_SECONDS,
                 "staleAfter": STALE_AFTER_SECONDS}

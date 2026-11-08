@@ -81,9 +81,12 @@ class DropboxEvents:
             if db is None or db == "/":
                 continue
             lower = db.lower()
-            if lower.startswith(PLOT_REQUESTS):
-                if (not is_directory and event_type != "deleted" and "/" not in lower[len(PLOT_REQUESTS):]
-                        and request_name(db.rsplit("/", 1)[1]) is not None and self.on_plot_request):
+            if lower.startswith(PLOT_REQUESTS) or lower == PLOT_REQUESTS.rstrip("/"):
+                rest = lower[len(PLOT_REQUESTS):]
+                wake = (event_type != "deleted" and "/" not in rest
+                        and (is_directory or not rest or request_name(db.rsplit("/", 1)[1]) is not None))
+                if wake and self.on_plot_request:
+                    log.debug("Plot request event: %s %s", event_type, db)
                     self.on_plot_request()
                 continue
             if is_directory:
@@ -120,6 +123,7 @@ def watch(
     stop = stop or threading.Event()
     debouncer = Debouncer(quiet, max_wait)
     handler = DropboxEvents(indexer.root, indexer.rules, debouncer, on_plot_request=indexer.plot_wanted.set)
+    indexer.plot_folder.make_requests_folder()
     observer = Observer()
     observer.schedule(handler, str(indexer.root), recursive=True)
     observer.start()  # before the scan, so nothing changed during it is missed

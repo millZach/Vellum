@@ -586,8 +586,13 @@ def test_nothing_is_written_outside_dropbox_vellum_and_no_project_file_changes(d
 
 # --- The watcher -----------------------------------------------------------------------------------------------
 
-def test_the_watcher_answers_a_request_within_seconds_and_checks_in(dropbox, tmp_path, make_indexer, plot_log):
+def test_the_watcher_answers_a_request_within_seconds_and_checks_in(dropbox, tmp_path, make_indexer, plot_log,
+                                                                    caplog):
+    import logging
+
     from vellum_indexer.watch import watch
+
+    caplog.set_level(logging.DEBUG, logger="vellum_indexer")
 
     small_tree(dropbox)
     indexer = make_indexer(plotter=plotter(tmp_path))
@@ -600,13 +605,16 @@ def test_the_watcher_answers_a_request_within_seconds_and_checks_in(dropbox, tmp
         while not (dropbox / "Vellum" / "Index" / "index.json").exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         assert (dropbox / "Vellum" / "Plots" / "laptop.json").exists()
+        assert requests_folder(dropbox).is_dir()  # made at start, so a request lands in a watched folder
         indexer.next_plot_look = time.monotonic() + 3600  # only the watcher's notice can find it in time
         asked = time.monotonic()
         name = ask(dropbox, entries(dropbox)[("E-202.dwg", "Layout1")])
         while (answer_of(dropbox, name) or {}).get("state") != "done" and time.monotonic() - asked < 20:
             time.sleep(0.05)
         took = time.monotonic() - asked
-        assert answer_of(dropbox, name)["state"] == "done"
+        assert (answer_of(dropbox, name) or {}).get("state") == "done", (
+            f"no answer after {took:.1f} s; due {indexer.plots_due()}, files "
+            f"{sorted(p.name for p in requests_folder(dropbox).iterdir())}")
         assert took < 15, took
         writes = indexer.check_in.writes
         time.sleep(1.2)

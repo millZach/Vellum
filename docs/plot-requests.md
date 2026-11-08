@@ -98,7 +98,7 @@ isn't in the drawing index", "the request doesn't match the drawing index (the d
 
 ### How the laptop works through requests
 
-- It looks at `requests/` when the watcher sees a request arrive (within half a second of Dropbox writing it), at
+- It makes `requests/` at start if it is not there, and looks at it when the watcher sees a request arrive (within half a second of Dropbox writing it), at
   start, and once a minute anyway. Requests go ahead of everything the scan is waiting to read, even during a first
   scan's listing of all of Dropbox, so one is answered within seconds plus the plot while the laptop is on.
 - One plot at a time, oldest request first, through AutoCAD's console at below-normal priority, stopped after 5

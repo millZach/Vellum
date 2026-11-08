@@ -32,24 +32,23 @@ struct RootView: View {
             }
         }
         .background(WindowAppearance(style: (AppearanceSetting(rawValue: appearance) ?? .default).interfaceStyle))
-        // A plot that came in while Zach was elsewhere calls him back to it (#70), over whichever tab is showing; over
-        // an open canvas, under its top bar.
-        .overlay(alignment: .top) {
+        // A plot that came in while Zach was elsewhere calls him back to it (#70), at the top of whichever tab is
+        // showing. It takes its own room at the top rather than floating over the screen, so it never covers a control:
+        // every screen's title row, buttons and search field, and an open canvas's top bar and rails (which lay
+        // themselves out from the safe area), move down below it while it shows, folded and unfolded. The canvas itself
+        // ignores the safe area, so it isn't resized.
+        .safeAreaInset(edge: .top, spacing: 0) {
             if let entry = drawings.plotBanner {
-                GeometryReader { proxy in
-                    // The canvas's top bar is taller folded, as the prototype places the banner.
-                    let overCanvas = selection == .canvases && canvases.openEditor != nil
-                    PlotBanner(entry: entry,
-                               view: {
-                                   selection = .drawings
-                                   drawings.viewBanner()
-                               },
-                               dismiss: { drawings.plotBanner = nil })
-                        .padding(.top, overCanvas ? (proxy.size.width < 700 ? 104 : 60) : 12)
-                        .padding(.horizontal, 16)
-                        .frame(maxWidth: .infinity)
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
+                PlotBanner(entry: entry,
+                           view: {
+                               selection = .drawings
+                               drawings.viewBanner()
+                           },
+                           dismiss: { drawings.plotBanner = nil })
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .animation(.easeOut(duration: 0.2), value: drawings.plotBanner?.id)

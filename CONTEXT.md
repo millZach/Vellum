@@ -105,7 +105,7 @@ Mirroring a canvas folder to its Dropbox folder, uploading only what changed, wh
 _Avoid_: backup, upload (one request), save (saving is on the Duo)
 
 **Sync outbox**:
-The uploads and deletes still to do in Dropbox, kept on the Duo with the sync ledger so they survive a crash or a relaunch, and sent when a connection returns (ADR-0010).
+The uploads and deletes still to do in Dropbox, kept on the Duo so they survive a crash or a relaunch, and sent when a connection returns: a canvas's with the sync ledger, a plot request's with the plot ledger (ADR-0010).
 _Avoid_: queue, upload queue, outbox (alone; a job folder is not an outbox)
 
 **Text box**:
@@ -271,6 +271,14 @@ _Avoid_: print, export, sheet (a sheet is a placed PDF page)
 **Plot request**:
 Vellum asking the laptop to plot a drawing that has no PDF yet: one small file per request in `Dropbox/Vellum/Plots/requests`, naming the drawing index entry. The laptop indexer plots it with AutoCAD's own core console, using the layout's page setup (or DWG To PDF at its paper size when it has none that plots to PDF), keeps the PDF in `Dropbox/Vellum/Plots` and answers beside the request: queued the moment it is seen, then plotting, done, or failed with a reason. The Duo deletes its request once it has read a final answer (`docs/plot-requests.md`, ADR-0018).
 _Avoid_: job (a job goes to Sotto), print request, plot job
+
+**Plot watch**:
+The Duo waiting for its open plot requests: it sends each from the sync outbox, then looks at its answer and the check-in, every 5 seconds for a request's first 2 minutes and every 30 seconds after, only while one is open and the app is on the screen and online. When the answer is done it downloads the PDF, deletes the request and remembers the plot until the drawing index lists it; a plot that comes in while Zach is elsewhere puts up the plot banner (ADR-0010).
+_Avoid_: polling, poller, plot queue
+
+**Plot banner**:
+"E-201 is plotted and ready to view", with View, over whichever tab is showing when a plot Zach asked for comes in and he isn't looking at that drawing in the drawing viewer. View opens it there.
+_Avoid_: notification, toast (a toast goes by itself)
 
 **Check-in**:
 The laptop indexer's "last seen" file, `Dropbox/Vellum/Plots/laptop.json`: a time and its version, rewritten every 2 minutes while it runs. Older than 5 minutes, the laptop is off, and a plot request waits ("Waiting for the laptop").

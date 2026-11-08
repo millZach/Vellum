@@ -32,6 +32,31 @@ struct RootView: View {
             }
         }
         .background(WindowAppearance(style: (AppearanceSetting(rawValue: appearance) ?? .default).interfaceStyle))
+        // A plot that came in while Zach was elsewhere calls him back to it (#70), over whichever tab is showing; over
+        // an open canvas, under its top bar.
+        .overlay(alignment: .top) {
+            if let entry = drawings.plotBanner {
+                GeometryReader { proxy in
+                    // The canvas's top bar is taller folded, as the prototype places the banner.
+                    let overCanvas = selection == .canvases && canvases.openEditor != nil
+                    PlotBanner(entry: entry,
+                               view: {
+                                   selection = .drawings
+                                   drawings.viewBanner()
+                               },
+                               dismiss: { drawings.plotBanner = nil })
+                        .padding(.top, overCanvas ? (proxy.size.width < 700 ? 104 : 60) : 12)
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: drawings.plotBanner?.id)
+        .onChange(of: selection, initial: true) { _, tab in drawings.onDrawingsTab = tab == .drawings }
+        .onChange(of: drawings.debugTab) { _, tab in
+            if let tab { selection = tab }
+        }
         .task {
             // The drawing index is read and refreshed off the main thread; nothing here waits for it.
             Task { await DrawingIndexSetup.start(drawings) }
@@ -55,6 +80,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             // Every change is already written; leaving the screen flushes it to storage so a power cut keeps it too.
             if phase != .active { canvases.appWillLeaveScreen(background: phase == .background) }
+            if phase == .background { drawings.appLeftScreen() }
             if phase == .active {
                 canvases.appDidBecomeActive()
                 drawings.appBecameActive()

@@ -29,6 +29,13 @@ enum DrawingIndexSetup {
 /// - `--ui-viewer-timing` (#69): opens a made-up twelve-page E-size set already on the Duo three times, logging each
 ///   time from the tap to its first page's first tile to `viewer.txt`, and their median to `viewer-timing.json`.
 ///
+/// - `--ui-plot <laptop>` (#70): the plot watch keeps its requests in memory, and a made-up laptop answers them on the
+///   made-up Dropbox as the laptop indexer would: `plotting` (queued, then plotting, never done), `waiting` (its
+///   check-in 12 minutes old, never answering), `queued` (the Duo goes offline before the drawing opens), `failed` (the
+///   laptop's reason), `done` (queued, plotting, then a made-up PDF) and `done-warning` (the same, with 2 references
+///   missing). Use with `--ui-viewer E-201`, the fixture's DWG with no PDF. `--ui-plot-leave` switches to the Canvases
+///   tab once the request is asked, so the banner calls Zach back when the plot is in.
+///
 /// Use with `--ui-dropbox folders`, so the Drawings tab is signed in.
 @MainActor
 enum DebugDrawingIndex {
@@ -67,6 +74,11 @@ enum DebugDrawingIndex {
         let tokens = DropboxTokens(accessToken: "capture", refreshToken: "capture", expiresAt: .distantFuture)
         let session = DropboxSession(appKey: key, transport: dropbox, store: DropboxMemoryTokenStore(tokens))
         model.followsConnection = false
+        let plot = DebugLaunch.argument("--ui-plot")
+        if let plot {
+            model.plotLedger = PlotLedgerMemory()
+            DebugPlotLaptop.run(dropbox, mode: plot)
+        }
         if state == "offline" {
             dropbox.offline = true
             model.debugSetOnline(false)
@@ -82,7 +94,18 @@ enum DebugDrawingIndex {
         }
         if let query = DebugLaunch.argument("--ui-search") { model.query = query }
         if let number = DebugLaunch.argument("--ui-select") { model.debugSelect(number: number) }
+        if plot == "queued" {
+            dropbox.offline = true
+            model.debugSetOnline(false)
+            try? await Task.sleep(for: .milliseconds(300))
+        }
         if let number = DebugLaunch.argument("--ui-viewer") { model.debugOpen(number: number) }
+        if plot != nil, DebugLaunch.has("--ui-plot-leave") {
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                model.debugTab = .canvases
+            }
+        }
         if DebugLaunch.has("--ui-viewer-timing") { Task { await DebugDrawingViewer.time(model) } }
         return true
     }
@@ -189,6 +212,67 @@ enum DebugDrawingViewer {
             .appendingPathComponent("viewer-timing.json")
         try? json.write(to: file, atomically: true, encoding: .utf8)
         log("done")
+    }
+}
+#endif
+
+#if DEBUG
+/// The made-up laptop for the plot captures (#70): it checks in, and answers each request in
+/// `Dropbox/Vellum/Plots/requests` as `laptop/src/vellum_indexer/plot_requests.py` does, on the made-up Dropbox. Every
+/// path and reason is made up.
+enum DebugPlotLaptop {
+    static let checkIn = Array(#"{"every": 120, "format": 1, "indexer": "1.1.0", "seen": "2026-11-07T12:00:00Z", "staleAfter": 300}"#.utf8)
+    static let reason = "the layout has no page setup that plots to PDF, and its paper size (500 x 700 mm) isn't one DWG To PDF has"
+
+    static func run(_ dropbox: MadeUpDropbox, mode: String) {
+        let seen = mode == "waiting" ? Date().addingTimeInterval(-720) : Date()
+        dropbox.changeOnTheLaptop(PlotRequestFormat.checkInPath, to: checkIn, at: seen)
+        guard mode != "waiting" else { return }
+        Task.detached(priority: .utility) {
+            var looks: [String: Int] = [:]
+            for _ in 0..<240 {
+                try? await Task.sleep(for: .milliseconds(500))
+                for (name, bytes) in dropbox.files(in: PlotRequestFormat.requestsFolder)
+                where name.hasSuffix(".json") && !name.hasSuffix(".answer.json") {
+                    let request = String(name.dropLast(".json".count))
+                    let id = (try? JSONSerialization.jsonObject(with: Data(bytes)) as? [String: Any])?["id"] as? String
+                    let look = (looks[request] ?? 0) + 1
+                    looks[request] = look
+                    answer(dropbox, request: request, id: id, mode: mode, look: look)
+                }
+            }
+        }
+    }
+
+    private static func answer(_ dropbox: MadeUpDropbox, request: String, id: String?, mode: String, look: Int) {
+        var object: [String: Any] = ["format": 1, "request": request, "id": id.map { $0 as Any } ?? NSNull(),
+                                     "updated": PlotRequestFormat.time(Date()),
+                                     "pdf": NSNull(), "contentHash": NSNull(), "pageSetup": NSNull(), "reason": NSNull(),
+                                     "missingReferences": NSNull(), "warning": NSNull()]
+        switch mode {
+        case "failed":
+            guard look == 2 else { return }
+            object["state"] = "failed"
+            object["reason"] = reason
+        case "plotting", "queued":
+            guard look == 1 || look == 3 else { return }
+            object["state"] = look == 1 ? "queued" : "plotting"
+        default:
+            guard [1, 2, 4].contains(look) else { return }
+            object["state"] = look == 1 ? "queued" : look == 2 ? "plotting" : "done"
+            if look == 4 {
+                let pdf = MadeUpPDF.data(1)
+                let path = "/Vellum/Plots/Made-up Plant Upgrade/E-201 - Layout1 - 2026-09-21 141500 - 5c0e1d2a.pdf"
+                dropbox.changeOnTheLaptop(path, to: [UInt8](pdf))
+                object["pdf"] = path
+                object["contentHash"] = DropboxContentHash.of([UInt8](pdf))
+                object["pageSetup"] = "saved"
+                object["missingReferences"] = mode == "done-warning" ? 2 : 0
+                if mode == "done-warning" { object["warning"] = "2 references couldn't be found, so the PDF is missing them" }
+            }
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else { return }
+        dropbox.changeOnTheLaptop(PlotRequestFormat.answerPath(request), to: [UInt8](data))
     }
 }
 #endif

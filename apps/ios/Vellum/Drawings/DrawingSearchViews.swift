@@ -206,8 +206,6 @@ struct DrawingRow: View {
         let text = DrawingRowText(entry)
         let query = model.resultQuery
         let selected = unfolded && (model.viewer?.entry.id ?? model.selection) == entry.id
-        let markers = DrawingMarker.of(entry, online: model.online, pdfsOnThisDuo: model.pdfsOnThisDuo,
-                                      pdfPathsOnThisDuo: model.pdfPathsOnThisDuo)
         let content = HStack(alignment: .center, spacing: 12) {
             DrawingThumbnailView(model: model, name: entry.thumbnail, width: unfolded ? 56 : 62, height: unfolded ? 38 : 42)
             VStack(alignment: .leading, spacing: 1) {
@@ -220,11 +218,9 @@ struct DrawingRow: View {
                 Text(Self.highlighted(text.place, query, number: false))
                     .font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
                     .truncationMode(.middle)
-                if !markers.isEmpty {
-                    DrawingFlow(spacing: 4) {
-                        ForEach(markers, id: \.self) { DrawingMarkerChip(marker: $0) }
-                    }
-                    .padding(.top, 3)
+                if !DrawingChips.isEmpty(model, entry) {
+                    DrawingChips(model: model, entry: entry)
+                        .padding(.top, 3)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -243,7 +239,7 @@ struct DrawingRow: View {
         Button { model.open(entry) } label: { content }
             .buttonStyle(.plain)
             .accessibilityAddTraits(selected ? .isSelected : [])
-            .accessibilityHint(entry.pdf == nil ? "No PDF yet" : "Opens the drawing's PDF")
+            .accessibilityHint(entry.pdf == nil ? "No PDF yet: asks the laptop to plot it" : "Opens the drawing's PDF")
     }
 
     private func headline(_ text: DrawingRowText, _ query: String) -> Text {
@@ -406,8 +402,6 @@ struct DrawingDetailPane: View {
 
     private func details(_ entry: DrawingEntry) -> some View {
         let text = DrawingRowText(entry)
-        let markers = DrawingMarker.of(entry, online: model.online, pdfsOnThisDuo: model.pdfsOnThisDuo,
-                                      pdfPathsOnThisDuo: model.pdfPathsOnThisDuo)
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 16) {
@@ -418,9 +412,8 @@ struct DrawingDetailPane: View {
                         }
                         Text(text.title).font(.system(size: 17)).foregroundStyle(text.quiet ? .secondary : .primary)
                         if let details = text.details { Text(details).font(.system(size: 13)).foregroundStyle(.secondary) }
-                        if !markers.isEmpty {
-                            DrawingFlow(spacing: 4) { ForEach(markers, id: \.self) { DrawingMarkerChip(marker: $0) } }
-                                .padding(.top, 4)
+                        if !DrawingChips.isEmpty(model, entry) {
+                            DrawingChips(model: model, entry: entry).padding(.top, 4)
                         }
                     }
                 }
@@ -523,6 +516,9 @@ enum DrawingIndexColors {
     static let only = dynamic(light: 0x6b3fa8, dark: 0xc4a2f0)
     static let onlyBackground = dynamic(light: 0xefe7f8, dark: 0xc4a2f0, darkAlpha: 0.15)
     static let quietBackground = dynamic(light: 0xeee8dc, dark: 0x3a3b40)
+    /// A plot that came in (#70), as the prototype's "ok" colours.
+    static let ok = dynamic(light: 0x2f7a4f, dark: 0x6fcf97)
+    static let okBackground = dynamic(light: 0xe3f1e8, dark: 0x6fcf97, darkAlpha: 0.14)
     static let highlight = dynamic(light: 0xfde68a, dark: 0xfde68a, darkAlpha: 0.32)
 
     private static func dynamic(light: UInt32, dark: UInt32, darkAlpha: CGFloat = 1) -> Color {

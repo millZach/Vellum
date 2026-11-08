@@ -67,9 +67,6 @@ struct DrawingViewerView: View {
 
     private var header: some View {
         let text = DrawingRowText(model.entry)
-        let markers = DrawingMarker.of(model.entry, online: index.online, pdfsOnThisDuo: index.pdfsOnThisDuo,
-                                      pdfPathsOnThisDuo: index.pdfPathsOnThisDuo)
-            .filter { $0 != .notOnThisDuo || !model.isReady }
         return VStack(alignment: .leading, spacing: 3) {
             if full {
                 Button(action: back) {
@@ -93,11 +90,18 @@ struct DrawingViewerView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if !markers.isEmpty {
-                DrawingFlow(spacing: 4) {
-                    ForEach(markers, id: \.self) { DrawingMarkerChip(marker: $0) }
-                }
-                .padding(.top, 2)
+            if !DrawingChips.isEmpty(index, model.entry, hideNotOnThisDuo: model.isReady) {
+                DrawingChips(model: index, entry: model.entry, hideNotOnThisDuo: model.isReady)
+                    .padding(.top, 2)
+            }
+            // The laptop's one line about its plot: references it couldn't find, or the fallback page setup (#70).
+            if let note = model.plotNote {
+                Label(note, systemImage: "exclamationmark.triangle")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(DrawingIndexColors.plot)
+                    .lineLimit(2)
+                    .padding(.top, 2)
+                    .accessibilityIdentifier("plot-note")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -184,11 +188,10 @@ struct DrawingViewerView: View {
             case .opening:
                 ProgressView()
             case .noPDFYet:
+                // Waiting for the laptop's plot (#70): it fills in here when it comes.
                 waitCard {
-                    Label("No PDF yet", systemImage: "laptopcomputer").font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(DrawingIndexColors.plot)
-                    Text("Nobody has plotted \(model.entry.number ?? model.entry.name) yet, so there is no PDF to show or place. Asking the laptop to plot it from here comes in a later update.")
-                        .font(.system(size: 12.5)).foregroundStyle(.secondary)
+                    PlotCard(entry: model.entry, stage: index.plots[model.entry.id]?.stage,
+                             askAgain: { index.ask(model.entry) })
                 }
             case .failed(let problem):
                 waitCard {

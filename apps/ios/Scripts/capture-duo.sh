@@ -244,6 +244,10 @@ drawing_captures() {
 # first; and the Canvases tab after picking the newest, the 1/4" M-101 waiting as a true-size outline for a tap. Then,
 # in light, the time from a tap to the first page of a made-up twelve-page E-size set already on the Duo, three opens,
 # into viewer-timing.json for perf-compare.py. viewer.txt logs what each step did.
+# Then a DWG with no PDF yet (#70), E-201, with a made-up laptop answering its plot request on the made-up Dropbox
+# (`--ui-plot`, Vellum/Drawings/DrawingIndexSetup.swift): plotting on the laptop, waiting for the laptop (its check-in
+# 12 minutes old), queued on this Duo (offline), the laptop's reason when it won't plot it, the viewer filled in with
+# the plot and its one line about missing references, and the banner over the Canvases tab after leaving the viewer.
 viewer_captures() {
   data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
   rm -rf "$data/Documents/capture-index" "$data/Documents/viewer.txt"
@@ -256,6 +260,13 @@ viewer_captures() {
     capture viewer "$@" --ui-viewer M-501
     capture viewer-picker "$@" --ui-reset --ui-seed-list --ui-viewer M-101 --ui-viewer-step picker
     capture viewer-placing "$@" --ui-reset --ui-seed-list --ui-viewer M-101 --ui-viewer-step place
+    WAIT=${PLOT_WAIT:-12}
+    capture viewer-plotting "$@" --ui-viewer E-201 --ui-plot plotting
+    capture viewer-plot-waiting "$@" --ui-viewer E-201 --ui-plot waiting
+    capture viewer-plot-queued "$@" --ui-viewer E-201 --ui-plot queued
+    capture viewer-plot-failed "$@" --ui-viewer E-201 --ui-plot failed
+    capture viewer-plot-filled "$@" --ui-viewer E-201 --ui-plot done-warning
+    capture viewer-plot-banner "$@" --ui-reset --ui-seed-list --ui-viewer E-201 --ui-plot done --ui-plot-leave
     WAIT=$saved_wait
   done
   appearance=light

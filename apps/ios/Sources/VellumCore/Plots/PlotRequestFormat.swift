@@ -149,10 +149,13 @@ public struct PlotAnswer: Codable, Hashable, Sendable {
     public var missingReferences: Int?
     /// On `done` with references missing, a sentence to show as it is.
     public var warning: String?
+    /// On `done`: true for a plot fitted to the page, not to scale (a Model-tab DWG's fallback, #92), which the Duo
+    /// places as an NTS sheet. The laptop writes it only when true (indexer 1.1.2 and later), so it is nil otherwise.
+    public var fitted: Bool?
 
     public init(request: String?, id: String?, state: State, updated: String? = nil, pdf: String? = nil,
                 contentHash: String? = nil, pageSetup: String? = nil, reason: String? = nil,
-                missingReferences: Int? = nil, warning: String? = nil) {
+                missingReferences: Int? = nil, warning: String? = nil, fitted: Bool? = nil) {
         self.request = request
         self.id = id
         self.state = state
@@ -163,6 +166,7 @@ public struct PlotAnswer: Codable, Hashable, Sendable {
         self.reason = reason
         self.missingReferences = missingReferences
         self.warning = warning
+        self.fitted = fitted
     }
 
     /// Reads an answer; nil for one that is not format 1's shape (a state this Vellum doesn't know among them), which
@@ -178,12 +182,21 @@ public struct PlotAnswer: Codable, Hashable, Sendable {
     /// `done` or `failed`: it will not change, and the Duo deletes its request once it has read it.
     public var isFinal: Bool { state == .done || state == .failed }
 
+    /// A `done` plot fitted to the page, not to scale (#92).
+    public var isFitted: Bool { state == .done && fitted == true }
+
+    /// The viewer's line for a plot fitted to the page, in place of the fallback line (#92, Zach's words).
+    public static let fittedNote = "Plotted to fit, not to scale"
+
     /// The one short line the viewer shows under a plot that came with something to know: the laptop's warning about
-    /// missing references, and its sentence about plotting with the fallback page setup.
+    /// missing references, and its sentence about plotting with the fallback page setup, or for a plot fitted to the
+    /// page, "Plotted to fit, not to scale" in its place.
     public var note: String? {
         var parts: [String] = []
         if state == .done, let warning, !warning.isEmpty { parts.append(Self.sentence(warning)) }
-        if state == .done, pageSetup == "fallback" {
+        if isFitted {
+            parts.append(Self.fittedNote)
+        } else if state == .done, pageSetup == "fallback" {
             parts.append(Self.sentence(reason ?? "Plotted with DWG To PDF at its paper size, not its own page setup"))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " ")

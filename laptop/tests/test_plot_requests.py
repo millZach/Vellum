@@ -225,6 +225,7 @@ def test_a_request_is_answered_plotting_then_done_and_the_index_lists_the_pdf(dr
     answer = answer_of(dropbox, name)
     assert answer["state"] == "done" and answer["format"] == 1 and answer["request"] == name
     assert answer["id"] == entry["id"] and answer["pageSetup"] == "saved" and answer["reason"] is None
+    assert "fitted" not in answer and "fitted" not in entries(dropbox)[("E-301.dwg", "Layout1")]["pdf"]
     assert answer["pdf"].startswith("/Vellum/Plots/Made-up Plant Upgrade/E-301 - Layout1 - ")
     pdf = dropbox / answer["pdf"].lstrip("/")
     assert pdf.read_bytes().startswith(b"%PDF")
@@ -970,9 +971,11 @@ def test_a_plot_of_a_dwg_with_no_layout_yet_stays_once_its_layouts_are_known(dro
 # --- The Model tab and answers out of step (#87) -----------------------------------------------------------------
 
 MODEL_ANSWERS = ["_.-PLOT", "_Y", "Model", "DWG To PDF.pc3", "ANSI full bleed A (8.50 x 11.00 Inches)", "_I", "_L",
-                 "_N", "_E", "1:1", "", "_Y", "", "_Y", "_A", "<out>", "_N", "_Y"]
-# detailed, layout, device, paper, units, orientation, upside down, area, scale, offset, plot styles, style table,
-# lineweights, then the shade plot setting on the Model tab
+                 "_N", "_E", "_F", "", "_Y", "", "_Y", "_A", "<out>", "_N", "_Y"]
+# detailed, layout, device, paper, units, orientation, upside down, area, scale (Fit, #92), offset, plot styles, style
+# table, lineweights, then the shade plot setting on the Model tab
+FITTED_REASON = ("the Model tab has no page setup that plots to PDF, so its extents were plotted with DWG To PDF to "
+                 "fit the page, not to scale")
 
 
 def model_dwg(dropbox: Path) -> Path:
@@ -982,8 +985,8 @@ def model_dwg(dropbox: Path) -> Path:
     return dwg
 
 
-def test_a_model_tab_dwg_falls_back_to_its_extents_at_1_1_with_the_model_tabs_answers(dropbox, tmp_path, make_indexer,
-                                                                                       plot_log):
+def test_a_model_tab_dwg_falls_back_to_its_extents_fitted_with_the_model_tabs_answers(dropbox, tmp_path, make_indexer,
+                                                                                         plot_log):
     model_dwg(dropbox)
     indexer = make_indexer(plotter=plotter(tmp_path, timeout=10))
     indexer.scan()
@@ -993,8 +996,10 @@ def test_a_model_tab_dwg_falls_back_to_its_extents_at_1_1_with_the_model_tabs_an
     assert time.monotonic() - started < 8
     answer = answer_of(dropbox, name)
     assert (answer["state"], answer["pageSetup"]) == ("done", "fallback")
-    assert answer["reason"] == ("the Model tab has no page setup that plots to PDF, so its extents were plotted with "
-                                "DWG To PDF at 1:1")
+    assert answer["reason"] == FITTED_REASON
+    assert answer["fitted"] is True
+    listed = entries(dropbox)[("M-101.dwg", "Model")]
+    assert listed["pdf"]["path"] == answer["pdf"] and listed["pdf"]["fitted"] is True
     runs = plot_log()
     assert [r["mode"] for r in runs] == ["saved", "model"]
     out = runs[1]["answers"][14]
@@ -1004,6 +1009,71 @@ def test_a_model_tab_dwg_falls_back_to_its_extents_at_1_1_with_the_model_tabs_an
     again = ask(dropbox, entries(dropbox)[("M-101.dwg", "Model")])
     answer_now(indexer)
     assert answer_of(dropbox, again)["reason"] == answer["reason"] and len(plot_log()) == 2
+    assert answer_of(dropbox, again)["fitted"] is True and answer_of(dropbox, again)["pdf"] == answer["pdf"]
+
+
+def test_a_model_tab_plot_made_at_1_1_before_92_is_plotted_again_fitted_and_kept_as_an_older_plot(
+        dropbox, tmp_path, make_indexer, plot_log):
+    from vellum_indexer import files
+    from vellum_indexer import plot as plot_module
+    from vellum_indexer.state import Plot
+
+    dwg = model_dwg(dropbox)
+    indexer = make_indexer(plotter=plotter(tmp_path))
+    indexer.scan()
+    entry = entries(dropbox)[("M-101.dwg", "Model")]
+    # the plot 1.1.1 made (#90): the Model tab's extents at 1:1, named as it named it, with no fitted mark
+    st = dwg.stat()
+    old = plot_name("Made-up Plant Upgrade", entry["dwg"]["path"], "Model", st.st_mtime_ns,
+                    plot_module.file_version(dwg))
+    old_file = files.local_path(dropbox, old)
+    make_pdf(old_file, [(72, 72, 12, "Made-up 1:1 plot of Model")], inches=(11, 8.5))
+    facts = {**indexer._read("pdf", old_file), "pageSetup": "fallback", "plottedLayout": "Model", "references": 0,
+             "missingReferences": 0}
+    pst = old_file.stat()
+    sheet = f"{files.key(entry['dwg']['path'])}#model"
+    indexer.state.put_plot(Plot(sheet, st.st_size, st.st_mtime_ns, old, pst.st_size, pst.st_mtime_ns - 10**9, facts))
+    indexer.publish()
+    assert entries(dropbox)[("M-101.dwg", "Model")]["pdf"]["path"] == old
+    assert "fitted" not in entries(dropbox)[("M-101.dwg", "Model")]["pdf"]
+
+    name = ask(dropbox, entry)
+    answer_now(indexer)
+    answer = answer_of(dropbox, name)
+    assert [r["mode"] for r in plot_log()] == ["saved", "model"]  # plotted again, not the 1:1 plot handed back
+    assert (answer["state"], answer["fitted"], answer["reason"]) == ("done", True, FITTED_REASON)
+    assert answer["pdf"] != old and answer["pdf"].startswith("/Vellum/Plots/Made-up Plant Upgrade/M-101 - Model - ")
+    assert old_file.read_bytes().startswith(b"%PDF")  # the old plot is not overwritten
+    listed = entries(dropbox)[("M-101.dwg", "Model")]
+    assert listed["pdf"]["path"] == answer["pdf"] and listed["pdf"]["fitted"] is True
+    assert listed["otherPdfs"] == [old]
+    # asked again: the fitted plot, not plotted a third time
+    again = ask(dropbox, entry)
+    answer_now(indexer)
+    assert answer_of(dropbox, again)["pdf"] == answer["pdf"] and len(plot_log()) == 2
+
+
+def test_an_answer_says_fitted_only_when_it_is():
+    before_92 = (b'{\n "contentHash": "h",\n "format": 1,\n "id": "0123456789abcdef",\n "missingReferences": 0,\n'
+                 b' "pageSetup": "saved",\n "pdf": "/Vellum/Plots/x.pdf",\n "reason": null,\n "request": "r1234567",\n'
+                 b' "state": "done",\n "updated": "2026-11-08T12:00:00Z",\n "warning": null\n}\n')
+    plain = pr.Answer("r1234567", "done", id="0123456789abcdef", pdf="/Vellum/Plots/x.pdf", content_hash="h",
+                      page_setup="saved", missing_references=0, updated="2026-11-08T12:00:00Z")
+    assert PlotFolder._bytes(plain) == before_92
+    plain.fitted = False
+    assert PlotFolder._bytes(plain) == before_92
+    fitted = pr.Answer("r1234567", "done", id="0123456789abcdef", pdf="/Vellum/Plots/x.pdf", content_hash="h",
+                       page_setup="fallback", missing_references=0, fitted=True, updated="2026-11-08T12:00:00Z")
+    assert json.loads(PlotFolder._bytes(fitted))["fitted"] is True
+    assert "fitted" not in pr.Answer("r1234567", "plotting", fitted=True).to_json()
+
+
+def test_a_fitted_plot_never_takes_another_plots_name():
+    t = 1_790_000_000 * 10**9
+    args = ("Made-up Plant Upgrade", "/Projects/Made-up Plant Upgrade/CAD/M-101.dwg", "Model", t, "abc")
+    assert plot_name(*args) != plot_name(*args, mode="fit")
+    assert plot_name(*args, mode="fit").rsplit(" - ", 1)[0] == plot_name(*args).rsplit(" - ", 1)[0]
+    assert plot_name(*args, mode="") == plot_name(*args)  # paper layouts keep the names they had
 
 
 def test_a_paper_layout_falls_back_with_the_layouts_answers_unchanged(dropbox, tmp_path, make_indexer, plot_log):
@@ -1021,6 +1091,7 @@ def test_a_paper_layout_falls_back_with_the_layouts_answers_unchanged(dropbox, t
                                    "_L", "_N", "_L", "1:1", "", "_Y", "", "_Y"]
     assert run["answers"][13:16] == ["_N", "_N", "_N"]  # scale lineweights, paper space first, hide paperspace
     assert run["answers"][16].endswith("/fallback.pdf") and run["answers"][17:] == ["_N", "_Y"]
+    assert "fitted" not in answer and "fitted" not in entries(dropbox)[("E-202.dwg", "Layout1")]["pdf"]
 
 
 def test_answers_out_of_step_fail_within_seconds_with_a_plain_reason(dropbox, tmp_path, make_indexer, plot_log,
@@ -1057,6 +1128,7 @@ def test_the_lisp_catches_a_cancelled_plot_and_reports_failed():
     script = plot_script("Model", Path("C:/w/model.pdf"), Path("C:/w/model.txt"), "model", "ANSI A", "Inches")
     assert "*error*" in script and "FAILED" in script
     assert '"_E" "1:1" "" "_Y" "" "_Y"\n' not in script and '"_A" out "_N" "_Y"' in script
+    assert '"_E" "_F" "" "_Y" "" "_Y" "_A" out "_N" "_Y"' in script and '"_L" "1:1" "" "_Y" "" "_Y" "_N"' in script
     # AutoCAD refuses a command inside vl-catch-all-apply or *error* ("bad order function: COMMAND", #87)
     for form in forms_starting(script, "(vl-catch-all-apply") + forms_starting(script, "(setq *error*"):
         assert not CALLS_COMMAND.search(form), form

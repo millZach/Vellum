@@ -115,6 +115,8 @@ public struct PlotProgress: Hashable, Sendable {
     public var keptName: String?
     /// The laptop's warning or fallback line (`PlotAnswer.note`), shown in one short line with the PDF.
     public var note: String?
+    /// Whether the plot was fitted to the page, not to scale (#92): it is placed as an NTS sheet.
+    public var fitted: Bool
 
     /// The plot's note, for the viewer showing the PDF at `path`: only while that PDF is this plot, so a note never
     /// lands on another PDF the index lists for the drawing later.
@@ -124,7 +126,7 @@ public struct PlotProgress: Hashable, Sendable {
     }
 
     public init(entry: String, request: String, stage: PlotStage, pdfPath: String? = nil, contentHash: String? = nil,
-                keptName: String? = nil, note: String? = nil) {
+                keptName: String? = nil, note: String? = nil, fitted: Bool = false) {
         self.entry = entry
         self.request = request
         self.stage = stage
@@ -132,5 +134,6 @@ public struct PlotProgress: Hashable, Sendable {
         self.contentHash = contentHash
         self.keptName = keptName
         self.note = note
+        self.fitted = fitted
     }
 }

@@ -13,7 +13,9 @@ The plotter is a seam (``Plotter``), as the title block reader is: AutoCAD's con
   ``DWG To PDF.pc3`` at the layout's paper size, matched to one of that plotter's sheets, with the layout's area, at
   1:1, keeping its plot style. The answer says so. When the paper size matches none of its sheets the plot fails with
   that reason rather than guessing. The Model tab has no layout to plot and AutoCAD asks it other questions, so a
-  Model-tab DWG's fallback plots its extents at 1:1 on that sheet, with the Model tab's own answers (#87).
+  Model-tab DWG's fallback plots its extents on that sheet with the Model tab's own answers (#87), fitted to the page,
+  not to scale (#92): at 1:1 a real Model-tab drawing ran off the sheet. Such a plot is marked ``fitted``, and the Duo
+  places it as an NTS sheet.
 - **Never waiting on a question out of step.** Should AutoCAD ask something the script did not expect, it cancels the
   ``-PLOT``; the LISP catches that and reports ``FAILED`` and ``END``, and the plotter stops a console still running
   a few seconds after its report's ``END``. The plot then fails at once with a plain reason, and the time limit is
@@ -67,6 +69,7 @@ class PlotResult:
     layout: str = ""  # the layout plotted, as AutoCAD names it (the saved one, for a request with no layout)
     references: int = 0  # top-level xrefs, images and underlays
     missing: int = 0  # of those, how many couldn't be found
+    fitted: bool = False  # plotted to fit the page, not to scale (the Model tab's fallback, #92)
 
 
 class Plotter(Protocol):
@@ -131,7 +134,8 @@ def is_model(layout: str | None) -> bool:
 def fallback_reason(layout: str | None) -> str:
     """The answer's reason for a plot made with DWG To PDF because the layout's own page setup doesn't plot to PDF."""
     if is_model(layout):
-        return "the Model tab has no page setup that plots to PDF, so its extents were plotted with DWG To PDF at 1:1"
+        return ("the Model tab has no page setup that plots to PDF, so its extents were plotted with DWG To PDF to fit "
+                "the page, not to scale")
     return "the layout has no page setup that plots to PDF, so it was plotted with DWG To PDF at its paper size"
 
 
@@ -149,7 +153,8 @@ def landscape(width_mm: float, height_mm: float, rotation: int) -> bool:
 # reference paths absolute against FOLDER (the original DWG's folder) and reports each reference ("REF", kind, path,
 # 1 found or 0 not), then either plots and writes "PLOTTED", or writes "UNUSABLE" (mode "saved" and its plotter is not
 # a PDF one) or "NOLAYOUT", then END. MODE "saved" takes the layout's own page setup; "fallback" types a paper layout's
-# detailed -PLOT answers and "model" the Model tab's, which AutoCAD 2026 asks differently (#87). A -PLOT AutoCAD
+# detailed -PLOT answers and "model" the Model tab's, which AutoCAD 2026 asks differently (#87), its extents at scale
+# Fit (#92). A -PLOT AutoCAD
 # cancels ("; error: Function cancelled") lands in vellum-plot's *error* handler, which writes "FAILED" with AutoCAD's
 # message and END; one still asking when its answers run out (CMDACTIVE) writes "FAILED" and is cancelled with an
 # empty (command). Either way "PLOTTED" is never written for a plot that didn't finish.
@@ -227,7 +232,7 @@ PLOT_FORMS = [
                 (progn (command "_.-PLOT" "_N" name "" "" out "_N" "_Y") (vellum-plot-done f))
                 (write-line "UNUSABLE" f)))
             ((= mode "model")
-              (command "_.-PLOT" "_Y" name "DWG To PDF.pc3" sheet units orient "_N" "_E" "1:1" "" "_Y" "" "_Y"
+              (command "_.-PLOT" "_Y" name "DWG To PDF.pc3" sheet units orient "_N" "_E" "_F" "" "_Y" "" "_Y"
                        "_A" out "_N" "_Y")
               (vellum-plot-done f))
             (T
@@ -351,14 +356,14 @@ class AccoreconsolePlotter:
                                 f"and its paper size ({setup.width_mm:.0f} x {setup.height_mm:.0f} mm) isn't one "
                                 "DWG To PDF has")
             orient = "Landscape" if landscape(setup.width_mm, setup.height_mm, setup.rotation) else "Portrait"
-            # the Model tab: its extents at 1:1, with the prompts AutoCAD asks there (#87)
+            # the Model tab: its extents fitted to the page, with the prompts AutoCAD asks there (#87, #92)
             mode = self.model_mode if model else "fallback"
             _, outcome, pdf, refs = self._run(job, copy, setup.layout, mode, sheet[0], sheet[1], orient,
                                               folder=origin)
             if outcome != "PLOTTED" or pdf is None:
                 raise PlotError("AutoCAD made no PDF with DWG To PDF")
             return PlotResult(pdf, "fallback", setup.device, sheet[0], setup.layout, len(refs),
-                              sum(not r.found for r in refs))
+                              sum(not r.found for r in refs), fitted=model)
         finally:
             shutil.rmtree(job, ignore_errors=True)
 
@@ -457,17 +462,20 @@ def safe_part(text: str, limit: int = 60) -> str:
     return cleaned
 
 
-def plot_name(project: str | None, dwg_path: str, layout: str | None, dwg_mtime_ns: int, version: str = "") -> str:
+def plot_name(project: str | None, dwg_path: str, layout: str | None, dwg_mtime_ns: int, version: str = "",
+              mode: str = "") -> str:
     """The plot's Dropbox path: ``/Vellum/Plots/<project>/<DWG name> - <layout> - <DWG saved, UTC> - <8 hex>.pdf``.
 
     The project and drawing are recognisable at a glance. The layout keeps two layouts of one DWG apart; the DWG's
     saved time, to the second, is there to read. The 8 hex digits come from the DWG's path, layout and ``version``,
     the SHA-256 of the DWG's bytes: two DWGs of one name in different folders of a project never clash, and nor do two
-    versions of one DWG saved within the same second, so a re-plot never overwrites the older plot.
+    versions of one DWG saved within the same second, so a re-plot never overwrites the older plot. ``mode`` is how
+    it was plotted when that isn't to scale (``"fit"``, #92), so a fitted re-plot of the DWG version a 1:1 plot was
+    made of never takes that plot's name; a plot to scale has none, and keeps the name it always had.
     """
     stem = PurePosixPath(dwg_path).stem
     saved = datetime.fromtimestamp(dwg_mtime_ns / 1e9, UTC).strftime("%Y-%m-%d %H%M%S")
-    key = dwg_path.lower() + "#" + (layout or "").lower() + "#" + version
+    key = dwg_path.lower() + "#" + (layout or "").lower() + "#" + version + (f"#{mode}" if mode else "")
     tag = hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
     parts = [safe_part(stem, 80)] + ([safe_part(layout, 40)] if layout else []) + [saved, tag]
     return "/" + "/".join([*PLOTS_FOLDER, safe_part(project or NO_PROJECT, 80), " - ".join(parts) + ".pdf"])

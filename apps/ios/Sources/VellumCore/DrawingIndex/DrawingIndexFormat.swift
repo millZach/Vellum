@@ -154,6 +154,11 @@ public struct DrawingEntry: Codable, Equatable, Hashable, Sendable, Identifiable
         public var size: Int?
         public var modified: String?
         public var read: Bool
+        /// True for a plot the laptop fitted to the page, not to scale (a Model-tab DWG's fallback, #92), which is placed
+        /// as an NTS sheet whatever the title block says; nil on every other PDF, and in an index from before 1.1.2, so
+        /// it is never encoded unless true. Declared beside `read`, where it fits in the padding before `contentHash`,
+        /// so an entry is no bigger than before #92 (`index_copy_bytes_20000`, docs/perf/baselines/drawing-index.json).
+        public var fitted: Bool?
         /// Dropbox's content hash, which names the PDF kept on the Duo (`SheetPDFs`); nil while unread.
         public var contentHash: String?
         public var pages: Int?
@@ -161,7 +166,7 @@ public struct DrawingEntry: Codable, Equatable, Hashable, Sendable, Identifiable
         public var paperInches: [Double]?
 
         public init(path: String, size: Int? = nil, modified: String? = nil, read: Bool = true,
-                    contentHash: String? = nil, pages: Int? = nil, paperInches: [Double]? = nil) {
+                    contentHash: String? = nil, pages: Int? = nil, paperInches: [Double]? = nil, fitted: Bool? = nil) {
             self.path = path
             self.size = size
             self.modified = modified
@@ -169,6 +174,7 @@ public struct DrawingEntry: Codable, Equatable, Hashable, Sendable, Identifiable
             self.contentHash = contentHash
             self.pages = pages
             self.paperInches = paperInches
+            self.fitted = fitted
         }
     }
 

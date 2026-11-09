@@ -97,7 +97,8 @@ struct DrawingViewerView: View {
                 DrawingChips(model: index, entry: model.entry, hideNotOnThisDuo: model.isReady)
                     .padding(.top, 2)
             }
-            // The laptop's one line about its plot: references it couldn't find, or the fallback page setup (#70).
+            // The laptop's one line about its plot: references it couldn't find, the fallback page setup (#70), or that
+            // it was plotted to fit, not to scale (#92).
             if let note = model.plotNote {
                 Label(note, systemImage: "exclamationmark.triangle")
                     .font(.system(size: 12.5))
@@ -119,7 +120,7 @@ struct DrawingViewerView: View {
     private var metaLine: Text {
         var parts: [Text] = []
         if let revision = model.entry.revision { parts.append(meta("Rev", revision)) }
-        if let scale = model.entry.scale { parts.append(meta("Scale", scale)) }
+        if let scale = model.scaleText { parts.append(meta("Scale", scale)) }
         if let date = model.entry.date { parts.append(Text(date)) }
         if let project = model.entry.project { parts.append(Text(project)) }
         guard var line = parts.first else { return Text("") }
@@ -287,8 +288,8 @@ struct DrawingViewerView: View {
             label = "Place on “\(name)”"
         }
         let ask = AddSheetModel(dropbox: .app, units: units, covers: { CanvasEditor.covers($0, units: units) })
-        ask.confirm(pdf, kept: kept, page: page, number: model.entry.number, indexScale: model.entry.scale,
-                    confirmation: DrawingOpening.confirmation(for: model.entry), placeLabel: label)
+        ask.confirm(pdf, kept: kept, page: page, number: model.entry.number, indexScale: model.scaleText,
+                    confirmation: DrawingOpening.confirmation(for: model.entry, pdf: pdf), placeLabel: label)
         ask.onPlace = { pending in
             asking = nil
             hand(pending, to: choice, handoff)

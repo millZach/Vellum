@@ -153,6 +153,86 @@ final class PlotRequestTests: XCTestCase {
         XCTAssertNil(PlotAnswer.read(Array(#"{"format": 1, "state": "paused"}"#.utf8)))
     }
 
+    func testAFittedPlotSaysSoInPlaceOfTheFallbackLineAndAnOlderAnswerReadsAsBefore() throws {
+        let reason = "the Model tab has no page setup that plots to PDF, so its extents were plotted with DWG To PDF to "
+            + "fit the page, not to scale"
+        let fitted = try XCTUnwrap(PlotAnswer.read(Laptop.answer(
+            "r", "e", "done", pdf: "/Vellum/Plots/x.pdf", hash: "h", pageSetup: "fallback", reason: reason, fitted: true)))
+        XCTAssertEqual(fitted.fitted, true)
+        XCTAssertTrue(fitted.isFitted)
+        XCTAssertEqual(fitted.note, "Plotted to fit, not to scale")
+        XCTAssertEqual(PlotAnswer.fittedNote, "Plotted to fit, not to scale")
+        // With missing references, the warning first, as before.
+        let both = try XCTUnwrap(PlotAnswer.read(Laptop.answer(
+            "r", "e", "done", pdf: "/Vellum/Plots/x.pdf", hash: "h", pageSetup: "fallback", reason: reason, missing: 1,
+            warning: "1 reference couldn't be found, so the PDF is missing it", fitted: true)))
+        XCTAssertEqual(both.note, "1 reference couldn't be found, so the PDF is missing it. Plotted to fit, not to scale")
+        // The laptop writes no `fitted` for a plot to scale; a `false` reads the same. An answer from a laptop before
+        // 1.1.2 has no `fitted` and reads exactly as before.
+        let scaled = try XCTUnwrap(PlotAnswer.read(Laptop.answer(
+            "r", "e", "done", pdf: "/Vellum/Plots/x.pdf", hash: "h", pageSetup: "fallback",
+            reason: "the layout has no page setup that plots to PDF, so it was plotted with DWG To PDF at its paper size",
+            fitted: false)))
+        XCTAssertFalse(scaled.isFitted)
+        XCTAssertEqual(scaled.note, "The layout has no page setup that plots to PDF, so it was plotted with DWG To PDF at "
+            + "its paper size.")
+        let older = try XCTUnwrap(PlotAnswer.read(Laptop.answer(
+            "r", "e", "done", pdf: "/Vellum/Plots/x.pdf", hash: "h", pageSetup: "fallback",
+            reason: "the Model tab has no page setup that plots to PDF, so its extents were plotted with DWG To PDF at 1:1")))
+        XCTAssertNil(older.fitted)
+        XCTAssertFalse(older.isFitted)
+        XCTAssertEqual(older.note, "The Model tab has no page setup that plots to PDF, so its extents were plotted with DWG "
+            + "To PDF at 1:1.")
+        XCTAssertEqual(older.pdf, "/Vellum/Plots/x.pdf")
+    }
+
+    func testAFittedPlotIsKeptFittedThroughTheLedgerAndOpensAsAnNTSSheet() async throws {
+        let rig = try Rig(t0, test: self)
+        var entry = IndexFixture.entry("M-102")
+        entry.scale = "1/4\" = 1'-0\""  // the title block's scale, which a fitted plot doesn't keep
+        let pdfBytes = Array("%PDF-1.4 made-up fitted plot of M-102 (example)\n%%EOF\n".utf8)
+        let pdfPath = "/Vellum/Plots/Made-up School Addition/M-102 - Model - 2026-09-21 141500 - 0a1b2c3d.pdf"
+        rig.onLook { time in
+            if time == t0.addingTimeInterval(5) {
+                rig.dropbox.changeOnTheLaptop(pdfPath, to: pdfBytes)
+                rig.laptop.answerAll("done", pdf: pdfPath, hash: DropboxContentHash.of(pdfBytes), pageSetup: "fallback",
+                                     reason: "the Model tab has no page setup that plots to PDF, so its extents were "
+                                         + "plotted with DWG To PDF to fit the page, not to scale", fitted: true)
+            }
+        }
+        await rig.watch.start()
+        await rig.watch.ask(entry)
+        await rig.watch.settled()
+        let doneProgress = await rig.watch.current[entry.id]
+        let done = try XCTUnwrap(doneProgress)
+        XCTAssertEqual(done.stage, .done)
+        XCTAssertTrue(done.fitted)
+        XCTAssertEqual(done.note, "Plotted to fit, not to scale")
+        let shown = try XCTUnwrap(DrawingOpening.pdf(plotted: done))
+        XCTAssertTrue(shown.fitted)
+        XCTAssertEqual(DrawingOpening.scaleText(for: entry, pdf: shown), "NTS")
+        XCTAssertEqual(DrawingOpening.confirmation(for: entry, pdf: shown).prefilled, .notToScale)
+        XCTAssertEqual(DrawingOpening.note(for: shown, plot: done), "Plotted to fit, not to scale")
+        // After a relaunch, from the ledger, it is still fitted.
+        let relaunched = try Rig(t0, test: self, dropbox: rig.dropbox, ledger: rig.ledger, pdfs: rig.pdfs)
+        await relaunched.watch.start()
+        let afterRelaunchProgress = await relaunched.watch.current[entry.id]
+        let afterRelaunch = try XCTUnwrap(afterRelaunchProgress)
+        XCTAssertTrue(afterRelaunch.fitted)
+        XCTAssertEqual(DrawingOpening.pdf(plotted: afterRelaunch)?.fitted, true)
+    }
+
+    func testALedgerWrittenBeforeFittedPlotsStillReads() throws {
+        let old = #"{"failed":{},"format":1,"open":[],"plotted":{"e":{"contentHash":"h","keptName":"k","note":null,"#
+            + #""path":"\/Vellum\/Plots\/x.pdf"}}}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let ledger = try decoder.decode(PlotLedger.self, from: Data(old.utf8))
+        XCTAssertEqual(ledger.plotted["e"], PlottedPDF(path: "/Vellum/Plots/x.pdf", contentHash: "h", keptName: "k",
+                                                       note: nil))
+        XCTAssertNil(ledger.plotted["e"]?.fitted)
+    }
+
     // MARK: Asking and waiting
 
     func testAPlotIsAskedForWatchedDownloadedOnceAndOnlyThenItsRequestDeleted() async throws {
@@ -678,7 +758,7 @@ private final class Laptop: @unchecked Sendable {
 
     /// Answers every request in `requests/` with `state`, as `Answer.to_json` writes it.
     func answerAll(_ state: String, pdf: String? = nil, hash: String? = nil, pageSetup: String? = nil,
-                   reason: String? = nil, missing: Int? = nil, warning: String? = nil) {
+                   reason: String? = nil, missing: Int? = nil, warning: String? = nil, fitted: Bool? = nil) {
         for (name, bytes) in dropbox.files(in: PlotRequestFormat.requestsFolder) {
             guard name.hasSuffix(".json"), !name.hasSuffix(".answer.json"),
                   let body = try? JSONSerialization.jsonObject(with: Data(bytes)) as? [String: Any] else { continue }
@@ -686,19 +766,21 @@ private final class Laptop: @unchecked Sendable {
             dropbox.changeOnTheLaptop(PlotRequestFormat.answerPath(request), to: Self.answer(
                 request, body["id"] as? String, state, pdf: pdf, hash: hash,
                 pageSetup: pageSetup ?? (state == "done" ? "saved" : nil), reason: reason,
-                missing: missing ?? (state == "done" ? 0 : nil), warning: warning))
+                missing: missing ?? (state == "done" ? 0 : nil), warning: warning, fitted: fitted))
         }
     }
 
     static func answer(_ request: String, _ id: String?, _ state: String, pdf: String? = nil, hash: String? = nil,
                        pageSetup: String? = nil, reason: String? = nil, missing: Int? = nil,
-                       warning: String? = nil) -> [UInt8] {
+                       warning: String? = nil, fitted: Bool? = nil) -> [UInt8] {
         func json(_ value: Any?) -> Any { value ?? NSNull() }
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "format": 1, "request": request, "id": json(id), "state": state, "updated": "2026-11-07T12:00:09Z",
             "pdf": json(pdf), "contentHash": json(hash), "pageSetup": json(pageSetup),
             "reason": json(reason), "missingReferences": json(missing), "warning": json(warning),
         ]
+        // 1.1.2 and later write `fitted` (#92); an answer from 1.1.1 or before has no such key.
+        if let fitted { object["fitted"] = fitted }
         return [UInt8]((try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data())
     }
 }

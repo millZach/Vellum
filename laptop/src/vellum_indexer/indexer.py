@@ -483,7 +483,8 @@ class Indexer:
                             page_setup=page_setup,
                             reason=None if page_setup != "fallback" else
                             plot_module.fallback_reason(plot.facts.get("plottedLayout") or layout),
-                            missing_references=missing, warning=missing_warning(missing)))
+                            missing_references=missing, warning=missing_warning(missing),
+                            fitted=bool(plot.facts.get("fitted"))))
         return True
 
     def _entry_of(self, request: PlotRequest) -> tuple[str, Record, str | None]:
@@ -508,6 +509,7 @@ class Indexer:
             raise Refused("the DWG isn't in Dropbox any more")
         for plot in self.state.plots():  # asked twice (two taps, two Duos): the same DWG gives the same plot
             if (plot.sheet == sheet and (plot.dwg_size, plot.dwg_mtime_ns) == (facts.size, facts.mtime_ns)
+                    and not made_at_1_1_on_the_model_tab(plot)
                     and files.local_path(self.root, plot.path).is_file()):
                 return plot, plot.facts.get("pageSetup") or "saved"
         copy = None
@@ -542,7 +544,8 @@ class Indexer:
             if copy is not None:
                 Downloader.done(copy)
         project = self.projects.project_of(record.path)
-        db_pdf = plot_module.plot_name(project.name, record.path, layout, facts.mtime_ns, version)
+        db_pdf = plot_module.plot_name(project.name, record.path, layout, facts.mtime_ns, version,
+                                       "fit" if result.fitted else "")
         dest = files.local_path(self.root, db_pdf)
         if not is_inside(dest, self.plots_root):
             raise Refused("the plot's name would put it outside Dropbox/Vellum/Plots")
@@ -556,12 +559,14 @@ class Indexer:
         read["plottedLayout"] = result.layout or layout  # a request with no layout: the layout AutoCAD plotted
         read["references"] = result.references
         read["missingReferences"] = result.missing
+        if result.fitted:  # to fit the page, not to scale: the Duo places it NTS (#92); absent otherwise
+            read["fitted"] = True
         plot = Plot(sheet, facts.size, facts.mtime_ns, db_pdf, st.st_size, st.st_mtime_ns, read)
         self.state.put_plot(plot)
         self.counters.plots_made += 1
         log.info("Plotted %s (%s) to %s with %s page setup", record.path, layout or "its saved layout", db_pdf,
                  "its own" if result.page_setup == "saved" else
-                 "DWG To PDF, the Model tab's extents at 1:1, as a fallback," if plot_module.is_model(result.layout)
+                 "DWG To PDF, the Model tab's extents fitted to the page, as a fallback," if result.fitted
                  else "DWG To PDF at its paper size, as a fallback,")
         return plot, result.page_setup
 
@@ -574,3 +579,10 @@ class Indexer:
         for plot in plots:
             if plot.path in found and found[plot.path] is None:
                 self.state.delete_plot(plot.path)
+
+
+def made_at_1_1_on_the_model_tab(plot: Plot) -> bool:
+    """A plot of the Model tab's extents at 1:1 through the fallback, as 1.1.1 made them (#90): it ran off the sheet, so
+    it is never handed out again. The DWG is plotted again, fitted (#92), and this one becomes an older plot."""
+    return (plot.facts.get("pageSetup") == "fallback" and plot_module.is_model(plot.facts.get("plottedLayout"))
+            and not plot.facts.get("fitted"))

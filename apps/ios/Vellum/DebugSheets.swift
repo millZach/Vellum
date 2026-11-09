@@ -179,7 +179,10 @@ enum DebugSheetSource {
         try? (old + line + "\n").write(to: file, atomically: true, encoding: .utf8)
     }
 
-    static func pending(file index: Int, page: Int, scale: Sheet.Scale? = nil) async -> CanvasEditor.PendingSheet? {
+    /// `fitted` makes it a plot fitted to the page, not to scale (#92, #96), as search's Place on a canvas, Open in a new
+    /// canvas and Add sheet make one: NTS, with the fitted mark.
+    static func pending(file index: Int, page: Int, scale: Sheet.Scale? = nil,
+                        fitted: Bool = false) async -> CanvasEditor.PendingSheet? {
         let file = MadeUpPDF.dropboxFile(index)
         guard let pdfs = SheetPDFs.app,
               let url = try? await pdfs.pdf(for: file, download: { MadeUpPDF.data(index) }) else { return nil }
@@ -200,7 +203,7 @@ enum DebugSheetSource {
         let sheet = info.reading.sheet(placedAt: chosen,
                                        page: SheetPage(file: file.keptName, name: file.name, path: file.path,
                                                        index: page, number: info.reading.sheetNumber),
-                                       invertsBadly: invertsBadly)
+                                       invertsBadly: invertsBadly, fitted: fitted)
         return CanvasEditor.PendingSheet(sheet: sheet, pdf: url, keptName: file.keptName)
     }
 }
@@ -274,6 +277,9 @@ struct CaptureSheetsTransport: DropboxTransport {
 /// - `--ui-sheets select-ink`, `select-sheet` (#64): the same sheet and markups, with Select in hand and a tap of the
 ///   Pencil on the red cloud on the sheet, which picks the cloud and not the sheet; or on bare paper, which picks the sheet
 ///   with its strip. Each logs what the tap picked and the status bar's prompt.
+/// - `--ui-sheets turn-fitted` (#96): the 1/4" plan placed as a plot fitted to the page, so NTS at its printed size, and
+///   picked up with a tap of the lasso: its strip has the angle, 90° left, 90° right and Done, and no Change scale. A
+///   scale change asked of it through the canvas view is refused, and the log says the sheet is still NTS.
 /// - `--ui-sheets scan`: the scan placed at 1/8" = 1'-0" beside the 1/4" plan: in dark mode the plan inverts and the
 ///   scan dims.
 /// - `--ui-sheets snap-corner`, `snap-edge` (#57): the measure tool's Pencil held down by a placed sheet's outline, so the
@@ -332,6 +338,8 @@ enum DebugSheets {
             case "turn-selected", "turn-90", "turn-angle", "turn-catch", "turn-moved", "turn-scale", "select-ink",
                  "select-sheet":
                 await turn(what, view, editor)
+            case "turn-fitted":
+                await turnFitted(view, editor)
             case "snap-corner", "snap-edge":
                 await snap(what, view, editor)
             default:
@@ -376,6 +384,28 @@ enum DebugSheets {
         view.viewportJumped()
         try? await Task.sleep(for: .seconds(0.3))
         logTurned(editor)
+    }
+
+    /// Places the 1/4" plan as a fitted plot and picks it up with the lasso, so its strip shows without Change scale (#96);
+    /// then asks the canvas view for a scale change, which is refused.
+    private static func turnFitted(_ view: InkCanvasUIView, _ editor: CanvasEditor) async {
+        guard let placed = await place(view, editor, file: 1, page: 0, fitted: true) else { return }
+        let reach = placed.centre.distance(to: placed.origin)
+        editor.zoom(to: CanvasRect(origin: placed.centre.offsetBy(dx: reach * -1.05, dy: reach * -1.05),
+                                   size: CanvasSize(width: reach * 2.1, height: reach * 2.1)))
+        view.viewportJumped()
+        try? await Task.sleep(for: .seconds(0.4))
+        editor.tool = .lasso
+        view.debugTap(at: placed.centre)
+        await view.changeSelectedSheetScale(to: .drawn(.architectural(inchesPerFoot: 1)))
+        view.viewportJumped()
+        try? await Task.sleep(for: .seconds(0.3))
+        let sheet = editor.sheets.last
+        var offered = -1
+        if let sheet { offered = await editor.scalesOffered(for: sheet).count }
+        log("fitted: picked up \(String(describing: editor.selection.sheet)), \(sheet?.label ?? "no sheet"), "
+            + "fitted \(sheet?.fitted == true), offers Change scale \(sheet?.offersScaleChange == true), "
+            + "scales offered \(offered)")
     }
 
     /// Takes Select and taps the marked-up sheet with the Pencil (#64): on the red cloud's line, which picks the ink and
@@ -517,8 +547,10 @@ enum DebugSheets {
     }
 
     private static func place(_ view: InkCanvasUIView, _ editor: CanvasEditor, file: Int, page: Int,
-                              scale: Sheet.Scale? = nil, at point: CGPoint? = nil) async -> Sheet? {
-        guard let pending = await DebugSheetSource.pending(file: file, page: page, scale: scale) else { return nil }
+                              scale: Sheet.Scale? = nil, at point: CGPoint? = nil, fitted: Bool = false) async -> Sheet? {
+        guard let pending = await DebugSheetSource.pending(file: file, page: page, scale: scale, fitted: fitted) else {
+            return nil
+        }
         editor.beginPlacing(pending)
         view.viewportJumped()
         try? await Task.sleep(for: .seconds(0.4))

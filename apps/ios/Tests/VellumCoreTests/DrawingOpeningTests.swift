@@ -265,6 +265,9 @@ final class DrawingOpeningTests: XCTestCase {
                                          scale: DrawingOpening.confirmation(for: entry).prefilled!, invertsBadly: false)
         XCTAssertEqual(sheet.scale, .notToScale)
         XCTAssertTrue(sheet.isNotToScale)
+        // It carries the fitted mark, so once placed it stays NTS (#96).
+        XCTAssertTrue(sheet.fitted)
+        XCTAssertFalse(sheet.offersScaleChange)
         // On the canvas at its printed size: 11" × 8.5", one printed inch a canvas inch.
         XCTAssertEqual(sheet.size, CanvasSize(width: .inches(11), height: .inches(8.5)))
         XCTAssertEqual(sheet.canvasPerPrinted, 1)
@@ -294,6 +297,8 @@ final class DrawingOpeningTests: XCTestCase {
                                              scale: quarter, invertsBadly: false)
             // 11" × 8.5" at 48 real inches a printed inch: 44'-0" × 34'-0".
             XCTAssertEqual(sheet.size, CanvasSize(width: .feet(44), height: .feet(34)))
+            XCTAssertFalse(sheet.fitted)
+            XCTAssertTrue(sheet.offersScaleChange)
             let canvas = Canvas(sheets: [sheet])
             let measure = canvas.measure(from: sheet.canvasPoint(at: PaperPoint(x: .inches(1), y: .inches(1))),
                                          to: sheet.canvasPoint(at: PaperPoint(x: .inches(4.5), y: .inches(1))))

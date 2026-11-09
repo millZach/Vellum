@@ -630,8 +630,9 @@ final class CanvasEditor {
     }
 
     /// The scales the selected sheet can change to, as Add sheet's confirm step offers them, its details' first. Reads the
-    /// page off the main thread.
+    /// page off the main thread. None for a fitted plot, which stays NTS (#96).
     func scalesOffered(for sheet: Sheet) async -> [Sheet.Scale] {
+        guard sheet.offersScaleChange else { return [] }
         let reading = await reading(of: sheet)
         return SheetReading.offeredScales(details: reading?.detailScales ?? [], units: canvas.units)
     }
@@ -640,7 +641,8 @@ final class CanvasEditor {
     /// as one undo step. Its page is read again, so a detail now at another scale than the sheet's becomes a scale area
     /// (ADR-0002); a page that can't be read keeps the areas it has.
     func changeSelectedSheetScale(to scale: Sheet.Scale) async -> (sheet: Sheet, motion: SheetMotion)? {
-        guard let sheet = selectedSheet, scale != sheet.scale else { return nil }
+        // A fitted plot stays NTS (#96); `Sheet.rescaled` and the ink session refuse it too.
+        guard let sheet = selectedSheet, sheet.offersScaleChange, scale != sheet.scale else { return nil }
         let reading = await reading(of: sheet)
         guard let current = selectedSheet, current.id == sheet.id else { return nil }
         return current.rescaled(to: scale, areas: reading?.areas(placedAt: scale))

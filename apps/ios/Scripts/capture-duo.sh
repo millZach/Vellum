@@ -147,8 +147,9 @@ sheet_captures() {
     # Turning a placed sheet (#44): selected with its buttons, turned 90 degrees and at an angle with level labels, the catch
     # guide, moved, and after a scale change, each with its measures in sheets.txt. Then Select (#64): the rail with Select in
     # hand and a Pencil tap on the red cloud on the sheet, which picks the cloud and not the sheet, and a tap on bare paper,
-    # which picks the sheet with its strip, each with what it picked in sheets.txt.
-    for what in turn-selected turn-90 turn-angle turn-catch turn-moved turn-scale select-ink select-sheet; do
+    # which picks the sheet with its strip, each with what it picked in sheets.txt. Then a plot fitted to the page (#96):
+    # the 1/4" plan placed as one, NTS, and selected, its strip without Change scale; sheets.txt says a scale change was refused.
+    for what in turn-selected turn-90 turn-angle turn-catch turn-moved turn-scale select-ink select-sheet turn-fitted; do
       capture "sheet-$what" --ui-tab canvases --ui-reset --ui-new-canvas --ui-sheets "$what"
       tail -30 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
     done

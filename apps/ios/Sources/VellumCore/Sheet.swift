@@ -171,20 +171,30 @@ public struct Sheet: Hashable, Sendable, Identifiable {
     public var invertsBadly: Bool
     /// How far the sheet is turned about its centre, in degrees counter-clockwise on screen, from 0 up to 360 (#44).
     public var angle: Double
+    /// Whether the page is a plot fitted to the page, not to scale (#92, CONTEXT.md "Fitted plot"): such a sheet is NTS
+    /// for good (#96). It holds no scale areas and is never given a scale, so nothing is measured off it as a real
+    /// length. Decided once, when the sheet is placed, and never changed.
+    public let fitted: Bool
 
+    /// A fitted sheet (`fitted`) is made NTS with no scale areas, whatever `scale` and `areas` say.
     public init(id: SheetID = SheetID(0), paper: PaperSize, scale: Scale, origin: CanvasPoint = .origin,
-                page: SheetPage? = nil, areas: [ScaleArea] = [], invertsBadly: Bool = false, angle: Double = 0) {
+                page: SheetPage? = nil, areas: [ScaleArea] = [], invertsBadly: Bool = false, angle: Double = 0,
+                fitted: Bool = false) {
         self.id = id
         self.paper = paper
-        self.scale = scale
+        self.scale = fitted ? .notToScale : scale
         self.origin = origin
         self.page = page
-        self.areas = areas
+        self.areas = fitted ? [] : areas
         self.invertsBadly = invertsBadly
         self.angle = angle
+        self.fitted = fitted
     }
 
     public var isNotToScale: Bool { scale == .notToScale }
+
+    /// Whether the sheet's strip offers Change scale: every sheet but a fitted plot, which stays NTS (#96).
+    public var offersScaleChange: Bool { !fitted }
 
     /// Canvas inches per printed inch of the sheet's paper.
     public var canvasPerPrinted: Double { scale.canvasPerPrinted }
@@ -290,7 +300,7 @@ public struct Sheet: Hashable, Sendable, Identifiable {
     /// The same sheet under another id.
     func withID(_ id: SheetID) -> Sheet {
         Sheet(id: id, paper: paper, scale: scale, origin: origin, page: page, areas: areas, invertsBadly: invertsBadly,
-              angle: angle)
+              angle: angle, fitted: fitted)
     }
 
     /// How long a printed length is on the canvas. An NTS sheet is placed at its printed size, so there the canvas

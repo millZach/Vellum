@@ -145,7 +145,7 @@ The printed width and height of a sheet's PDF page or of a frame, such as 24 × 
 _Avoid_: sheet size, page size
 
 **NTS sheet**:
-A sheet that is not to scale, such as a loop drawing or a schematic, or a fitted plot. It is placed at its printed size, and lengths read on it are printed lengths marked NTS, never real ones.
+A sheet that is not to scale, such as a loop drawing or a schematic, or a fitted plot. It is placed at its printed size, and lengths read on it are printed lengths marked NTS, never real ones. A fitted plot stays NTS once placed: its strip has no Change scale.
 _Avoid_: unscaled PDF
 
 **Frame**:

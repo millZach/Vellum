@@ -48,6 +48,8 @@ public enum DrawingMarker: String, CaseIterable, Sendable, Hashable {
 /// What a row of the Drawings tab says about an entry (#68): its number and title, then rev, scale and date, then its
 /// project. An entry whose DWG or PDF the laptop has not read yet (`read: false`, an online-only file waiting for its
 /// download) is a quiet row: its file name, then its path, and none of its fields, even a number taken from its name.
+/// A plot fitted to the page, not to scale (#92), says NTS in place of the title block's scale, with a "Plotted to fit"
+/// chip (#94, prototype model-fit variant B); the detail pane and the viewer's header say the same.
 public struct DrawingRowText: Equatable, Sendable {
     /// The drawing number, or nil.
     public var number: String?
@@ -59,16 +61,25 @@ public struct DrawingRowText: Equatable, Sendable {
     public var place: String
     /// Its DWG or PDF not read yet: shown quietly, by file name and path.
     public var quiet: Bool
+    /// Its PDF, or the plot the Duo has of it, was fitted to the page, not to scale: it has the "Plotted to fit" chip.
+    public var fitted: Bool
 
-    public init(number: String?, title: String, details: String?, place: String, quiet: Bool) {
+    /// The chip a fitted plot's row has, beside "PDF plotted".
+    public static let fittedChip = "Plotted to fit"
+
+    public init(number: String?, title: String, details: String?, place: String, quiet: Bool, fitted: Bool = false) {
         self.number = number
         self.title = title
         self.details = details
         self.place = place
         self.quiet = quiet
+        self.fitted = fitted
     }
 
-    public init(_ entry: DrawingEntry) {
+    /// `plot` is what the entry's plot has got to on the Duo (#70), whose PDF the row is about while the index lists none.
+    public init(_ entry: DrawingEntry, plot: PlotProgress? = nil) {
+        let pdf = DrawingOpening.pdf(for: entry, plot: plot)
+        fitted = pdf?.fitted == true
         quiet = entry.dwg?.read == false || entry.pdf?.read == false
         if quiet {
             number = nil
@@ -81,7 +92,7 @@ public struct DrawingRowText: Equatable, Sendable {
         title = entry.title ?? entry.name
         var parts: [String] = []
         if let revision = entry.revision { parts.append("Rev \(revision)") }
-        if let scale = entry.scale { parts.append(scale) }
+        if let scale = DrawingOpening.scaleText(for: entry, pdf: pdf) { parts.append(scale) }
         if let date = entry.date { parts.append(date) }
         details = parts.isEmpty ? nil : parts.joined(separator: " · ")
         let folder = entry.folder ?? String(entry.path.prefix(upTo: entry.path.lastIndex(of: "/") ?? entry.path.endIndex))

@@ -203,7 +203,7 @@ struct DrawingRow: View {
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        let text = DrawingRowText(entry)
+        let text = DrawingRowText(entry, plot: model.plots[entry.id])
         let query = model.resultQuery
         let selected = unfolded && (model.viewer?.entry.id ?? model.selection) == entry.id
         let content = HStack(alignment: .center, spacing: 12) {
@@ -285,6 +285,20 @@ struct DrawingMarkerChip: View {
         .padding(.vertical, 2)
         .background(background, in: RoundedRectangle(cornerRadius: 7))
         .fixedSize()
+    }
+}
+
+/// The "Plotted to fit" chip a plot fitted to the page, not to scale, has beside "PDF plotted" (#94, prototype model-fit
+/// variant B): the plot tag's amber, sized as every other chip, with no icon, as the prototype draws it.
+struct FittedPlotChip: View {
+    var body: some View {
+        Text(DrawingRowText.fittedChip)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(DrawingIndexColors.plot)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(DrawingIndexColors.plotBackground, in: RoundedRectangle(cornerRadius: 7))
+            .fixedSize()
     }
 }
 
@@ -401,7 +415,7 @@ struct DrawingDetailPane: View {
     }
 
     private func details(_ entry: DrawingEntry) -> some View {
-        let text = DrawingRowText(entry)
+        let text = DrawingRowText(entry, plot: model.plots[entry.id])
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 16) {

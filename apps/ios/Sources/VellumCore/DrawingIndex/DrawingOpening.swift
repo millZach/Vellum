@@ -48,6 +48,22 @@ public enum DrawingOpening {
         return PDF(path: path, name: name, contentHash: plot.contentHash, size: nil, pages: nil, fitted: plot.fitted)
     }
 
+    /// The PDF the viewer shows for an entry, and a row is about: the entry's own, else the plot the Duo has of it once
+    /// it is done (#70).
+    public static func pdf(for entry: DrawingEntry, plot: PlotProgress?) -> PDF? {
+        pdf(for: entry) ?? plot.flatMap(pdf(plotted:))
+    }
+
+    /// Whether the PDF at a Dropbox `path` is a plot fitted to the page, not to scale (#92, #94), by the index's mark or
+    /// a done plot's answer, compared without case as Dropbox paths are. Add sheet asks it of a PDF it lists, so a fitted
+    /// plot picked from Dropbox's folders is placed as one placed from search is. It reads every entry, so it runs off the
+    /// main thread.
+    public static func isFittedPlot(path: String, entries: [DrawingEntry], plots: [PlotProgress]) -> Bool {
+        let key = path.lowercased()
+        if plots.contains(where: { $0.stage == .done && $0.fitted && $0.pdfPath?.lowercased() == key }) { return true }
+        return entries.contains { $0.pdf?.fitted == true && $0.pdf?.path.lowercased() == key }
+    }
+
     /// The viewer's one line about the PDF shown: the plot's own note while the PDF is that plot, else for a plot the
     /// index marks fitted, "Plotted to fit, not to scale" (#92).
     public static func note(for pdf: PDF?, plot: PlotProgress?) -> String? {
@@ -110,11 +126,39 @@ public enum DrawingOpening {
     /// How placing from the viewer asks for the scale, with Add sheet's own confirm step (ADR-0002: Vellum reads the
     /// scale and Zach confirms it): prefilled with the index's scale, so a right one is one tap; or, for AS NOTED or a
     /// scale Vellum can't read, nothing prefilled, asking for one to be picked or typed.
+    ///
+    /// A plot fitted to the page, not to scale (#92), is NTS and nothing else (#94, Zach's answer, prototype model-fit
+    /// variant B): the step says why, offers only Cancel and Place sheet, never a scale to pick or Change scale, so it
+    /// can't be placed at a scale from search's Place on a canvas, Open in a new canvas or Add sheet.
     public struct Confirmation: Hashable, Sendable {
         /// The scale the confirm step starts on, from the index; nil when it asks.
         public var prefilled: Sheet.Scale?
+        /// A plot fitted to the page, not to scale: it goes on NTS, and the step offers no other scale.
+        public var fitted: Bool
+
+        public init(prefilled: Sheet.Scale?, fitted: Bool = false) {
+            self.prefilled = fitted ? .notToScale : prefilled
+            self.fitted = fitted
+        }
+
         /// Whether it asks for a scale to be picked or typed.
-        public var asks: Bool { prefilled == nil }
+        public var asks: Bool { !fitted && prefilled == nil }
+        /// Whether it offers Change scale beside Cancel and Place sheet: for a scale it starts on, never a fitted plot.
+        public var offersScaleChange: Bool { !fitted && prefilled != nil }
+
+        /// The confirm step for a plot fitted to the page, wherever it was picked.
+        public static let fittedPlot = Confirmation(prefilled: .notToScale, fitted: true)
+
+        /// What the confirm step says of a fitted plot, NTS in bold (#94, Zach's words).
+        public static let fittedExplanation = "Plotted to fit, not to scale, so it goes on NTS."
+
+        /// The confirm step's foot for a fitted plot, in place of what it will cover: its printed size as the page is
+        /// viewed, to the 1/32" (`SymbolScale.printedText`): "It goes on the canvas at its printed size, 11" × 8 1/2";
+        /// lengths on it read as printed inches marked NTS."
+        public static func fittedFooter(paper: PaperSize) -> String {
+            "It goes on the canvas at its printed size, \(SymbolScale.printedText(paper.width)) × "
+                + "\(SymbolScale.printedText(paper.height)); lengths on it read as printed inches marked NTS."
+        }
     }
 
     /// For the entry's own PDF; a fitted one (#92) starts on NTS.
@@ -124,19 +168,21 @@ public enum DrawingOpening {
 
     /// For the PDF shown, which may be a plot the index doesn't list yet; a fitted one (#92) starts on NTS.
     public static func confirmation(for entry: DrawingEntry, pdf: PDF?) -> Confirmation {
-        Confirmation(prefilled: scale(indexText: scaleText(for: entry, pdf: pdf)))
+        if pdf?.fitted == true { return .fittedPlot }
+        return Confirmation(prefilled: scale(indexText: scaleText(for: entry, pdf: pdf)))
     }
 
     // MARK: The sheet it becomes
 
     /// The sheet a page of the drawing's PDF becomes, waiting for where it goes, at `scale`: the same sheet Add sheet
     /// makes from the same page at the same scale (`SheetReading.sheet(placedAt:page:invertsBadly:)`), so its size and
-    /// scale areas are the same whichever way it came. `keptName` is the name the PDF is kept under on the Duo.
+    /// scale areas are the same whichever way it came. `keptName` is the name the PDF is kept under on the Duo. A
+    /// fitted plot (#92) is an NTS sheet whatever `scale` says.
     public static func sheet(_ entry: DrawingEntry, pdf: PDF, keptName: String, page: Int, reading: SheetReading,
                              scale: Sheet.Scale, invertsBadly: Bool) -> Sheet {
         let page = SheetPage(file: keptName, name: pdf.name, path: pdf.path, index: page,
                              number: reading.sheetNumber ?? entry.number)
-        return reading.sheet(placedAt: scale, page: page, invertsBadly: invertsBadly)
+        return reading.sheet(placedAt: scale, page: page, invertsBadly: invertsBadly, fitted: pdf.fitted)
     }
 
     // MARK: A new canvas
@@ -170,5 +216,13 @@ extension SheetReading {
     /// viewer and the captures all make a sheet here, so a page placed any way lands the same.
     public func sheet(placedAt scale: Sheet.Scale, page: SheetPage, invertsBadly: Bool) -> Sheet {
         Sheet(paper: paper, scale: scale, page: page, areas: areas(placedAt: scale), invertsBadly: invertsBadly)
+    }
+
+    /// The same, for a page that may be a plot fitted to the page, not to scale (#92, #94): a fitted one is an NTS sheet
+    /// at its printed size whatever `scale` says, with no scale areas, since a detail's scale written on it no more
+    /// holds than the title block's.
+    public func sheet(placedAt scale: Sheet.Scale, page: SheetPage, invertsBadly: Bool, fitted: Bool) -> Sheet {
+        guard fitted else { return sheet(placedAt: scale, page: page, invertsBadly: invertsBadly) }
+        return Sheet(paper: paper, scale: .notToScale, page: page, areas: [], invertsBadly: invertsBadly)
     }
 }

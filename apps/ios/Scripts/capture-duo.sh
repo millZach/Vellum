@@ -248,7 +248,8 @@ drawing_captures() {
 # (`--ui-plot`, Vellum/Drawings/DrawingIndexSetup.swift): plotting on the laptop, waiting for the laptop (its check-in
 # 12 minutes old), queued on this Duo (offline), the laptop's reason when it won't plot it, the viewer filled in with
 # the plot and its one line about missing references, the same with a plot fitted to the page (#92: "Plotted to fit,
-# not to scale", the header's scale NTS), and the banner at the top of the Canvases list after leaving
+# not to scale", the header's scale NTS), its search row reading NTS with Plotted to fit (#94) and its confirm step
+# placing it on NTS with no Change scale (#94), and the banner at the top of the Canvases list after leaving
 # the viewer, right of the list's + button, then the same folded, under the list's title row.
 viewer_captures() {
   data=$(xcrun simctl get_app_container "$udid" "$bundle" data)
@@ -269,6 +270,12 @@ viewer_captures() {
     capture viewer-plot-failed "$@" --ui-viewer E-201 --ui-plot failed
     capture viewer-plot-filled "$@" --ui-viewer E-201 --ui-plot done-warning
     capture viewer-plot-fitted "$@" --ui-viewer E-201 --ui-plot done-fitted
+    # The fitted plot's search row (#94): "Rev A · NTS · <date>" and Plotted to fit beside PDF plotted; then Open in a
+    # new canvas's confirm step for it, NTS with only Cancel and the place button.
+    capture viewer-plot-fitted-row "$@" --ui-search E-201 --ui-viewer E-201 --ui-plot done-fitted
+    WAIT=${PLOT_CONFIRM_WAIT:-17}
+    capture viewer-plot-fitted-confirm "$@" --ui-viewer E-201 --ui-plot done-fitted --ui-viewer-step confirm
+    WAIT=${PLOT_WAIT:-12}
     # The banner over the Canvases list, clear of its + (new canvas) button and every other control.
     capture plot-banner-canvases-list "$@" --ui-reset --ui-seed-list --ui-viewer E-201 --ui-plot done --ui-plot-leave
     # The same, folded (the cover screen, display 1): under the list's title row.

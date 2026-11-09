@@ -301,6 +301,185 @@ final class DrawingOpeningTests: XCTestCase {
         }
     }
 
+    // MARK: A fitted plot in search and at the confirm step (#94)
+
+    /// The fixture's E-201, a DWG whose title block says 1/4" = 1'-0", with a plot on 17" × 11" paper the index lists,
+    /// fitted to the page or not; or with none listed, as before the laptop plotted it.
+    private func boilerRoom(fitted: Bool?, listed: Bool = true) -> DrawingEntry {
+        var entry = IndexFixture.entry("E-201")
+        entry.pdf = listed
+            ? .init(path: "/Vellum/Plots/Made-up Plant Upgrade/E-201 - Layout1 - 2026-11-08 120000 - 0a1b2c3d.pdf",
+                    size: 4096, contentHash: "madeup" + String(repeating: "0", count: 54) + "0201", pages: 1,
+                    paperInches: [17, 11], fitted: fitted)
+            : nil
+        return entry
+    }
+
+    /// The plot the Duo has of E-201 before the index lists it (#70): done, fitted or not.
+    private func boilerRoomPlot(fitted: Bool, stage: PlotStage = .done) -> PlotProgress {
+        PlotProgress(entry: "32b0c34a8f6b09f2", request: "madeup-request", stage: stage,
+                     pdfPath: "/Vellum/Plots/Made-up Plant Upgrade/E-201 - Model - 2026-11-08 120000 - 0a1b2c3d.pdf",
+                     contentHash: "madeup" + String(repeating: "0", count: 54) + "0202",
+                     keptName: "madeup0202.pdf", note: fitted ? PlotAnswer.fittedNote : nil, fitted: fitted)
+    }
+
+    func testAFittedPlotsRowSaysNTSInPlaceOfTheScaleWithPlottedToFitAndNoOtherRowChanges() {
+        XCTAssertEqual(DrawingRowText.fittedChip, "Plotted to fit")
+        // A fitted plot the index lists: the prototype's variant B, word for word.
+        let fitted = DrawingRowText(boilerRoom(fitted: true))
+        XCTAssertEqual(fitted, DrawingRowText(number: "E-201", title: "Boiler room power plan",
+                                              details: "Rev A · NTS · 2026-09-14", place: "Made-up Plant Upgrade",
+                                              quiet: false, fitted: true))
+        // A fitted plot the Duo has before the index lists it says the same.
+        let plotted = DrawingRowText(boilerRoom(fitted: nil, listed: false), plot: boilerRoomPlot(fitted: true))
+        XCTAssertEqual(plotted.details, "Rev A · NTS · 2026-09-14")
+        XCTAssertTrue(plotted.fitted)
+        // A plot not fitted, listed or on the Duo, and one still plotting, keep the title block's scale and no chip.
+        let scaled = "Rev A · 1/4\" = 1'-0\" · 2026-09-14"
+        for row in [DrawingRowText(boilerRoom(fitted: false)), DrawingRowText(boilerRoom(fitted: nil)),
+                    DrawingRowText(boilerRoom(fitted: nil, listed: false), plot: boilerRoomPlot(fitted: false)),
+                    DrawingRowText(boilerRoom(fitted: nil, listed: false),
+                                   plot: boilerRoomPlot(fitted: true, stage: .plotting)),
+                    DrawingRowText(boilerRoom(fitted: nil, listed: false))] {
+            XCTAssertEqual(row.details, scaled)
+            XCTAssertFalse(row.fitted)
+        }
+        // Every fixture row reads as it did before #94.
+        for entry in IndexFixture.entries {
+            let row = DrawingRowText(entry)
+            XCTAssertFalse(row.fitted, entry.name)
+            if !row.quiet, let scale = entry.scale { XCTAssertTrue(row.details?.contains(scale) == true, entry.name) }
+        }
+        XCTAssertEqual(DrawingRowText(IndexFixture.entry("E-210")).details, "Rev A · 1:20 · 2026-10-20")
+    }
+
+    func testAFittedPlotsConfirmStepSaysWhyGoesOnNTSAndOffersNoScaleChange() {
+        XCTAssertEqual(DrawingOpening.Confirmation.fittedExplanation, "Plotted to fit, not to scale, so it goes on NTS.")
+        XCTAssertEqual(DrawingOpening.Confirmation.fittedFooter(paper: .inches(11, by: 8.5)),
+                       "It goes on the canvas at its printed size, 11\" × 8 1/2\"; lengths on it read as printed inches marked NTS.")
+        XCTAssertEqual(DrawingOpening.Confirmation.fittedFooter(paper: .inches(17, by: 11)),
+                       "It goes on the canvas at its printed size, 17\" × 11\"; lengths on it read as printed inches marked NTS.")
+        let entry = boilerRoom(fitted: true)
+        let plot = boilerRoomPlot(fitted: true)
+        // From search (the index's plot or the Duo's), and from Add sheet, which picks it by its path.
+        let steps = [DrawingOpening.confirmation(for: entry),
+                     DrawingOpening.confirmation(for: entry, pdf: DrawingOpening.pdf(for: entry)),
+                     DrawingOpening.confirmation(for: boilerRoom(fitted: nil, listed: false),
+                                                 pdf: DrawingOpening.pdf(for: boilerRoom(fitted: nil, listed: false),
+                                                                         plot: plot)),
+                     DrawingOpening.Confirmation.fittedPlot]
+        for step in steps {
+            XCTAssertEqual(step, DrawingOpening.Confirmation.fittedPlot)
+            XCTAssertTrue(step.fitted)
+            XCTAssertEqual(step.prefilled, .notToScale)
+            XCTAssertFalse(step.asks)
+            // Only Cancel and Place sheet: no Change scale, and no scale to pick.
+            XCTAssertFalse(step.offersScaleChange)
+        }
+        // A fitted step can't be made to start on a scale.
+        XCTAssertEqual(DrawingOpening.Confirmation(prefilled: .drawn(.architectural(inchesPerFoot: 0.25)), fitted: true),
+                       .fittedPlot)
+        // Any other drawing keeps its step: a scale it starts on offers Change scale; AS NOTED asks, as before.
+        let scaled = DrawingOpening.confirmation(for: boilerRoom(fitted: false))
+        XCTAssertEqual(scaled.prefilled, .drawn(.architectural(inchesPerFoot: 0.25)))
+        XCTAssertFalse(scaled.fitted)
+        XCTAssertTrue(scaled.offersScaleChange)
+        let nts = DrawingOpening.confirmation(for: IndexFixture.entry("I-301"))
+        XCTAssertEqual(nts.prefilled, .notToScale)
+        XCTAssertFalse(nts.fitted)
+        XCTAssertTrue(nts.offersScaleChange)
+        let asNoted = DrawingOpening.confirmation(for: IndexFixture.entry("M-501"))
+        XCTAssertTrue(asNoted.asks)
+        XCTAssertFalse(asNoted.offersScaleChange)
+    }
+
+    func testAFittedPlotLandsAsAnNTSSheetAtItsPrintedSizeFromEveryPath() throws {
+        let quarter = Sheet.Scale.drawn(.architectural(inchesPerFoot: 0.25))
+        // A made-up 17" × 11" page with details at 1" = 1'-0" and 1 1/2" = 1'-0": on a fitted plot they hold no more
+        // than the title block's scale does, so it gets no scale areas.
+        let page = MadeUpSheets.detailSheet
+        let reading = SheetReading.read(page.texts, paper: page.paper)
+        XCTAssertFalse(reading.areas(placedAt: .notToScale).isEmpty)
+        let entry = boilerRoom(fitted: true)
+        let pdf = try XCTUnwrap(DrawingOpening.pdf(for: entry))
+        let kept = try XCTUnwrap(pdf.keptName)
+
+        // Search's Place on a canvas and Open in a new canvas: the confirm step's scale, or any scale handed to it.
+        let step = DrawingOpening.confirmation(for: entry, pdf: pdf)
+        let fromSearch = DrawingOpening.sheet(entry, pdf: pdf, keptName: kept, page: 0, reading: reading,
+                                              scale: try XCTUnwrap(step.prefilled), invertsBadly: false)
+        let atAScale = DrawingOpening.sheet(entry, pdf: pdf, keptName: kept, page: 0, reading: reading, scale: quarter,
+                                            invertsBadly: false)
+        // Add sheet: the PDF picked from Dropbox's folders is found fitted by its path, whatever its case.
+        XCTAssertTrue(DrawingOpening.isFittedPlot(path: pdf.path.uppercased(), entries: IndexFixture.entries + [entry],
+                                                  plots: []))
+        let file = DropboxFile(id: "id:madeup", name: pdf.name, path: pdf.path, size: 4096, contentHash: pdf.contentHash!,
+                               rev: "madeup1")
+        let fromAddSheet = reading.sheet(placedAt: reading.suggestedScale ?? quarter,
+                                         page: SheetPage(file: file.keptName, name: file.name, path: file.path, index: 0,
+                                                         number: reading.sheetNumber),
+                                         invertsBadly: false, fitted: true)
+        // The plot the Duo has before the index lists it, from search and from Add sheet.
+        let plot = boilerRoomPlot(fitted: true)
+        let unlisted = boilerRoom(fitted: nil, listed: false)
+        let plotPDF = try XCTUnwrap(DrawingOpening.pdf(for: unlisted, plot: plot))
+        XCTAssertTrue(DrawingOpening.isFittedPlot(path: plot.pdfPath!, entries: [unlisted], plots: [plot]))
+        let fromPlot = DrawingOpening.sheet(unlisted, pdf: plotPDF, keptName: "madeup0202.pdf", page: 0,
+                                            reading: reading, scale: quarter, invertsBadly: false)
+
+        for sheet in [fromSearch, atAScale, fromAddSheet, fromPlot] {
+            XCTAssertEqual(sheet.scale, .notToScale)
+            XCTAssertTrue(sheet.isNotToScale)
+            // At its printed size: 17" × 11", one canvas inch a printed inch.
+            XCTAssertEqual(sheet.paper, .inches(17, by: 11))
+            XCTAssertEqual(sheet.size, CanvasSize(width: .inches(17), height: .inches(11)))
+            XCTAssertEqual(sheet.canvasPerPrinted, 1)
+            XCTAssertEqual(sheet.areas, [])
+            // Detail 1's printed 3" dimension reads 3" NTS, never 3'-0".
+            let canvas = Canvas(sheets: [sheet])
+            let measure = canvas.measure(from: sheet.canvasPoint(at: PaperPoint(x: .inches(1.5), y: .inches(3.8))),
+                                         to: sheet.canvasPoint(at: PaperPoint(x: .inches(4.5), y: .inches(3.8))))
+            XCTAssertEqual(measure, .notToScale(.inches(3)))
+            XCTAssertEqual(canvas.format(measure), "3\" NTS")
+        }
+        XCTAssertEqual(fromSearch, atAScale)
+        XCTAssertEqual(fromSearch.page, SheetPage(file: kept, name: pdf.name, path: pdf.path, index: 0, number: "D-501"))
+
+        // Open in a new canvas: the canvas is made with the NTS sheet in its middle, 17" × 11".
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("vellum-fitted-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let bytes = root.appendingPathComponent("E-201.pdf")
+        try Data("%PDF-1.4 made-up E-201".utf8).write(to: bytes)
+        let library = CanvasLibrary(root: root.appendingPathComponent("Canvases"))
+        let made = try library.create(name: DrawingOpening.canvasName(for: entry), sheet: fromSearch, pdf: bytes,
+                                      keptName: kept)
+        XCTAssertEqual(made.name, "E-201 Boiler room power plan")
+        let store = try library.openInk(made.id)
+        defer { store.closeFiles() }
+        let placed = try XCTUnwrap(store.session.sheets.first)
+        XCTAssertEqual(placed.scale, .notToScale)
+        XCTAssertEqual(placed.size, CanvasSize(width: .inches(17), height: .inches(11)))
+        XCTAssertEqual(placed.origin, CanvasPoint(x: .inches(-8.5), y: .inches(-5.5)))
+        XCTAssertEqual(placed.areas, [])
+
+        // Nothing else is taken for a fitted plot: a plot not fitted, one still plotting, or another PDF of the drawing.
+        XCTAssertFalse(DrawingOpening.isFittedPlot(path: pdf.path, entries: [boilerRoom(fitted: false)], plots: []))
+        XCTAssertFalse(DrawingOpening.isFittedPlot(path: plot.pdfPath!, entries: [],
+                                                   plots: [boilerRoomPlot(fitted: true, stage: .plotting)]))
+        XCTAssertFalse(DrawingOpening.isFittedPlot(path: "/Vellum/Plots/Made-up Plant Upgrade/E-201 - other.pdf",
+                                                   entries: [entry], plots: [plot]))
+        for fixture in IndexFixture.entries {
+            if let path = fixture.pdf?.path {
+                XCTAssertFalse(DrawingOpening.isFittedPlot(path: path, entries: IndexFixture.entries, plots: []))
+            }
+        }
+        let notFitted = reading.sheet(placedAt: .notToScale,
+                                      page: SheetPage(file: kept, name: pdf.name, path: pdf.path, index: 0),
+                                      invertsBadly: false, fitted: false)
+        XCTAssertEqual(notFitted.areas, reading.areas(placedAt: .notToScale))
+    }
+
     func testAnEntryOrPlotWithNoFittedPlotEncodesAsBefore92AndAFittedOneRoundTrips() throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]

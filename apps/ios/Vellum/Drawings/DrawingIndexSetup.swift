@@ -25,7 +25,8 @@ enum DrawingIndexSetup {
 /// - `--ui-viewer <number>` (#69): opens that drawing in the viewer, as a tap on its row does. The made-up Dropbox holds
 ///   a made-up PDF (`MadeUpPDF`) at every PDF path the fixture names: the three-page set for M-501, the 1/4" plan for the
 ///   rest. With `--ui-viewer-step picker`, Place on a canvas… is tapped once the PDF is open; with `place`, the newest
-///   canvas is picked, so the Canvases tab shows the sheet waiting in tap-to-place; with `new`, Open in a new canvas.
+///   canvas is picked, so the Canvases tab shows the sheet waiting in tap-to-place; with `new`, Open in a new canvas;
+///   with `confirm`, Open in a new canvas's confirm step, left open (#94).
 /// - `--ui-viewer-timing` (#69): opens a made-up twelve-page E-size set already on the Duo three times, logging each
 ///   time from the tap to its first page's first tile to `viewer.txt`, and their median to `viewer-timing.json`.
 ///
@@ -157,6 +158,16 @@ enum DebugDrawingViewer {
             if let pending = canvases.openEditor?.placingSheet {
                 log("waiting to place \(pending.sheet.page?.title ?? "?") at \(pending.sheet.scale), covering "
                     + "\(canvases.openEditor?.covers(pending.sheet) ?? "?"), areas \(pending.sheet.areas.map(\.label))")
+            }
+        case "confirm":
+            // Open in a new canvas's confirm step, left open for the captures (#94).
+            view.go(.newCanvas)
+            try? await Task.sleep(for: .seconds(1.5))
+            if let asked {
+                log("confirm step: \(asked.placeLabel), starting on \(asked.prefilled?.description ?? "a scale to pick")"
+                    + (asked.fittedFiles.isEmpty ? "" : ", a fitted plot"))
+            } else {
+                log("no confirm step")
             }
         case "new":
             view.go(.newCanvas)

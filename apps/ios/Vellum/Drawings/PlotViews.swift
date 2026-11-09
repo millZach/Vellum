@@ -133,7 +133,8 @@ struct PlotChip: View {
 }
 
 /// An entry's markers, as a row, the detail pane and the viewer show them, with its plot's tag in place of "No PDF yet"
-/// (#70), and "PDF plotted" on a drawing whose plot came in this session.
+/// (#70), "PDF plotted" on a drawing whose plot came in this session, and "Plotted to fit" beside it for a plot fitted to
+/// the page, not to scale (#94).
 struct DrawingChips: View {
     let model: DrawingIndexModel
     let entry: DrawingEntry
@@ -149,6 +150,12 @@ struct DrawingChips: View {
     static func isEmpty(_ model: DrawingIndexModel, _ entry: DrawingEntry, hideNotOnThisDuo: Bool = false) -> Bool {
         markers(model, entry, hideNotOnThisDuo: hideNotOnThisDuo).isEmpty
             && !(entry.pdf != nil && model.plottedThisSession.contains(entry.id))
+            && !isFitted(model, entry)
+    }
+
+    /// A plot fitted to the page, not to scale (#92), from the index or the plot the Duo has: "Plotted to fit" (#94).
+    static func isFitted(_ model: DrawingIndexModel, _ entry: DrawingEntry) -> Bool {
+        DrawingOpening.pdf(for: entry, plot: model.plots[entry.id])?.fitted == true
     }
 
     var body: some View {
@@ -162,6 +169,9 @@ struct DrawingChips: View {
             }
             if entry.pdf != nil, model.plottedThisSession.contains(entry.id) {
                 PlotChip(stage: .done)
+            }
+            if Self.isFitted(model, entry) {
+                FittedPlotChip()
             }
         }
     }

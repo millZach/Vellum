@@ -269,7 +269,7 @@ The PDF a drawing's DWG was plotted to, which the drawing index pairs with it: b
 _Avoid_: print, export, sheet (a sheet is a placed PDF page)
 
 **Fitted plot**:
-A plot the laptop made of a Model-tab DWG through the fallback, its extents fitted to the page, not to scale (#92). The answer and the drawing index mark it `fitted`; the Duo places it as an NTS sheet, whatever its title block says, and the viewer says "Plotted to fit, not to scale".
+A plot the laptop made of a Model-tab DWG through the fallback, its extents fitted to the page, not to scale (#92). The answer and the drawing index mark it `fitted`; the Duo places it as an NTS sheet with no scale areas, whatever its title block says, and the viewer says "Plotted to fit, not to scale". Its search row, detail pane and viewer header read NTS in place of the title block's scale, with a "Plotted to fit" chip beside "PDF plotted"; Add sheet's confirm step says "Plotted to fit, not to scale, so it goes on NTS." and offers only Cancel and Place sheet, from search, Open in a new canvas and Add sheet alike (#94).
 _Avoid_: scaled-to-fit plot, fit plot
 
 **Plot request**:

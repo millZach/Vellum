@@ -22,6 +22,8 @@ struct RootView: View {
                     if tab == .canvases {
                         CanvasesTab(model: canvases)
                             .environment(canvases)
+                            // Add sheet asks it whether a PDF is a plot fitted to the page, not to scale (#94).
+                            .environment(drawings)
                     } else if tab == .drawings {
                         DrawingsScreen(index: drawings,
                                        handoff: DrawingHandoff(canvases: canvases, showCanvases: { selection = .canvases }))

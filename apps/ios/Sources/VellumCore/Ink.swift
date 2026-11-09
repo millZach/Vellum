@@ -796,11 +796,13 @@ public struct InkSession: Hashable, Sendable {
     }
 
     /// Puts a sheet where a turn, move or scale change took it (`Sheet.turned`, `moved`, `rescaled`), with its markups
-    /// moved by the same motion, as one undo step. False when it names no sheet or changes nothing.
+    /// moved by the same motion, as one undo step. False when it names no sheet or changes nothing, or would change the
+    /// scale or scale areas of a fitted sheet, which stays NTS (#96).
     @discardableResult
     public mutating func changeSheet(to after: Sheet, markups: CanvasSelection = .empty, motion: SheetMotion) -> Bool {
         guard let before = sheet(after.id) else { return false }
         let rescaled = after.scale != before.scale || after.areas != before.areas
+        guard before.offersScaleChange || !rescaled else { return false }
         guard rescaled || after.origin != before.origin || after.angle != before.angle else { return false }
         perform(.changeSheet(SheetChange(id: after.id, origin: after.origin, angle: after.angle,
                                          rescaled: rescaled ? .init(scale: after.scale, areas: after.areas) : nil,
@@ -952,7 +954,9 @@ public struct InkSession: Hashable, Sendable {
             record(.addSheet(sheet))
             return InkChange(addedSheets: [sheet])
         case .changeSheet(let change):
-            guard let before = sheet(change.id) else { return .none }
+            // A fitted sheet is NTS for good (#96): a change that would give it a scale or scale areas is refused whole,
+            // from the strip, from sync or from a log, so neither it nor its undo can put a scale on the sheet.
+            guard let before = sheet(change.id), before.offersScaleChange || change.rescaled == nil else { return .none }
             let after = change.applied(to: before)
             let markups = pieces(of: change.markups)
             record(.changeSheet(before: before, after: after, markups: markups, motion: change.motion))

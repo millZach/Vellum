@@ -60,3 +60,7 @@ A drawing placed from the Drawings tab's search is confirmed as one picked in Ad
 
 A plot the laptop fitted to the page, not to scale (#92), is not drawn at any scale, so Zach has none to confirm. Add sheet's confirm step says "Plotted to fit, not to scale, so it goes on NTS." with its printed size, and offers only Cancel and Place sheet: no Change scale and no scale to pick, whether it was reached from search's Place on a canvas, Open in a new canvas or Add sheet's own Dropbox browser, which knows the plot by its path in the drawing index or the plots on the Duo. It is placed as an NTS sheet at its printed size with no scale areas, since the scales written on its details are no truer than its title block's (`SheetReading.sheet(placedAt:page:invertsBadly:fitted:)`).
 
+
+## Amendment (#96): a placed fitted plot stays NTS
+
+Zach's answer on #96: lock it. A placed fitted plot keeps its mark (`Sheet.fitted`), written in the ink log as bit 2 of the sheet's flags byte, so it costs no byte and a canvas without one is byte for byte what it was; it travels through the snapshot, sync and a relaunch. Its strip (ADR-0011) has no Change scale, and the ink session refuses any change that would give it a scale or scale areas, from the strip, from sync or from a log, so undo never brings one back. Lengths on it are always printed lengths marked NTS. It still turns, moves and erases as any sheet does.

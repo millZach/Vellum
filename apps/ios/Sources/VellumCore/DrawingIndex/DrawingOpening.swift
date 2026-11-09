@@ -220,9 +220,9 @@ extension SheetReading {
 
     /// The same, for a page that may be a plot fitted to the page, not to scale (#92, #94): a fitted one is an NTS sheet
     /// at its printed size whatever `scale` says, with no scale areas, since a detail's scale written on it no more
-    /// holds than the title block's.
+    /// holds than the title block's. It carries the fitted mark (`Sheet.fitted`), so once placed it stays NTS (#96).
     public func sheet(placedAt scale: Sheet.Scale, page: SheetPage, invertsBadly: Bool, fitted: Bool) -> Sheet {
         guard fitted else { return sheet(placedAt: scale, page: page, invertsBadly: invertsBadly) }
-        return Sheet(paper: paper, scale: .notToScale, page: page, areas: [], invertsBadly: invertsBadly)
+        return Sheet(paper: paper, scale: .notToScale, page: page, areas: [], invertsBadly: invertsBadly, fitted: true)
     }
 }

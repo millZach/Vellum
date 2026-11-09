@@ -288,6 +288,32 @@ final class SyncTests: XCTestCase {
         try await assertDropboxRebuildsTheDuosCanvas(sync, id)
     }
 
+    /// A placed plot fitted to the page keeps its fitted mark through sync (#96): the laptop's copy rebuilt from Dropbox
+    /// opens with the sheet still fitted and NTS.
+    func testAFittedSheetSyncsWithItsMark() async throws {
+        let id = try library.create(name: "Fitted").id
+        _ = try keepSheet(on: id, named: "madeuphash03")
+        let page = SheetPage(file: "madeuphash03", name: "M-101 - Model (example).pdf", path: "/M-101 - Model (example).pdf",
+                             index: 0)
+        let (_, opened, saver) = try await savers.open(id)
+        var session = opened
+        session.addSheet(Sheet(paper: .inches(11, by: 8.5), scale: .notToScale, page: page, fitted: true))
+        saver.save(session.takeEvents())
+        savers.close(saver)
+        await saver.idle()
+        let (sync, _) = engine()
+        await sync.start()
+        await sync.settled()
+        try await assertDropboxRebuildsTheDuosCanvas(sync, id)
+        let name = await self.folder(sync, id)
+        let copy = root.appendingPathComponent("laptop-fitted")
+        try SyncedCanvasFolder.write(try SyncedCanvasFolder.rebuild(dropbox.files(in: SyncPaths.folder(name))), to: copy)
+        let store = try InkStore(folder: copy)
+        defer { store.closeFiles() }
+        XCTAssertEqual(store.session.sheets.map(\.fitted), [true])
+        XCTAssertEqual(store.session.sheets.first?.scale, .notToScale)
+    }
+
     /// A shape corrected through its tag (#40) reaches Dropbox as the log's tail, not the stroke's canvas again.
     func testACorrectionSyncsOnlyTheLogsTail() async throws {
         let id = try library.create(name: "Corrected").id

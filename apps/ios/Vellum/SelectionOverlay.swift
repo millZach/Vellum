@@ -274,7 +274,8 @@ final class SelectionMenu: UIView {
 }
 
 /// What sits under the top bar while a sheet is selected (#44), as the prototype at `prototype/sheet-rotate` has it: the
-/// sheet's angle, which can't be tapped, 90° left and 90° right, Change scale, and Done.
+/// sheet's angle, which can't be tapped, 90° left and 90° right, Change scale, and Done. A plot fitted to the page, not
+/// to scale, stays NTS, so its strip has no Change scale (#96).
 @MainActor
 final class SheetStrip: UIView {
     private let angleLabel = UILabel()
@@ -382,11 +383,17 @@ final class SheetStrip: UIView {
     }
 
     /// Shows the strip with the sheet's angle, under the top bar; nil hides it. The angle's text is set only when it reads
-    /// differently, and its box holds its width, so a turn lays out one label.
-    func show(angle: Double?, in bounds: CGRect) {
+    /// differently, and its box holds its width, so a turn lays out one label. `offersScaleChange` is false for a fitted
+    /// plot, whose strip goes without Change scale (#96).
+    func show(angle: Double?, offersScaleChange: Bool, in bounds: CGRect) {
         guard let angle else {
             if !isHidden { isHidden = true }
             return
+        }
+        var resize = isHidden
+        if changeScale.isHidden == offersScaleChange {
+            changeScale.isHidden = !offersScaleChange
+            resize = true
         }
         let text = SheetAngle.reading(angle)
         if text != shownAngle {
@@ -394,7 +401,7 @@ final class SheetStrip: UIView {
             angleLabel.text = text
             angleBox.accessibilityLabel = "Angle \(text), counter-clockwise"
         }
-        if isHidden {
+        if resize {
             isHidden = false
             let size = systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
             let chrome = CanvasEditor.chromeInsets

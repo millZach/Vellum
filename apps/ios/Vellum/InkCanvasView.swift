@@ -2212,7 +2212,7 @@ extension InkCanvasUIView {
 
     /// The Change scale menu: read when it opens, with the scale in hand ticked.
     fileprivate func sheetScaleMenu() async -> [UIMenuElement] {
-        guard let sheet = editor.selectedSheet else { return [] }
+        guard let sheet = editor.selectedSheet, sheet.offersScaleChange else { return [] }
         let scales = await editor.scalesOffered(for: sheet)
         return scales.map { scale in
             UIAction(title: scale.description, state: scale == sheet.scale ? .on : .off) { [weak self] _ in
@@ -2232,7 +2232,7 @@ extension InkCanvasUIView {
         let caught = sheetDrag?.caught == true
         selectionOverlay.showSheet(corners: sheet?.corners.map(screen), centre: sheet.map { screen($0.centre) } ?? .zero,
                                    catchAngle: caught ? sheet?.angle : nil, in: bounds)
-        sheetStrip.show(angle: sheet?.angle, in: bounds)
+        sheetStrip.show(angle: sheet?.angle, offersScaleChange: sheet?.offersScaleChange ?? true, in: bounds)
         if sheet != nil, subviews.last !== sheetStrip { bringSubviewToFront(sheetStrip) }
     }
 

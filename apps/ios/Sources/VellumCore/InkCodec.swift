@@ -498,14 +498,15 @@ struct ByteWriter {
     /// one's name, rectangle on the paper in printed inches as four 64-bit floats, and scale). The made-up AS NOTED
     /// sheet takes 226 bytes. Since #44 a sheet that stands turned sets bit 1 of the inverts-badly byte and adds its angle
     /// in degrees as a 64-bit float at the end; a sheet at 0° is written as #11 wrote it, so a canvas saved before #44
-    /// reads with its sheets at 0°.
+    /// reads with its sheets at 0°. Since #96 a plot fitted to the page, not to scale, sets bit 2 of the same byte and adds
+    /// nothing more; any other sheet is written as before, so a canvas without one is byte for byte what it was.
     mutating func sheet(_ sheet: Sheet) {
         varint(UInt64(max(sheet.id.value, 0)))
         f64(sheet.paper.width.inches)
         f64(sheet.paper.height.inches)
         sheetScale(sheet.scale)
         gridPoint(sheet.origin)
-        u8((sheet.invertsBadly ? 1 : 0) | (sheet.angle != 0 ? 2 : 0))
+        u8((sheet.invertsBadly ? 1 : 0) | (sheet.angle != 0 ? 2 : 0) | (sheet.fitted ? 4 : 0))
         if let page = sheet.page {
             u8(1)
             string(page.file)
@@ -818,7 +819,7 @@ struct ByteReader {
         }
         let areas = try scaleAreas()
         return Sheet(id: id, paper: .inches(width, by: height), scale: scale, origin: origin, page: page, areas: areas,
-                     invertsBadly: flags & 1 == 1, angle: flags & 2 != 0 ? try angle() : 0)
+                     invertsBadly: flags & 1 == 1, angle: flags & 2 != 0 ? try angle() : 0, fitted: flags & 4 != 0)
     }
 
     private mutating func scaleAreas() throws -> [ScaleArea] {

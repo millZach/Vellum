@@ -155,7 +155,10 @@ extension Sheet {
     /// The sheet at another drawing scale, with the size that scale gives it, about its centre, and how its markups scale
     /// with it, so each stays on the same spot of the paper. `areas` are its scale areas at that scale; nil keeps them.
     /// A sheet turned or not, or NTS on either side, works the same way: an NTS sheet's canvas inches are printed inches.
+    ///
+    /// A fitted sheet (#96) refuses: it comes back as it was, with a motion that moves nothing.
     public func rescaled(to new: Scale, areas newAreas: [ScaleArea]? = nil) -> (sheet: Sheet, motion: SheetMotion) {
+        guard offersScaleChange else { return (self, SheetMotion(centre: centre)) }
         var after = self
         let old = centre
         after.scale = new

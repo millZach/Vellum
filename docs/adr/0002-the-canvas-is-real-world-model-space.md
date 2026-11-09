@@ -56,3 +56,7 @@ Zach's answer on #60, settling the two exceptions to "top sheet wins" that #11 l
 
 A drawing placed from the Drawings tab's search is confirmed as one picked in Add sheet is: the viewer opens Add sheet's own confirm step on the page shown, prefilled with the scale the drawing index read off the title block, so a right scale is one tap and Change scale picks another. AS NOTED, or index text Vellum can't read whole, asks for a scale to be picked or typed. The sheet is built by the same `SheetReading.sheet(placedAt:page:invertsBadly:)`, so its size and scale areas are the same whichever way it came.
 
+## Amendment (#94): a fitted plot has nothing to confirm but NTS
+
+A plot the laptop fitted to the page, not to scale (#92), is not drawn at any scale, so Zach has none to confirm. Add sheet's confirm step says "Plotted to fit, not to scale, so it goes on NTS." with its printed size, and offers only Cancel and Place sheet: no Change scale and no scale to pick, whether it was reached from search's Place on a canvas, Open in a new canvas or Add sheet's own Dropbox browser, which knows the plot by its path in the drawing index or the plots on the Duo. It is placed as an NTS sheet at its printed size with no scale areas, since the scales written on its details are no truer than its title block's (`SheetReading.sheet(placedAt:page:invertsBadly:fitted:)`).
+

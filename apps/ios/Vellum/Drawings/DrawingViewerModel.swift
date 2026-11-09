@@ -58,7 +58,7 @@ final class DrawingViewerModel {
     /// shown.
     init(entry: DrawingEntry, plot: PlotProgress? = nil) {
         self.entry = entry
-        let shown = DrawingOpening.pdf(for: entry) ?? plot.flatMap(DrawingOpening.pdf(plotted:))
+        let shown = DrawingOpening.pdf(for: entry, plot: plot)
         pdf = shown
         // The plot's note stays while the PDF shown is that plot, however the drawing was opened (#70); a plot the
         // index marks fitted says so (#92).

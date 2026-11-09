@@ -657,6 +657,8 @@ private struct TopBar: View {
 private struct CanvasActions: View {
     let editor: CanvasEditor
     @State private var addSheet: AddSheetModel?
+    /// The drawing index, so Add sheet knows a plot fitted to the page, not to scale, when it lists one (#94).
+    @Environment(DrawingIndexModel.self) private var drawings: DrawingIndexModel?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -697,6 +699,7 @@ private struct CanvasActions: View {
     private func makeModel() -> AddSheetModel {
         let editor = editor
         let model = AddSheetModel(dropbox: .app, units: editor.canvas.units, covers: { editor.covers($0) })
+        model.isFittedPlot = drawings?.fittedPlotCheck()
         model.onPlace = { [weak model] pending in
             model?.close?()
             editor.beginPlacing(pending)

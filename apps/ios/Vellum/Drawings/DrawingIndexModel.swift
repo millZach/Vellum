@@ -118,6 +118,18 @@ final class DrawingIndexModel {
         limit += Self.page
     }
 
+    /// Whether a PDF at a Dropbox path is a plot fitted to the page, not to scale (#94), for Add sheet: the copy's entries
+    /// and the plots on the Duo as they are now, read off the main thread when it asks.
+    func fittedPlotCheck() -> @Sendable (String) async -> Bool {
+        let entries = listing?.entries ?? []
+        let plots = Array(self.plots.values)
+        return { path in
+            await Task.detached(priority: .userInitiated) {
+                DrawingOpening.isFittedPlot(path: path, entries: entries, plots: plots)
+            }.value
+        }
+    }
+
     var selectedEntry: DrawingEntry? {
         guard let selection else { return nil }
         return listing?.entries.first { $0.id == selection }

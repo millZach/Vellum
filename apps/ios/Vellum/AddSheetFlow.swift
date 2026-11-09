@@ -49,6 +49,11 @@ final class AddSheetModel {
     private(set) var indexScaleText: String?
     /// The sheet number a page is placed with when none is read off it: the drawing index's.
     @ObservationIgnored private var fallbackNumber: String?
+    /// Whether a PDF at a Dropbox path is a plot fitted to the page, not to scale (#94), from the drawing index and the
+    /// plots on the Duo, worked out off the main thread; nil where there is no index (previews).
+    @ObservationIgnored var isFittedPlot: (@Sendable (String) async -> Bool)?
+    /// The PDFs, by id, that are plots fitted to the page: their confirm step is NTS and nothing else.
+    private(set) var fittedFiles: Set<String> = []
 
     init(dropbox: DropboxConnection, units: CanvasUnits, covers: @escaping (Sheet) -> String) {
         self.dropbox = dropbox
@@ -75,6 +80,7 @@ final class AddSheetModel {
         defer { downloading = nil }
         guard let reader = await reader(for: file) else { return }
         let count = await reader.pageCount
+        if let isFittedPlot, await isFittedPlot(file.path) { fittedFiles.insert(file.id) }
         pageCounts[file.id] = count
         guard count > 0 else {
             problem = "Vellum couldn't read \(file.name) as a PDF."
@@ -106,6 +112,7 @@ final class AddSheetModel {
 
     /// Hands a confirmed page to the canvas as a sheet waiting to be placed: its scale, its scale areas for the scale
     /// chosen, and whether it dims in dark mode, worked out off the main thread.
+    /// A fitted plot (#94) goes on as an NTS sheet whatever `scale` says.
     func place(_ file: DropboxFile, page: Int, info: SheetPDFReader.PageInfo, scale: Sheet.Scale) async {
         guard let reader = readers[file.id], let url = urls[file.id] else { return }
         let invertsBadly = await reader.invertsBadly(page: page)
@@ -113,7 +120,7 @@ final class AddSheetModel {
             placedAt: scale,
             page: SheetPage(file: file.keptName, name: file.name, path: file.path, index: page,
                             number: info.reading.sheetNumber ?? fallbackNumber),
-            invertsBadly: invertsBadly)
+            invertsBadly: invertsBadly, fitted: isFitted(file))
         onPlace?(CanvasEditor.PendingSheet(sheet: sheet, pdf: url, keptName: file.keptName))
     }
 
@@ -131,8 +138,12 @@ final class AddSheetModel {
         self.placeLabel = placeLabel
         prefilled = confirmation.prefilled
         indexScaleText = indexScale
+        if confirmation.fitted { fittedFiles.insert(file.id) }
         confirmOnly = (file, page)
     }
+
+    /// Whether the PDF is a plot fitted to the page, not to scale (#94), however Add sheet reached it.
+    func isFitted(_ file: DropboxFile) -> Bool { fittedFiles.contains(file.id) }
 
     /// The scales the confirm step offers to pick: the ones written on the sheet's details first, then the common
     /// ones for the canvas units, and NTS.
@@ -368,7 +379,8 @@ private struct ScaleTag: View {
 
 /// The confirm step: what Vellum read and what the sheet will cover, with Cancel, Change scale and Place sheet; or,
 /// when it can't tell (AS NOTED, no scale, a scan, several scales, junk), the scales to pick or one to type, with the
-/// scale areas outlined on the page for the scale picked.
+/// scale areas outlined on the page for the scale picked. A plot fitted to the page, not to scale (#94, prototype
+/// model-fit variant B), says so and goes on NTS, with only Cancel and Place sheet.
 private struct ConfirmSheet: View {
     let model: AddSheetModel
     let file: DropboxFile
@@ -402,7 +414,11 @@ private struct ConfirmSheet: View {
             // What it will cover, and Cancel and Place sheet, always in view however long the scales run.
             if let info {
                 HStack(spacing: 10) {
-                    if let chosen = chosen(info) {
+                    if fitted {
+                        Text(DrawingOpening.Confirmation.fittedFooter(paper: info.paper))
+                            .font(.callout).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("coverage")
+                    } else if let chosen = chosen(info) {
                         // Wraps in the room the buttons leave, whatever its length; the buttons never do.
                         Text("On the canvas it will cover \(coverage(info, chosen)).")
                             .font(.callout).foregroundStyle(.secondary)
@@ -422,8 +438,7 @@ private struct ConfirmSheet: View {
             guard let reader = await model.reader(for: file) else { return }
             let read = await reader.info(page: page)
             info = read
-            if let read { picked = model.confirmOnly == nil ? read.reading.suggestedScale
-                                                            : model.prefilled ?? read.reading.suggestedScale }
+            if let read { picked = suggested(read) ?? read.reading.suggestedScale }
             thumbnail = await reader.thumbnail(page: page, side: 660)?.image
         }
     }
@@ -432,8 +447,12 @@ private struct ConfirmSheet: View {
         [info.reading.sheetNumber, file.name].compactMap { $0 }.joined(separator: " · ")
     }
 
-    /// Whether Zach picks or types the scale: Vellum can't tell, or he asked to change it.
+    /// A plot fitted to the page, not to scale: NTS, and nothing to pick or change.
+    private var fitted: Bool { model.isFitted(file) }
+
+    /// Whether Zach picks or types the scale: Vellum can't tell, or he asked to change it; never for a fitted plot.
     private func asks(_ info: SheetPDFReader.PageInfo) -> Bool {
+        if fitted { return false }
         if changing { return true }
         return model.confirmOnly == nil ? info.reading.asksForScale : model.prefilled == nil
     }
@@ -441,7 +460,8 @@ private struct ConfirmSheet: View {
     /// The scale it goes on at unless Zach picks another: the one read off the title block, or from the viewer the
     /// drawing index's.
     private func suggested(_ info: SheetPDFReader.PageInfo) -> Sheet.Scale? {
-        model.confirmOnly == nil ? info.reading.suggestedScale : model.prefilled
+        if fitted { return .notToScale }
+        return model.confirmOnly == nil ? info.reading.suggestedScale : model.prefilled
     }
 
     private func chosen(_ info: SheetPDFReader.PageInfo) -> Sheet.Scale? {
@@ -454,11 +474,20 @@ private struct ConfirmSheet: View {
 
     @ViewBuilder
     private func explanation(_ info: SheetPDFReader.PageInfo) -> some View {
-        if model.confirmOnly != nil {
+        if fitted {
+            Text(Self.bold("NTS", in: DrawingOpening.Confirmation.fittedExplanation))
+        } else if model.confirmOnly != nil {
             indexExplanation(info)
         } else {
             readExplanation(info)
         }
+    }
+
+    /// `text` with its first `word` in bold.
+    private static func bold(_ word: String, in text: String) -> AttributedString {
+        var out = AttributedString(text)
+        if let range = out.range(of: word) { out[range].inlinePresentationIntent = .stronglyEmphasized }
+        return out
     }
 
     /// From the viewer: what the drawing index's title block fields say about the scale.
@@ -536,7 +565,7 @@ private struct ConfirmSheet: View {
         HStack(spacing: 10) {
             Button("Cancel") { model.close?() }
                 .buttonStyle(.bordered)
-            if !asks(info), suggested(info) != nil {
+            if !fitted, !asks(info), suggested(info) != nil {
                 Button("Change scale") { changing = true }
                     .buttonStyle(.bordered)
             }
@@ -566,7 +595,8 @@ private struct ConfirmSheet: View {
 
     /// The page, with its scale areas outlined for the scale picked.
     private func preview(_ info: SheetPDFReader.PageInfo) -> some View {
-        let areas = chosen(info).map { info.reading.areas(placedAt: $0) } ?? []
+        // A fitted plot has no scale areas: the scales written on it no more hold than its title block's.
+        let areas = fitted ? [] : chosen(info).map { info.reading.areas(placedAt: $0) } ?? []
         return ZStack {
             Color.white
             if let thumbnail {

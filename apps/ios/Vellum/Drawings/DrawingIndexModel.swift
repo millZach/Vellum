@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 import VellumCore
 
 /// The Drawings tab's search (#68): the Duo's copy of the drawing index, kept fresh with `DrawingIndexKeeper`, and the
@@ -9,6 +10,8 @@ import VellumCore
 ///
 /// The copy is refreshed on launch, when the app comes back to the screen, when the connection returns, when Zach
 /// signs in to Dropbox and on a pull to refresh; one refresh runs at a time, and one asked for meanwhile runs after it.
+/// A refresh asks iOS for background time, so leaving the app mid-download keeps it going while iOS allows (#98); one
+/// cut short carries on by itself when the app comes back or the connection returns.
 @MainActor
 @Observable
 final class DrawingIndexModel {
@@ -91,6 +94,9 @@ final class DrawingIndexModel {
     @ObservationIgnored private var connection: ConnectionWatcher?
     @ObservationIgnored private var again = false
     @ObservationIgnored private var lastStarted = Date.distantPast
+    /// The last refresh didn't finish (stopped as background time ran out, offline, or a failure): the next time the
+    /// app comes back it carries on at once, however recently it started.
+    @ObservationIgnored private var cutShort = false
     /// Debug captures hold the connection state themselves.
     @ObservationIgnored var followsConnection = true
 
@@ -147,7 +153,11 @@ final class DrawingIndexModel {
             copyState = .none
             return
         }
-        let keeper = DrawingIndexKeeper(session: session, root: root)
+        // Dropbox's `offline` also means a request that timed out or dropped; the keeper retries those while the Duo
+        // has a connection, which `NWPathMonitor` says (#98).
+        let keeper = DrawingIndexKeeper(session: session, root: root, connected: { [weak self] in
+            await self?.online ?? false
+        })
         self.keeper = keeper
         self.session = session
         await startPlotWatch(session: session)
@@ -170,10 +180,16 @@ final class DrawingIndexModel {
         }
         refreshing = true
         lastStarted = Date()
+        // iOS ending the background time stops the refresh; the shards that came down stay for the next.
+        let background = BackgroundTime("Drawing index refresh") { Task { await keeper.interrupt() } }
+        defer { background.end() }
         repeat {
             again = false
             let outcome = await keeper.refresh()
             if outcome == .busy { continue }
+            cutShort = [DrawingIndexRefresh.interrupted, .offline, .failed].contains(outcome)
+            // Stopped part way: the screen stays as it was, and the app coming back carries on.
+            if outcome == .interrupted { break }
             lastRefresh = outcome
             switch outcome {
             case .updated: await reload()
@@ -186,11 +202,11 @@ final class DrawingIndexModel {
     }
 
     /// The app came back to the screen: the plot watch looks again, and the copy is refreshed unless a refresh started
-    /// moments ago (launch makes the app active too).
+    /// moments ago (launch makes the app active too) and wasn't cut short.
     func appBecameActive() {
         let plotWatch = self.plotWatch
         Task { await plotWatch?.setActive(true) }
-        guard Date().timeIntervalSince(lastStarted) > 10 else { return }
+        guard cutShort || Date().timeIntervalSince(lastStarted) > 10 else { return }
         Task { await refresh() }
         Task { await notePDFsOnThisDuo() }
     }
@@ -449,4 +465,27 @@ final class DrawingIndexModel {
         open(entry)
     }
     #endif
+}
+
+/// Background time from iOS for one piece of work (#98): asked for when the work starts, and given back when it ends or
+/// when iOS says the time is up, after `expired` has asked the work to stop. Given back once.
+@MainActor
+final class BackgroundTime {
+    private var task = UIBackgroundTaskIdentifier.invalid
+
+    init(_ name: String, expired: @escaping @MainActor @Sendable () -> Void) {
+        task = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            // iOS calls this on the main thread, and ends the app if the time isn't given back before it returns.
+            MainActor.assumeIsolated {
+                expired()
+                self?.end()
+            }
+        }
+    }
+
+    func end() {
+        guard task != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(task)
+        task = .invalid
+    }
 }

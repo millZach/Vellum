@@ -211,7 +211,8 @@ final class DrawingIndexTests: XCTestCase {
         let shardFiles = IndexFixture.manifest.shards.map(\.file)
         XCTAssertEqual(dropbox.requests.count, 5)
         XCTAssertEqual(dropbox.requests.first, "list /Vellum/Index")
-        XCTAssertEqual(Array(dropbox.requests.suffix(3)), shardFiles.map { "download /Vellum/Index/" + $0 })
+        // The shards come down several at a time (#98), so in any order.
+        XCTAssertEqual(Set(dropbox.requests.suffix(3)), Set(shardFiles.map { "download /Vellum/Index/" + $0 }))
         let firstBytes = await keeper.bytesDownloaded
         XCTAssertEqual(firstBytes, 666 + 630 + 4938 + 2510)
         IndexBudget.check("index_requests_first_refresh", dropbox.requests.count)

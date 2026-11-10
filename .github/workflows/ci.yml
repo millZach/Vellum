@@ -40,6 +40,13 @@ jobs:
         run: |
           VELLUM_PERF_OUT="$RUNNER_TEMP/drawing-index.json" swift test -c release -Xswiftc -enable-testing \
             --package-path apps/ios --filter DrawingSearchTimingTests
+      # The first refresh of a made-up 2,500-shard index against a stand-in network, one shard at a time and six at a
+      # time (#98), added to the same file. A process of its own, so its thousands of writes don't sit beside the
+      # search's memory and timings.
+      - name: Time the first drawing index download of a made-up 2,500-shard index (Release)
+        run: |
+          VELLUM_PERF_OUT="$RUNNER_TEMP/drawing-index.json" swift test -c release -Xswiftc -enable-testing \
+            --package-path apps/ios --filter DrawingIndexDownloadTests/testTimings
       - name: Compare the drawing search timings with the baseline
         if: always()
         run: python3 apps/ios/Scripts/perf-compare.py drawing-index "$RUNNER_TEMP/drawing-index.json"

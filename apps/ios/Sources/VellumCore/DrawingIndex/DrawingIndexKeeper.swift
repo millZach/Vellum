@@ -36,6 +36,9 @@ public enum DrawingIndexRefresh: Equatable, Sendable {
     case unreadableShard(generation: Int)
     /// Another refresh is running.
     case busy
+    /// The refresh was stopped part way (`interrupt()`, or iOS ending Vellum's background time). The copy is kept as it
+    /// was, and the shards that arrived stay, so the next refresh downloads only the rest.
+    case interrupted
 }
 
 /// Keeps the Duo's copy of the drawing index (#68, ADR-0017, ADR-0010's #68 amendment) in `Application Support/
@@ -48,21 +51,43 @@ public enum DrawingIndexRefresh: Equatable, Sendable {
 /// ```
 ///
 /// A refresh does what `DrawingIndexPlan` says: one listing of `Vellum/Index`, then, only when the manifest changed,
-/// the manifest and the shards the Duo lacks, each checked against the hash its name gives. The new manifest is
-/// written over the old one only once every shard it names is on the Duo, so the copy is never half one generation
-/// and half another. Everything here runs off the main thread, on the actor.
+/// the manifest and the shards the Duo lacks, `shardsInFlight` at a time (#98), each checked against the hash its name
+/// gives and written atomically as it arrives. A request that times out or loses its connection is retried while the
+/// Duo has a connection. The new manifest is written over the old one only once every shard it names is on the Duo, so
+/// the copy is never half one generation and half another. Everything here runs off the main thread: on the actor, and
+/// the downloads and writes in its child tasks.
 public actor DrawingIndexKeeper {
+    /// Shards downloaded at once (#98). A first refresh is thousands of small shards (median a few KB), so its time is
+    /// almost all round trips; six in flight cuts it about sixfold, keeps a dropped connection's retries to six, and
+    /// stays well inside what Dropbox lets one app ask at once, so it rarely meets a 429.
+    public static let shardsInFlight = 6
+    /// The waits before each retry of a request that timed out, lost its connection or met a busy Dropbox (#98): four
+    /// retries over about 7.5 seconds, enough to ride out a dropped Wi-Fi packet or a moment in the background.
+    public static let retryDelays: [Duration] = [.milliseconds(500), .seconds(1), .seconds(2), .seconds(4)]
+
     public nonisolated let root: URL
     private let session: DropboxSession?
+    /// Whether the Duo has a connection (`NWPathMonitor` in the app). Dropbox's `offline` covers a timed-out or dropped
+    /// request as well as no connection at all, so a refresh asks this before believing it: connected, the request is
+    /// retried; not, the refresh ends as `.offline`. Nil believes the error, as before #98.
+    private let connected: (@Sendable () async -> Bool)?
+    private let inFlight: Int
+    private let delays: [Duration]
     private var running = false
+    private var current: Task<DrawingIndexRefresh, Never>?
     private var referenced: Set<String> = []
     private var thumbnailsInFlight: [String: Task<Data?, Never>] = [:]
     /// File bytes downloaded by refreshes and thumbnails since this keeper was made, for the budgets and the PR.
     public private(set) var bytesDownloaded = 0
 
-    public init(session: DropboxSession?, root: URL) {
+    public init(session: DropboxSession?, root: URL, connected: (@Sendable () async -> Bool)? = nil,
+                inFlight: Int = DrawingIndexKeeper.shardsInFlight,
+                retryDelays: [Duration] = DrawingIndexKeeper.retryDelays) {
         self.session = session
         self.root = root
+        self.connected = connected
+        self.inFlight = max(1, inFlight)
+        delays = retryDelays
     }
 
     /// The copy's folder on this Duo: `Application Support/DrawingIndex`.
@@ -126,9 +151,22 @@ public actor DrawingIndexKeeper {
         guard !running else { return .busy }
         running = true
         defer { running = false }
+        let work = Task { await self.performRefresh() }
+        current = work
+        defer { current = nil }
+        return await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
+    }
+
+    /// Stops the refresh running now, if any: its downloads in flight are cancelled and it returns `.interrupted`. The
+    /// shards already written stay; nothing is swapped in.
+    public func interrupt() {
+        current?.cancel()
+    }
+
+    private func performRefresh() async -> DrawingIndexRefresh {
         guard let session, await session.isSignedIn else { return .notSignedIn }
         do {
-            guard let listed = try await session.files(in: DrawingIndexFormat.folder),
+            guard let listed = try await retrying({ try await session.files(in: DrawingIndexFormat.folder) }),
                   let manifestFile = listed.first(where: { $0.name.lowercased() == DrawingIndexFormat.manifestName })
             else { return .noIndex }
             let kept = try? DurableFile.read(manifestURL)
@@ -137,10 +175,11 @@ public actor DrawingIndexKeeper {
             case .unchanged: return .unchanged
             case .downloadManifest: break
             }
-            let bytes = [UInt8](try await session.download(manifestFile))
+            let bytes = [UInt8](try await retrying { try await session.download(manifestFile) })
             bytesDownloaded += bytes.count
-            let read: Result<DrawingIndexManifest, DrawingIndexError>
-            do { read = .success(try DrawingIndexFormat.manifest(from: bytes)) } catch { read = .failure(error) }
+            let read: Result<DrawingIndexManifest, DrawingIndexError> = Result { () throws(DrawingIndexError) in
+                try DrawingIndexFormat.manifest(from: bytes)
+            }
             // The second pass finds every shard here; a third would mean a download that did not stay.
             for _ in 0..<2 {
                 switch DrawingIndexPlan.step(read, held: heldShards()) {
@@ -151,19 +190,7 @@ public actor DrawingIndexKeeper {
                 case .fetch(let files):
                     guard case .success(let manifest) = read else { return .failed }
                     try FileManager.default.createDirectory(at: shardsFolder, withIntermediateDirectories: true)
-                    for file in files {
-                        let path = DrawingIndexFormat.folder + "/" + file
-                        let size = manifest.shards.first { $0.file == file }?.bytes ?? 0
-                        let shard = [UInt8](try await session.download(DropboxFile(
-                            id: path, name: String(file.dropFirst("shards/".count)), path: path, size: size,
-                            contentHash: "", rev: "")))
-                        bytesDownloaded += shard.count
-                        // Named by its bytes: anything else is damaged, or not what the manifest meant.
-                        guard DrawingIndexFormat.contentName(of: shard) == DrawingIndexFormat.namedHash(file) else {
-                            return .failed
-                        }
-                        try DurableFile.writeAtomically(shard, to: root.appendingPathComponent(file))
-                    }
+                    guard try await fetch(files, of: manifest, from: session) else { return .failed }
                 case .swap(let delete):
                     guard case .success(let manifest) = read else { return .failed }
                     // Every shard of the new generation is read before it is promoted: one the Duo can't read (named
@@ -180,6 +207,7 @@ public actor DrawingIndexKeeper {
                             return .unreadableShard(generation: manifest.generation)
                         }
                     }
+                    if Task.isCancelled { return .interrupted }
                     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
                     try DurableFile.writeAtomically(bytes, to: manifestURL)
                     for file in delete { try? FileManager.default.removeItem(at: root.appendingPathComponent(file)) }
@@ -187,15 +215,84 @@ public actor DrawingIndexKeeper {
                 }
             }
             return .failed
-        } catch let error as DropboxError {
+        } catch {
+            if Task.isCancelled { return .interrupted }
+            guard let error = error as? DropboxError else { return .failed }
             switch error {
-            case .offline: return .offline
+            // Retried and still unreachable: offline only if the Duo has no connection; else a failure to try again.
+            case .offline: return await isConnected() ? .failed : .offline
             case .notSignedIn, .signInExpired: return .notSignedIn
             default: return .failed
             }
-        } catch {
-            return .failed
         }
+    }
+
+    /// Downloads `files`, `inFlight` at a time, each retried as `retrying` says, checked against the hash its name gives
+    /// and written atomically as it arrives. False when one came down that is not what its name says; nothing more is
+    /// asked then, and what has been written stays.
+    private func fetch(_ files: [String], of manifest: DrawingIndexManifest, from session: DropboxSession) async throws
+        -> Bool {
+        var sizes: [String: Int] = [:]
+        for shard in manifest.shards { sizes[shard.file] = shard.bytes }
+        let root = self.root
+        return try await withThrowingTaskGroup(of: Int?.self) { group in
+            var next = files.makeIterator()
+            func start() -> Bool {
+                guard !Task.isCancelled, let file = next.next() else { return false }
+                let path = DrawingIndexFormat.folder + "/" + file
+                let dropboxFile = DropboxFile(id: path, name: String(file.dropFirst("shards/".count)), path: path,
+                                              size: sizes[file] ?? 0, contentHash: "", rev: "")
+                group.addTask {
+                    let shard = [UInt8](try await self.retrying { try await session.download(dropboxFile) })
+                    // Named by its bytes: anything else is damaged, or not what the manifest meant.
+                    guard DrawingIndexFormat.contentName(of: shard) == DrawingIndexFormat.namedHash(file) else {
+                        return nil
+                    }
+                    try DurableFile.writeAtomically(shard, to: root.appendingPathComponent(file))
+                    return shard.count
+                }
+                return true
+            }
+            for _ in 0..<inFlight {
+                guard start() else { break }
+            }
+            while let downloaded = try await group.next() {
+                guard let downloaded else {
+                    group.cancelAll()
+                    return false
+                }
+                bytesDownloaded += downloaded
+                _ = start()
+            }
+            // Stopped part way: what came down is written, and nothing more is asked.
+            try Task.checkCancellation()
+            return true
+        }
+    }
+
+    /// `request`, tried again after each of `delays` while it times out, loses its connection or finds Dropbox busy,
+    /// and the Duo still has a connection. Throws the last error, or `CancellationError` once the refresh is stopped.
+    private nonisolated func retrying<Value: Sendable>(_ request: @Sendable () async throws -> Value)
+        async throws -> Value {
+        var attempt = 0
+        while true {
+            try Task.checkCancellation()
+            do {
+                return try await request()
+            } catch {
+                try Task.checkCancellation()
+                guard attempt < delays.count, let dropbox = error as? DropboxError,
+                      dropbox == .offline || dropbox == .dropboxUnavailable else { throw error }
+                if dropbox == .offline, !(await isConnected()) { throw error }
+                try await Task.sleep(for: delays[attempt])
+                attempt += 1
+            }
+        }
+    }
+
+    private nonisolated func isConnected() async -> Bool {
+        guard let connected else { return false }
+        return await connected()
     }
 
     // MARK: Thumbnails

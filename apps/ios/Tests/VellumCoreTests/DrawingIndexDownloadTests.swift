@@ -368,7 +368,8 @@ final class DrawingIndexDownloadTests: XCTestCase {
             let network = makeNetwork(index, delay: .milliseconds(5))
             let keeper = makeKeeper(network, temporaryFolder(), inFlight: inFlight)
             let started = Date()
-            let result = await refresh(keeper, network)
+            // One at a time takes over a minute on a runner: each shard's durable write costs more than its round trip.
+            let result = await withDeadline(600) { await keeper.refresh() }
             let elapsed = Date().timeIntervalSince(started) * 1000
             XCTAssertEqual(result, .updated)
             measurements.append((metric, elapsed))

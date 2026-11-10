@@ -73,9 +73,8 @@ final class DrawingSearchTimingTests: XCTestCase {
             ("index_resident_20000_mb", resident),
         ]
         for (metric, value) in measurements { print("PERF drawing-index \(metric)=\(String(format: "%.2f", value))") }
-        let json = ["measurements": measurements.map { ["metric": $0.0, "value": $0.1] as [String: Any] }]
-        try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys, .prettyPrinted])
-            .write(to: URL(fileURLWithPath: out))
+        // The index download's timings (#98) go in the same file.
+        try PerfOut.append(measurements, to: out)
         withExtendedLifetime((entries, index)) {}
     }
 

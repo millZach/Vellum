@@ -35,11 +35,12 @@ jobs:
         run: swift test --package-path apps/ios
       # The drawing search on a made-up 20,000-drawing index (#68): load, keystroke and full-scan times and resident
       # memory, in an optimised build as the app runs, compared with docs/perf/baselines/drawing-index.json. Timings
-      # never fail the build; the search's counts are budgets in the run above.
+      # never fail the build; the search's counts are budgets in the run above. The same run times the first refresh
+      # of a made-up 2,500-shard index against a stand-in network, one shard at a time and six at a time (#98).
       - name: Time the drawing search on a made-up 20,000-drawing index (Release)
         run: |
           VELLUM_PERF_OUT="$RUNNER_TEMP/drawing-index.json" swift test -c release -Xswiftc -enable-testing \
-            --package-path apps/ios --filter DrawingSearchTimingTests
+            --package-path apps/ios --filter 'DrawingSearchTimingTests|DrawingIndexDownloadTests/testTimings'
       - name: Compare the drawing search timings with the baseline
         if: always()
         run: python3 apps/ios/Scripts/perf-compare.py drawing-index "$RUNNER_TEMP/drawing-index.json"

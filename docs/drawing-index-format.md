@@ -111,8 +111,8 @@ the same bytes and the same name.
 1. Ask Dropbox for `Vellum/Index/index.json`'s metadata (or read the `Vellum/Index` listing's changes). Same `rev`
    as last time: nothing changed; stop.
 2. Download `index.json`. Refuse a `format` other than 1.
-3. Download each shard named whose file name the Duo has not got. A shard's name is the hash of its bytes, so a
-   download that does not hash to its name is refused.
+3. Download each shard named whose file name the Duo has not got, several at a time (six, #98). A shard's name is the
+   hash of its bytes, so a download that does not hash to its name is refused. A dropped request is retried.
 4. Drop kept shards no longer named.
 5. Download thumbnails by name as rows need them; a name the Duo has is never downloaded again.
 

@@ -112,6 +112,43 @@
       "note": "The same, typing a project's name: every made-up project starts \"Made-up Project\", so most keys look at all 20,000 until its number; the worst case of the three (380,000 without narrowing)."
     },
     {
+      "metric": "index_requests_first_refresh_2500",
+      "kind": "count",
+      "value": 2502,
+      "unit": "requests",
+      "tolerance": 0,
+      "measured": "fix/index-first-download 2026-11-10 VellumCore DrawingIndexDownloadTests (deterministic)",
+      "note": "A first refresh of a made-up index of 2,500 one-drawing shards, Zach's scale (#98): one list_folder of Vellum/Index, the manifest, and one download per shard, none twice."
+    },
+    {
+      "metric": "index_shard_downloads_in_flight",
+      "kind": "count",
+      "value": 6,
+      "before": 1,
+      "unit": "requests",
+      "tolerance": 0,
+      "measured": "fix/index-first-download 2026-11-10 VellumCore DrawingIndexDownloadTests (deterministic)",
+      "note": "The most shard downloads in flight at once during that refresh (DrawingIndexKeeper.shardsInFlight). One before #98."
+    },
+    {
+      "metric": "index_shard_requests_first_refresh_2500_eight_dropped",
+      "kind": "count",
+      "value": 2508,
+      "unit": "requests",
+      "tolerance": 0,
+      "measured": "fix/index-first-download 2026-11-10 VellumCore DrawingIndexDownloadTests (deterministic)",
+      "note": "The same refresh with every 300th shard request failing once as a timed-out or dropped request: each of the 8 is asked again once, and the refresh completes. Before #98 the first failure ended the refresh as offline."
+    },
+    {
+      "metric": "index_requests_carry_on_after_1000_of_2500",
+      "kind": "count",
+      "value": 1502,
+      "unit": "requests",
+      "tolerance": 0,
+      "measured": "fix/index-first-download 2026-11-10 VellumCore DrawingIndexDownloadTests (deterministic)",
+      "note": "A first refresh cut off by the connection going after 1,000 of 2,500 shards, run again: the listing, the manifest and only the 1,500 shards the Duo lacks."
+    },
+    {
       "metric": "search_keystroke_p50_ms",
       "kind": "time",
       "value": 0.56,

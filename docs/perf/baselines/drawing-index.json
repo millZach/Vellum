@@ -214,6 +214,26 @@
       "measured": "feat/drawing-search 2026-11-07 run 42406413271, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
       "note": "Resident memory added by holding the 20,000 entries and their search, measured with task_info; index_copy_bytes_20000 and search_index_bytes_20000 are the deterministic estimates.",
       "warn": false
+    },
+    {
+      "metric": "index_first_refresh_2500_ms",
+      "kind": "time",
+      "value": 13435.43,
+      "before": 69313.36,
+      "unit": "ms",
+      "tolerance": 0.5,
+      "measured": "fix/index-first-download 2026-11-10 run 42897344798, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
+      "note": "The first refresh of a made-up 2,500-shard index (#98) through the real DropboxSession and a stand-in network that answers each request after 5 ms, six shards in flight: the listing, the manifest, and every shard downloaded, checked against its name and written durably. Most of it is the durable writes on the runner, not the round trips; on the Duo, where a round trip is a few hundred milliseconds, the round trips dominate and the gain is nearer sixfold."
+    },
+    {
+      "metric": "index_first_refresh_2500_one_at_a_time_ms",
+      "kind": "time",
+      "value": 69313.36,
+      "unit": "ms",
+      "tolerance": 0.5,
+      "warn": false,
+      "measured": "fix/index-first-download 2026-11-10 run 42897344798, xcode-27 image, Xcode 27.2, swift test -c release (one sample)",
+      "note": "The same refresh one shard at a time, the way before #98, for comparison; recorded only."
     }
   ]
 }

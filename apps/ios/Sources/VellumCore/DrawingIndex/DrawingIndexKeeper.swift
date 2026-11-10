@@ -177,8 +177,9 @@ public actor DrawingIndexKeeper {
             }
             let bytes = [UInt8](try await retrying { try await session.download(manifestFile) })
             bytesDownloaded += bytes.count
-            let read: Result<DrawingIndexManifest, DrawingIndexError>
-            do { read = .success(try DrawingIndexFormat.manifest(from: bytes)) } catch { read = .failure(error) }
+            let read: Result<DrawingIndexManifest, DrawingIndexError> = Result { () throws(DrawingIndexError) in
+                try DrawingIndexFormat.manifest(from: bytes)
+            }
             // The second pass finds every shard here; a third would mean a download that did not stay.
             for _ in 0..<2 {
                 switch DrawingIndexPlan.step(read, held: heldShards()) {
@@ -271,7 +272,7 @@ public actor DrawingIndexKeeper {
 
     /// `request`, tried again after each of `delays` while it times out, loses its connection or finds Dropbox busy,
     /// and the Duo still has a connection. Throws the last error, or `CancellationError` once the refresh is stopped.
-    private nonisolated func retrying<Value: Sendable>(_ request: @Sendable () async throws(DropboxError) -> Value)
+    private nonisolated func retrying<Value: Sendable>(_ request: @Sendable () async throws -> Value)
         async throws -> Value {
         var attempt = 0
         while true {
@@ -280,8 +281,9 @@ public actor DrawingIndexKeeper {
                 return try await request()
             } catch {
                 try Task.checkCancellation()
-                guard attempt < delays.count, error == .offline || error == .dropboxUnavailable else { throw error }
-                if error == .offline, !(await isConnected()) { throw error }
+                guard attempt < delays.count, let dropbox = error as? DropboxError,
+                      dropbox == .offline || dropbox == .dropboxUnavailable else { throw error }
+                if dropbox == .offline, !(await isConnected()) { throw error }
                 try await Task.sleep(for: delays[attempt])
                 attempt += 1
             }

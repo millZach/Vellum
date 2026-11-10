@@ -40,7 +40,8 @@ final class StandInIndexNetwork: DropboxTransport, @unchecked Sendable {
     var dropped: Int { lock.withLock { _dropped.count } }
 
     func send(_ request: DropboxHTTPRequest) async throws -> DropboxHTTPResponse {
-        let argument = request.headers["Dropbox-API-Arg"] ?? ""
+        // JSONSerialization writes "/" as "\/" in the header.
+        let argument = (request.headers["Dropbox-API-Arg"] ?? "").replacingOccurrences(of: "\\/", with: "/")
         let isShard = request.url.path == "/2/files/download" && argument.contains("/shards/")
         let (failure, counted): (DropboxError?, Bool) = lock.withLock {
             if request.url.path == "/oauth2/token" { _tokenRequests += 1 }

@@ -103,10 +103,68 @@ struct MadeUpShardedIndex {
     }
 }
 
+/// The answer of `work`, or nil once `seconds` pass: a refresh that stops answering fails its test by name instead of
+/// stalling the suite.
+func withDeadline<Value: Sendable>(_ seconds: Int = 60, _ work: @escaping @Sendable () async -> Value) async -> Value? {
+    let race = Race<Value?>()
+    return await withCheckedContinuation { continuation in
+        race.waiting(continuation)
+        Task { race.give(await work()) }
+        Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            race.give(nil)
+        }
+    }
+}
+
+private final class Race<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Never>?
+    private var answer: Value?
+    private var answered = false
+
+    func waiting(_ continuation: CheckedContinuation<Value, Never>) {
+        let ready: Value? = lock.withLock {
+            if answered { return answer }
+            self.continuation = continuation
+            return nil
+        }
+        if answered, let ready { continuation.resume(returning: ready) }
+    }
+
+    func give(_ value: Value) {
+        let waiting: CheckedContinuation<Value, Never>? = lock.withLock {
+            guard !answered else { return nil }
+            answered = true
+            answer = value
+            defer { continuation = nil }
+            return continuation
+        }
+        waiting?.resume(returning: value)
+    }
+}
+
 final class DrawingIndexDownloadTests: XCTestCase {
     static let size = 2_500
     /// Retries wait nothing in the tests; the app's waits are `DrawingIndexKeeper.retryDelays`.
     static let noWaits: [Duration] = [.zero, .zero, .zero, .zero]
+
+    override func setUp() {
+        super.setUp()
+        // Unbuffered, so a stalled test is named in the log even though XCTest's own lines wait in stdout's buffer.
+        FileHandle.standardError.write(Data("\(name) started\n".utf8))
+    }
+
+    /// A refresh, failing the test with the network's counts if it hasn't answered in a minute.
+    private func refresh(_ keeper: DrawingIndexKeeper, _ network: StandInIndexNetwork,
+                         file: StaticString = #filePath, line: UInt = #line) async -> DrawingIndexRefresh? {
+        let result = await withDeadline { await keeper.refresh() }
+        if result == nil {
+            XCTFail("the refresh didn't answer in 60 s: \(network.shardRequests) shard requests, peak \(network.peakInFlight)",
+                    file: file, line: line)
+        }
+        return result
+    }
 
     private func temporaryFolder() -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("drawing-index-\(UUID().uuidString)")
@@ -145,7 +203,7 @@ final class DrawingIndexDownloadTests: XCTestCase {
         XCTAssertEqual(index.files.count, Self.size)
         let network = makeNetwork(index)
         let keeper = makeKeeper(network, temporaryFolder())
-        let result = await keeper.refresh()
+        let result = await refresh(keeper, network)
         XCTAssertEqual(result, .updated)
         let copyRead = await keeper.load()
         let copy = try XCTUnwrap(copyRead)
@@ -165,7 +223,7 @@ final class DrawingIndexDownloadTests: XCTestCase {
         let network = makeNetwork(index)
         network.dropEvery = 300
         let keeper = makeKeeper(network, temporaryFolder())
-        let result = await keeper.refresh()
+        let result = await refresh(keeper, network)
         XCTAssertEqual(result, .updated)
         // Requests 300, 600 … 2,400 failed once each and were asked again.
         XCTAssertEqual(network.dropped, 8)
@@ -183,14 +241,14 @@ final class DrawingIndexDownloadTests: XCTestCase {
         let network = makeNetwork(first)
         let root = temporaryFolder()
         let keeper = makeKeeper(network, root)
-        let swapped = await keeper.refresh()
+        let swapped = await refresh(keeper, network)
         XCTAssertEqual(swapped, .updated)
 
         // A new generation in Dropbox, and the connection gone before its first shard.
         let second = MadeUpShardedIndex(shards: 60, generation: 2)
         second.put(in: network.dropbox)
         network.offlineAfter = network.shardRequests
-        let offline = await keeper.refresh()
+        let offline = await refresh(keeper, network)
         XCTAssertEqual(offline, .offline)
         let kept = await keeper.load()
         XCTAssertEqual(kept?.manifest.generation, 1)
@@ -203,7 +261,7 @@ final class DrawingIndexDownloadTests: XCTestCase {
         network.offlineAfter = 1_000
         let root = temporaryFolder()
         let keeper = makeKeeper(network, root)
-        let cut = await keeper.refresh()
+        let cut = await refresh(keeper, network)
         XCTAssertEqual(cut, .offline)
         let none = await keeper.load()
         XCTAssertNil(none)
@@ -214,7 +272,7 @@ final class DrawingIndexDownloadTests: XCTestCase {
         let back = StandInIndexNetwork(network.dropbox, delay: .milliseconds(1))
         network.dropbox.resetCounts()
         let again = makeKeeper(back, root)
-        let carried = await again.refresh()
+        let carried = await refresh(again, back)
         XCTAssertEqual(carried, .updated)
         XCTAssertEqual(back.shardRequests, 1_500)
         XCTAssertEqual(network.dropbox.requests.count, 1_502)
@@ -230,9 +288,10 @@ final class DrawingIndexDownloadTests: XCTestCase {
         let root = temporaryFolder()
         let keeper = makeKeeper(network, root)
         let running = Task { await keeper.refresh() }
-        while network.shardRequests < 60 { try await Task.sleep(for: .milliseconds(2)) }
+        let deadline = Date().addingTimeInterval(60)
+        while network.shardRequests < 60, Date() < deadline { try await Task.sleep(for: .milliseconds(2)) }
         await keeper.interrupt()
-        let result = await running.value
+        let result = await withDeadline { await running.value }
         XCTAssertEqual(result, .interrupted)
         let none = await keeper.load()
         XCTAssertNil(none)
@@ -241,7 +300,7 @@ final class DrawingIndexDownloadTests: XCTestCase {
         XCTAssertLessThan(held, 300)
 
         let before = network.shardRequests
-        let carried = await keeper.refresh()
+        let carried = await refresh(keeper, network)
         XCTAssertEqual(carried, .updated)
         XCTAssertEqual(network.shardRequests - before, 300 - held)
         await assertEveryShardVerified(keeper, index)
@@ -255,7 +314,7 @@ final class DrawingIndexDownloadTests: XCTestCase {
         bytes[bytes.count / 2] ^= 0x01
         network.dropbox.changeOnTheLaptop("/Vellum/Index/" + damaged, to: bytes)
         let keeper = makeKeeper(network, temporaryFolder())
-        let result = await keeper.refresh()
+        let result = await refresh(keeper, network)
         XCTAssertEqual(result, .failed)
         let copy = await keeper.load()
         XCTAssertNil(copy)
@@ -278,17 +337,17 @@ final class DrawingIndexDownloadTests: XCTestCase {
                                        expiresAt: expired ? .distantPast : .distantFuture)
             let session = DropboxSession(appKey: downloadKey, transport: network, store: DropboxMemoryTokenStore(tokens))
             let files = index.files.keys.sorted().prefix(DrawingIndexKeeper.shardsInFlight)
-            let downloaded = try await withThrowingTaskGroup(of: Bool.self) { group in
+            let downloaded = await withDeadline { () -> [Bool] in await withTaskGroup(of: Bool.self) { group in
                 for file in files {
                     let path = "/Vellum/Index/" + file
                     let dropboxFile = DropboxFile(id: path, name: file, path: path, size: index.files[file]!.count,
                                                   contentHash: "", rev: "")
-                    group.addTask { [UInt8](try await session.download(dropboxFile)) == index.files[file]! }
+                    group.addTask { (try? await session.download(dropboxFile)).map { [UInt8]($0) } == index.files[file]! }
                 }
                 var all: [Bool] = []
-                for try await same in group { all.append(same) }
+                for await same in group { all.append(same) }
                 return all
-            }
+            } }
             XCTAssertEqual(downloaded, Array(repeating: true, count: files.count), "expired: \(expired)")
             XCTAssertEqual(network.tokenRequests, 1, "expired: \(expired)")
             XCTAssertEqual(network.peakInFlight, files.count, "expired: \(expired)")
@@ -308,7 +367,7 @@ final class DrawingIndexDownloadTests: XCTestCase {
             let network = makeNetwork(index, delay: .milliseconds(5))
             let keeper = makeKeeper(network, temporaryFolder(), inFlight: inFlight)
             let started = Date()
-            let result = await keeper.refresh()
+            let result = await refresh(keeper, network)
             let elapsed = Date().timeIntervalSince(started) * 1000
             XCTAssertEqual(result, .updated)
             measurements.append((metric, elapsed))

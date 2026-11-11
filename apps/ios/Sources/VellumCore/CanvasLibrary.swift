@@ -102,12 +102,20 @@ public struct CanvasLibrary: Sendable {
     /// listed without its sheet, and a crash leaves either nothing or the whole canvas.
     public func create(name: String?, units: CanvasUnits = .default, now: Date = Date(), sheet: Sheet, pdf: URL,
                        keptName: String) throws -> CanvasSummary {
+        try create(name: name, units: units, now: now, sheet: sheet, pdf: pdf, keptName: keptName, midway: nil)
+    }
+
+    /// The same, with `midway` run inside the hidden folder once the PDF is kept and before the sheet is written: the
+    /// tests use it to read the list while a canvas is being built (#101).
+    func create(name: String?, units: CanvasUnits, now: Date, sheet: Sheet, pdf: URL, keptName: String,
+                midway: (() throws -> Void)?) throws -> CanvasSummary {
         try create(name: name, units: units, now: now) { building in
             guard let bytes = try DurableFile.read(pdf) else { throw CocoaError(.fileNoSuchFile) }
             let sheets = building.appendingPathComponent(Self.sheetsFolderName, isDirectory: true)
             try FileManager.default.createDirectory(at: sheets, withIntermediateDirectories: true)
             try DurableFile.writeAtomically(bytes, to: sheets.appendingPathComponent(keptName + ".pdf"))
             try DurableFile.flushFolder(building)
+            try midway?()
             var centred = sheet
             let size = sheet.size
             centred.origin = CanvasPoint(x: -size.width / 2, y: -size.height / 2)
@@ -215,7 +223,9 @@ public struct CanvasLibrary: Sendable {
         return true
     }
 
-    /// Clears away the hidden folders a crash can leave mid-create or mid-delete.
+    /// Clears away the hidden folders a crash can leave mid-create or mid-delete. Run it once, at launch, before
+    /// anything can make or delete a canvas, and never again in that run: the hidden folders it clears are also where
+    /// a canvas is built and where a deleted one goes, so running it later deletes a canvas being made (#101).
     public func removeLeftovers() {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return }
         for name in names where name.hasPrefix(".") && (name.hasSuffix(".creating") || name.hasSuffix(".deleting")) {

@@ -51,11 +51,14 @@ final class CanvasesModel {
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: Self.lastOpenKey) }
     }
 
-    /// Finds (and makes, the first time) the canvases' folder, off the main thread, and starts syncing.
+    /// Finds (and makes, the first time) the canvases' folder, off the main thread, and starts syncing. A crash's
+    /// half-made or half-deleted canvases are cleared here, once, before the library is set, so nothing can be making
+    /// or deleting a canvas while they are; a list refresh never clears them (#101).
     func prepare() async {
         guard library == nil else { return }
         guard let found = await Task.detached(priority: .userInitiated, operation: { () -> (CanvasLibrary, SyncLedgerFile?)? in
             guard let library = try? CanvasLibrary.onThisDevice() else { return nil }
+            library.removeLeftovers()
             return (library, try? SyncLedgerFile.onThisDevice())
         }).value else {
             problem = "Vellum could not find its folder on this Duo."
@@ -140,7 +143,6 @@ final class CanvasesModel {
     func refresh() async {
         guard let library else { return }
         let result = await Task.detached(priority: .userInitiated) { () -> ([CanvasSummary], [UUID: CanvasPreviews.Info]) in
-            library.removeLeftovers()
             let summaries = (try? library.list()) ?? []
             var previews: [UUID: CanvasPreviews.Info] = [:]
             for summary in summaries { previews[summary.id] = CanvasPreviews.info(for: summary.id) }

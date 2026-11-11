@@ -8,12 +8,15 @@ import Foundation
 /// Writing files so a crash, a kill or a dead battery leaves either the old contents or the new, never half of each
 /// (ADR-0014). Plain POSIX calls, so it behaves the same on the Duo and on Linux, where the tests run.
 enum DurableFile {
-    struct Failure: Error, CustomStringConvertible {
+    struct Failure: Error, CustomStringConvertible, LocalizedError {
         let operation: String
         let path: String
         let code: Int32
 
         var description: String { "\(operation) \(path): \(String(cString: strerror(code)))" }
+
+        /// What an alert says: the call and the system's error, without the path, which names a canvas by its id.
+        var errorDescription: String? { "\(operation) failed: \(String(cString: strerror(code)))." }
 
         /// Whether the Duo is out of space, which the status bar says plainly.
         var isOutOfSpace: Bool { code == ENOSPC || code == EDQUOT }

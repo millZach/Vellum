@@ -795,6 +795,70 @@ final class DrawingOpeningTests: XCTestCase {
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.root.path), [])
     }
 
+    // MARK: A list refresh while a canvas is built (#101)
+
+    /// A made-up library with a made-up PDF and sheet, for building a canvas with its sheet.
+    private func libraryWithAPDF() throws -> (CanvasLibrary, URL, Sheet) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("vellum-race-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let pdf = root.appendingPathComponent("E-210.pdf")
+        try Data("%PDF-1.4 made-up E-210".utf8).write(to: pdf)
+        return (CanvasLibrary(root: root.appendingPathComponent("Canvases")), pdf,
+                Sheet(paper: .inches(36, by: 24), scale: .drawn(.ratio(20))))
+    }
+
+    func testAListRefreshWhileACanvasIsBuiltNeverRemovesItAndLaunchStillClearsACrashsLeftovers() throws {
+        let (library, pdf, sheet) = try libraryWithAPDF()
+        try FileManager.default.createDirectory(at: library.root, withIntermediateDirectories: true)
+        // What a crash mid-create leaves: a hidden folder with half a canvas in it.
+        let crashed = ".\(UUID().uuidString).creating"
+        let leftover = library.root.appendingPathComponent(crashed, isDirectory: true)
+        try FileManager.default.createDirectory(at: leftover.appendingPathComponent("sheets"),
+                                                withIntermediateDirectories: true)
+        try Data("%PDF-1.4 made-up half".utf8).write(to: leftover.appendingPathComponent("sheets/half.pdf"))
+
+        var refreshedMidway = false
+        let made = try library.create(name: "E-210", units: .default, now: Date(), sheet: sheet, pdf: pdf,
+                                      keptName: "madeupe210", midway: {
+            // What the Canvases list's refresh reads, from the library and from a copy of it, as the app's tasks do.
+            XCTAssertEqual(try library.list(), [])
+            XCTAssertEqual(try CanvasLibrary(root: library.root).list(), [])
+            let building = try FileManager.default.contentsOfDirectory(atPath: library.root.path)
+                .filter { $0.hasSuffix(".creating") && $0 != crashed }
+            XCTAssertEqual(building.count, 1, "the canvas being built is still there")
+            refreshedMidway = true
+        })
+        XCTAssertTrue(refreshedMidway)
+        XCTAssertEqual(try library.list().map(\.id), [made.id])
+        let store = try library.openInk(made.id)
+        XCTAssertEqual(store.session.sheets.count, 1)
+        store.closeFiles()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: leftover.path), "a refresh leaves the crash's folder alone")
+
+        // Launch clears the crash's leftover and keeps the canvas.
+        library.removeLeftovers()
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: library.root.path), [made.id.uuidString])
+    }
+
+    /// Why leftovers are cleared only at launch: clearing them while a canvas is built deletes it, and the canvas is
+    /// never made, which is what Open in a new canvas did on the Duo (#101).
+    func testClearingLeftoversWhileACanvasIsBuiltIsWhatLostIt() throws {
+        let (library, pdf, sheet) = try libraryWithAPDF()
+        XCTAssertThrowsError(try library.create(name: "E-210", units: .default, now: Date(), sheet: sheet, pdf: pdf,
+                                                keptName: "madeupe210", midway: { library.removeLeftovers() }))
+        XCTAssertEqual(try library.list(), [])
+    }
+
+    func testAFileFailureSaysTheCallAndTheSystemErrorWithoutThePath() {
+        let id = UUID().uuidString
+        let failure = DurableFile.Failure(operation: "open", path: "/made-up/Canvases/.\(id).creating/ink.log",
+                                          code: ENOENT)
+        XCTAssertEqual(failure.localizedDescription, "open failed: \(String(cString: strerror(ENOENT))).")
+        XCTAssertFalse(failure.localizedDescription.contains(id))
+        XCTAssertTrue(failure.description.contains(id), "the log line keeps the path")
+    }
+
     func testADownloadThroughTheSessionReadsTheHashDropboxGives() async throws {
         let dropbox = MadeUpDropbox()
         let bytes = [UInt8]("%PDF-1.4 made-up E-210".utf8)

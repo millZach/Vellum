@@ -104,6 +104,12 @@ enum MadeUpPDF {
         let box = MadeUpSheets.titleBlockBox(page.paper)
         context.stroke(CGRect(x: box.minX * 72, y: box.minY * 72, width: box.width.inches * 72,
                               height: box.height.inches * 72))
+        for fill in page.fills {
+            context.setFillColor(red: CGFloat(fill.colour.red) / 255, green: CGFloat(fill.colour.green) / 255,
+                                 blue: CGFloat(fill.colour.blue) / 255, alpha: 1)
+            context.fill(CGRect(x: fill.rect.minX * 72, y: fill.rect.minY * 72, width: fill.rect.width.inches * 72,
+                                height: fill.rect.height.inches * 72))
+        }
         context.setLineWidth(1.2)
         for segment in page.drawing {
             context.setStrokeColor(segment.coloured ? UIColor.systemBlue.cgColor : UIColor.black.cgColor)
@@ -281,7 +287,9 @@ struct CaptureSheetsTransport: DropboxTransport {
 ///   picked up with a tap of the lasso: its strip has the angle, 90° left, 90° right and Done, and no Change scale. A
 ///   scale change asked of it through the canvas view is refused, and the log says the sheet is still NTS.
 /// - `--ui-sheets scan`: the scan placed at 1/8" = 1'-0" beside the 1/4" plan: in dark mode the plan inverts and the
-///   scan dims.
+///   scan shows as printed, its own yellowed paper.
+/// - `--ui-sheets coloured` (#100): the made-up coloured P&ID placed NTS and zoomed to: in dark mode it shows as printed,
+///   white paper and true colours on the dark canvas.
 /// - `--ui-sheets snap-corner`, `snap-edge` (#57): the measure tool's Pencil held down by a placed sheet's outline, so the
 ///   loupe names what it catches: by the 1/4" plan's top-left corner, "Sheet corner"; and by the middle of the left edge
 ///   of the AS NOTED sheet turned to 33.5°, "Sheet edge". Each logs what the tip snapped to and the scale it reads there.
@@ -333,6 +341,10 @@ enum DebugSheets {
                 _ = await place(view, editor, file: 1, page: 0, at: CGPoint(x: view.bounds.midX - 150, y: view.bounds.midY))
                 _ = await place(view, editor, file: 2, page: 0, scale: .drawn(.architectural(inchesPerFoot: 0.125)),
                                 at: CGPoint(x: view.bounds.midX + 200, y: view.bounds.midY))
+                editor.zoomToEverything()
+                view.viewportJumped()
+            case "coloured":
+                _ = await place(view, editor, file: 3, page: 0)
                 editor.zoomToEverything()
                 view.viewportJumped()
             case "turn-selected", "turn-90", "turn-angle", "turn-catch", "turn-moved", "turn-scale", "select-ink",

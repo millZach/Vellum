@@ -47,8 +47,8 @@ final class InkTileRenderer {
     var displayScale: CGFloat = 3 {
         didSet { if displayScale != oldValue { redrawEverything() } }
     }
-    /// In dark mode, where sheets show light paper (dimmed ones, #11): ink starting there keeps its light-mode colour
-    /// so sketch ink stays dark over the paper (`MarkupColour.rgb(dark:overLightPaper:)`, ADR-0011).
+    /// In dark mode, where sheets show light paper (those drawn as printed, #11, #100): ink starting there keeps its
+    /// light-mode colour so sketch ink stays dark over the paper (`MarkupColour.rgb(dark:overLightPaper:)`, ADR-0011).
     var lightPaper: [Sheet] = [] {
         didSet { if lightPaper != oldValue { redrawEverything() } }
     }

@@ -33,7 +33,7 @@ final class InkTests: XCTestCase {
         // Readable (WCAG 4.5:1) on the ground it is drawn over, in both modes.
         XCTAssertGreaterThan(sketchLight.contrast(with: lightGround), 4.5)
         XCTAssertGreaterThan(sketchDark.contrast(with: darkGround), 4.5)
-        // Over a sheet drawn light in dark mode (a dimmed sheet), sketch ink stays dark.
+        // Over a sheet drawn light in dark mode (one drawn as printed), sketch ink stays dark.
         XCTAssertEqual(MarkupColour.sketch.rgb(dark: true, overLightPaper: true), sketchLight)
 
         for (colour, channel) in [(MarkupColour.red, \InkRGB.red), (.green, \InkRGB.green), (.blue, \InkRGB.blue)] {

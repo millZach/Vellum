@@ -130,8 +130,9 @@ runs() { for p in "$@"; do [ "$part" = "$p" ] && return 0; done; return 1; }
 # scan asking for a scale; then on a new canvas, driven through the canvas view's own input paths, the true-size
 # outline following the Pencil before the tap, the 1/4" plan placed with its 24'-0" dimension measured, the AS NOTED
 # sheet placed with its scale areas and Detail 2's 2'-0" measured inside one, the NTS loop diagram measured 4" NTS,
-# and the scan placed beside the plan: in dark mode the plan inverts and the scan dims. The console prints each
-# measure beside its printed dimension.
+# and the scan placed beside the plan: in dark mode the plan inverts and the scan shows as printed; and the coloured
+# P&ID (#100), in dark mode on white paper in its true colours. The console prints each measure beside its printed
+# dimension.
 sheet_captures() {
   for appearance in light dark; do
     xcrun simctl ui "$udid" appearance "$appearance"
@@ -140,7 +141,7 @@ sheet_captures() {
       capture "add-sheet-$step" --ui-tab canvases --ui-reset --ui-new-canvas --ui-dropbox sheets --ui-add-sheet "$step"
     done
     # labels (#35): the D-501 zoomed out, with two-line labels and the scale-alone fallback showing together.
-    for what in outline quarter asnoted labels nts scan; do
+    for what in outline quarter asnoted labels nts scan coloured; do
       capture "sheet-$what" --ui-tab canvases --ui-reset --ui-new-canvas --ui-sheets "$what"
       tail -30 "$(xcrun simctl get_app_container "$udid" "$bundle" data)/Documents/sheets.txt" 2>/dev/null || true
     done

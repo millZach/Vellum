@@ -1,4 +1,4 @@
-/// Whether a PDF page inverts badly in dark mode, so it shows dimmed rather than inverted (ADR-0011, #11 "Vellum
+/// Whether a PDF page inverts badly in dark mode, so it shows as printed rather than inverted (ADR-0011, #11 "Vellum
 /// decides"). Inverting suits a line drawing: black lines on white paper become light lines on dark. It does not suit
 /// a scan, whose paper is grey or yellowed and whose lines are fuzzy, or a page with coloured or large dark fills,
 /// which invert to garish complements and glaring blocks.

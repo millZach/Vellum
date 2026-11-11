@@ -212,8 +212,9 @@ public enum DrawingOpening {
 
 extension SheetReading {
     /// The sheet this page becomes at `scale`, its origin still to come: its paper, its scale areas for that scale
-    /// (every detail drawn at another, #11), and whether it dims in dark mode. Add sheet's confirm step, the drawing
-    /// viewer and the captures all make a sheet here, so a page placed any way lands the same.
+    /// (every detail drawn at another, #11), and whether it shows as printed rather than inverted in dark mode. Add
+    /// sheet's confirm step, the drawing viewer and the captures all make a sheet here, so a page placed any way lands
+    /// the same.
     public func sheet(placedAt scale: Sheet.Scale, page: SheetPage, invertsBadly: Bool) -> Sheet {
         Sheet(paper: paper, scale: scale, page: page, areas: areas(placedAt: scale), invertsBadly: invertsBadly)
     }

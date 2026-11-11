@@ -111,7 +111,7 @@ final class AddSheetModel {
     }
 
     /// Hands a confirmed page to the canvas as a sheet waiting to be placed: its scale, its scale areas for the scale
-    /// chosen, and whether it dims in dark mode, worked out off the main thread.
+    /// chosen, and whether it shows as printed rather than inverted in dark mode, worked out off the main thread.
     /// A fitted plot (#94) goes on as an NTS sheet whatever `scale` says.
     func place(_ file: DropboxFile, page: Int, info: SheetPDFReader.PageInfo, scale: Sheet.Scale) async {
         guard let reader = readers[file.id], let url = urls[file.id] else { return }

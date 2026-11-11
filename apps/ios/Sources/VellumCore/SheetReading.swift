@@ -202,7 +202,7 @@ public struct SheetReading: Hashable, Sendable {
         }
     }
 
-    /// Whether the page has no text, so it is a scan: its title block can't be read, and it dims in dark mode.
+    /// Whether the page has no text, so it is a scan: its title block can't be read, and it shows as printed in dark mode.
     public var isScan: Bool { titleBlock == .scan }
 
     // MARK: Finding things on the page

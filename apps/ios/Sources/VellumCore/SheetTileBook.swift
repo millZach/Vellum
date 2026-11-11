@@ -24,7 +24,7 @@ public struct SheetTileBook: Sendable {
     /// The most bytes of drawn tiles kept: 96 MB, about forty 768-pixel tiles, two screens' worth at 3x.
     public static let cacheLimit = 96 << 20
 
-    /// One tile: a sheet, its display (printed, inverted or dimmed), its level, and its column and row on the paper.
+    /// One tile: a sheet, its display (as printed or inverted), its level, and its column and row on the paper.
     public struct Key: Hashable, Sendable {
         public var sheet: SheetID
         public var display: SheetDisplay

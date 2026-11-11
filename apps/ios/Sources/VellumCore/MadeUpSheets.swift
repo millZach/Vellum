@@ -22,6 +22,12 @@ public enum MadeUpSheets {
         public var coloured = false
     }
 
+    /// A coloured fill on the page, such as a P&ID's equipment shaded by service, for the "inverts badly" test.
+    public struct Fill: Hashable, Sendable {
+        public var rect: PaperRect
+        public var colour: InkRGB
+    }
+
     public struct Page: Hashable, Sendable {
         public var number: String
         public var title: String
@@ -30,6 +36,8 @@ public enum MadeUpSheets {
         public var texts: [PageText]
         public var dimensions: [PrintedDimension]
         public var drawing: [Segment]
+        /// Coloured fills, drawn under the lines.
+        public var fills: [Fill] = []
         /// A scan: the page is one picture, grey paper and fuzzy lines, with no text.
         public var isScan = false
     }
@@ -48,7 +56,7 @@ public enum MadeUpSheets {
     public static let subfolder = "Superseded"
 
     /// The PDFs in that folder: a three-page set (a 1/4" plan, an AS NOTED detail sheet, an NTS loop diagram), the
-    /// plan again on its own, and a scan.
+    /// plan again on its own, a scan, and a coloured P&ID (#100).
     public static let files: [File] = [
         File(name: "IFC set, Riverside boiler house (example).pdf", pages: [quarterInchPlan, detailSheet, loopDiagram],
              contentHash: "madeup0000000000000000000000000000000000000000000000000000000001"),
@@ -56,6 +64,8 @@ public enum MadeUpSheets {
              contentHash: "madeup0000000000000000000000000000000000000000000000000000000002"),
         File(name: "M-001 Boiler house 1978, scanned (example).pdf", pages: [scan],
              contentHash: "madeup0000000000000000000000000000000000000000000000000000000003"),
+        File(name: "P-201 Boiler feed P&ID, coloured (example).pdf", pages: [colouredDiagram],
+             contentHash: "madeup0000000000000000000000000000000000000000000000000000000004"),
     ]
 
     /// M-101, a 36 × 24 plan at 1/4" = 1'-0", with a 6" printed dimension reading 24'-0".
@@ -113,14 +123,37 @@ public enum MadeUpSheets {
                         + [Segment(from: p(2.4, 3.5), to: p(5.4, 3.5)), Segment(from: p(2.4, 3.7), to: p(5.4, 3.7))])
     }()
 
-    /// M-001, an 11 × 17 scan: no text, grey paper, so Vellum can't read its scale and dims it in dark mode. Zach
-    /// would type its scale; the captures pick 1/8" = 1'-0".
+    /// M-001, an 11 × 17 scan: no text, grey paper, so Vellum can't read its scale and shows it as printed in dark
+    /// mode. Zach would type its scale; the captures pick 1/8" = 1'-0".
     public static let scan: Page = {
         let paper = PaperSize.inches(17, by: 11)
         return Page(number: "M-001", title: "BOILER HOUSE 1978 (EXAMPLE)", paper: paper, texts: [], dimensions: [],
                     drawing: rectangle(1.5, 1.5, 12, 8) + rectangle(3, 3, 3, 2) + rectangle(8, 3, 3, 2)
                         + [Segment(from: p(1.5, 6.5), to: p(13.5, 6.5))],
                     isScan: true)
+    }()
+
+    /// P-201, a 17 × 11 P&ID, NTS, with its equipment shaded by service and its process lines in blue: a page with
+    /// coloured fills, so Vellum shows it as printed in dark mode, white paper and true colours (#100).
+    public static let colouredDiagram: Page = {
+        let paper = PaperSize.inches(17, by: 11)
+        let blue = InkRGB(hex: 0x4A90D9), green = InkRGB(hex: 0x4CAF50), orange = InkRGB(hex: 0xF0A040)
+        let boiler = (2.0, 2.0, 4.0, 4.5), tank = (8.0, 2.0, 2.5, 3.5), pump = (8.5, 7.0, 1.5, 1.2)
+        func fill(_ r: (Double, Double, Double, Double), _ colour: InkRGB) -> Fill {
+            Fill(rect: .inches(x: r.0, y: r.1, width: r.2, height: r.3), colour: colour)
+        }
+        func line(_ a: PaperPoint, _ b: PaperPoint) -> Segment { Segment(from: a, to: b, coloured: true) }
+        return Page(number: "P-201", title: "BOILER FEED P&ID (EXAMPLE)", paper: paper,
+                    texts: titleBlock(paper, number: "P-201", title: "BOILER FEED P&ID (EXAMPLE)", scale: "SCALE: NTS")
+                        + [.at(2.6, 6.8, "BOILER B-1", width: 1.2, height: 0.2),
+                           .at(8.3, 5.8, "DA TANK T-1", width: 1.3, height: 0.2),
+                           .at(8.2, 8.5, "FW PUMP P-1", width: 1.3, height: 0.2)],
+                    dimensions: [],
+                    drawing: rectangle(boiler.0, boiler.1, boiler.2, boiler.3) + rectangle(tank.0, tank.1, tank.2, tank.3)
+                        + rectangle(pump.0, pump.1, pump.2, pump.3)
+                        + [line(p(9.25, 5.5), p(9.25, 7)), line(p(8.5, 7.6), p(4, 7.6)), line(p(4, 7.6), p(4, 6.5)),
+                           line(p(6, 3), p(8, 3)), line(p(10.5, 3), p(12.5, 3))],
+                    fills: [fill(boiler, orange), fill(tank, blue), fill(pump, green)])
     }()
 
     // MARK: Pieces

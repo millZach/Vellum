@@ -259,7 +259,7 @@ final class MadeUpSheetTests: XCTestCase {
     }
 
     func testTheMadeUpFilesAreMadeUp() {
-        XCTAssertEqual(MadeUpSheets.files.count, 3)
+        XCTAssertEqual(MadeUpSheets.files.count, 4)
         for file in MadeUpSheets.files {
             XCTAssertTrue(file.name.contains("(example)"), file.name)
             for page in file.pages { XCTAssertTrue(page.title.contains("(EXAMPLE)"), page.title) }
@@ -406,7 +406,8 @@ final class SheetSavingTests: XCTestCase {
     }
 }
 
-/// The "inverts badly" test (#11, ADR-0011): line drawings invert, scans and coloured pages dim.
+/// The "inverts badly" test (#11, ADR-0011): line drawings invert; scans and coloured pages show as printed, on white
+/// paper (#100).
 final class SheetToneTests: XCTestCase {
     /// A made-up 96 × 64 sample: paper of one colour with lines of another every `every` rows and columns.
     private func sample(paper: (UInt8, UInt8, UInt8), line: (UInt8, UInt8, UInt8), every: Int,
@@ -428,21 +429,36 @@ final class SheetToneTests: XCTestCase {
         XCTAssertEqual(SheetDisplay.display(dark: true, invertsBadly: reading.invertsBadly), .inverted)
     }
 
-    func testAScanDims() {
+    func testAScanShowsAsPrinted() {
         let grey = SheetTone.read(rgba: sample(paper: (205, 200, 185), line: (60, 60, 60), every: 12), hasText: true)
         XCTAssertTrue(grey.invertsBadly, "grey, yellowed paper: \(grey)")
         let noText = SheetTone.read(rgba: sample(paper: (255, 255, 255), line: (0, 0, 0), every: 12), hasText: false)
         XCTAssertTrue(noText.invertsBadly, "no text: a scan")
-        XCTAssertEqual(SheetDisplay.display(dark: true, invertsBadly: true), .dimmed)
+        XCTAssertEqual(SheetDisplay.display(dark: true, invertsBadly: true), .asPrinted)
     }
 
-    func testColouredFillsDim() {
+    func testColouredFillsShowAsPrinted() {
         let coloured = SheetTone.read(rgba: sample(paper: (255, 255, 255), line: (0, 0, 0), every: 12,
                                                    fill: ((10, 10, 40, 30), (40, 120, 220))), hasText: true)
         XCTAssertTrue(coloured.invertsBadly, "\(coloured)")
         let dark = SheetTone.read(rgba: sample(paper: (255, 255, 255), line: (0, 0, 0), every: 12,
                                                fill: ((0, 0, 60, 40), (20, 20, 20))), hasText: true)
         XCTAssertTrue(dark.invertsBadly, "a large black fill: \(dark)")
+    }
+
+    /// The made-up coloured P&ID the dark-mode capture shows on white paper is coloured well past the limit, so it is
+    /// shown as printed: its fills alone cover several times `colourfulLimit` of the page.
+    func testTheMadeUpColouredDiagramIsColouredEnoughToShowAsPrinted() {
+        let page = MadeUpSheets.colouredDiagram
+        let filled = page.fills.reduce(0) { $0 + $1.rect.width.inches * $1.rect.height.inches }
+        let share = filled / (page.paper.width.inches * page.paper.height.inches)
+        XCTAssertGreaterThan(share, SheetTone.colourfulLimit * 3, "fills cover \(share) of the page")
+        for fill in page.fills {
+            let c = [Int(fill.colour.red), Int(fill.colour.green), Int(fill.colour.blue)]
+            XCTAssertGreaterThanOrEqual(c.max()! - c.min()!, 48, "\(fill.colour) is clearly coloured")
+        }
+        XCTAssertFalse(page.isScan)
+        XCTAssertFalse(page.texts.isEmpty)
     }
 }
 

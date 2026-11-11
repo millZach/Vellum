@@ -289,7 +289,8 @@ struct CaptureSheetsTransport: DropboxTransport {
 /// - `--ui-sheets scan`: the scan placed at 1/8" = 1'-0" beside the 1/4" plan: in dark mode the plan inverts and the
 ///   scan shows as printed, its own yellowed paper.
 /// - `--ui-sheets coloured` (#100): the made-up coloured P&ID placed NTS and zoomed to: in dark mode it shows as printed,
-///   white paper and true colours on the dark canvas.
+///   white paper and true colours on the dark canvas. Black markup goes on it (#104): a text box and a dimension over its
+///   paper, which stay black in dark mode, and a text box on the canvas beside it, which flips to near-white.
 /// - `--ui-sheets snap-corner`, `snap-edge` (#57): the measure tool's Pencil held down by a placed sheet's outline, so the
 ///   loupe names what it catches: by the 1/4" plan's top-left corner, "Sheet corner"; and by the middle of the left edge
 ///   of the AS NOTED sheet turned to 33.5°, "Sheet edge". Each logs what the tip snapped to and the scale it reads there.
@@ -344,7 +345,11 @@ enum DebugSheets {
                 editor.zoomToEverything()
                 view.viewportJumped()
             case "coloured":
-                _ = await place(view, editor, file: 3, page: 0)
+                guard let sheet = await place(view, editor, file: 3, page: 0) else { return }
+                editor.zoom(to: sheet.bounds)
+                view.viewportJumped()
+                try? await Task.sleep(for: .seconds(0.3))
+                markUpColoured(sheet, view, editor)
                 editor.zoomToEverything()
                 view.viewportJumped()
             case "turn-selected", "turn-90", "turn-angle", "turn-catch", "turn-moved", "turn-scale", "select-ink",
@@ -536,6 +541,29 @@ enum DebugSheets {
         let corner = at(-5, -3)
         editor.addFrame(fitting: CanvasRect(origin: corner, size: CanvasSize(width: sheet.size.width / 5,
                                                                              height: sheet.size.height / 5)))
+    }
+
+    /// Black (sketch) markup on and off the coloured P&ID (#104): a text box and a dimension over its white paper, which
+    /// stay black in dark mode as ink does, and a text box on the canvas beside it, which flips to near-white there.
+    private static func markUpColoured(_ sheet: Sheet, _ view: InkCanvasUIView, _ editor: CanvasEditor) {
+        func at(_ x: Double, _ y: Double) -> CanvasPoint { sheet.canvasPoint(at: PaperPoint(x: .inches(x), y: .inches(y))) }
+        let was = editor.colour
+        editor.colour = .sketch
+        let font = editor.viewport.canvasLength(ofScreen: TextBox.screenFontSize)
+        let width = editor.viewport.canvasLength(ofScreen: 150), height = editor.viewport.canvasLength(ofScreen: 24)
+        let onPaper = editor.addText("Verify FW line size", at: at(11.6, 4.6), width: width, height: height, fontSize: font)
+        let onCanvas = editor.addText("On the canvas", at: at(-4.5, 4.6), width: width, height: height, fontSize: font)
+        // Across the DA tank's top, pulled above it.
+        let dimension = editor.addDimension(start: at(8, 2), end: at(10.5, 2), through: at(9.25, 1.2))
+        editor.colour = was
+        let lightPaper = SheetDisplay.lightPaper(editor.sheets, dark: view.isDark)
+        func ground(_ point: CanvasPoint?) -> String {
+            guard let point else { return "missing" }
+            return MarkupColour.onDarkGround(dark: view.isDark, startingAt: point, lightPaper: lightPaper) ? "dark ground"
+                : "light ground"
+        }
+        log("coloured markup (dark \(view.isDark)): text on paper \(ground(onPaper?.origin)), text on canvas "
+            + "\(ground(onCanvas?.origin)), dimension \(ground(dimension?.start))")
     }
 
     /// Every printed dimension as measured on the sheet where it now stands, what a kept dimension reads, and what the

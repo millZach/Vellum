@@ -131,8 +131,9 @@ runs() { for p in "$@"; do [ "$part" = "$p" ] && return 0; done; return 1; }
 # outline following the Pencil before the tap, the 1/4" plan placed with its 24'-0" dimension measured, the AS NOTED
 # sheet placed with its scale areas and Detail 2's 2'-0" measured inside one, the NTS loop diagram measured 4" NTS,
 # and the scan placed beside the plan: in dark mode the plan inverts and the scan shows as printed; and the coloured
-# P&ID (#100), in dark mode on white paper in its true colours. The console prints each measure beside its printed
-# dimension.
+# P&ID (#100), in dark mode on white paper in its true colours, with a black text box and dimension on its paper that
+# stay black and a text box on the canvas beside it that turns near-white (#104). The console prints each measure beside
+# its printed dimension.
 sheet_captures() {
   for appearance in light dark; do
     xcrun simctl ui "$udid" appearance "$appearance"

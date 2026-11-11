@@ -42,10 +42,32 @@ final class AnnotationOverlay {
     var isDark = false {
         didSet {
             guard isDark != oldValue else { return }
+            startGround = nil
             rebuildAll()
             applyToolColours()
             showTool()
         }
+    }
+    /// In dark mode, the sheets whose paper shows light: a dimension starting there (its first point) is drawn in its
+    /// light-mode colours, line, text and box, so black stays dark over the paper, as ink does
+    /// (`MarkupColour.onDarkGround`, #104). Set it before `isDark` or `sheetsChanged`, which draw the dimensions again.
+    var lightPaper: [Sheet] = [] {
+        didSet { startGround = nil }
+    }
+    /// Whether markup starting at the tool's first point is on a dark ground: worked out once per first point, not once
+    /// per frame while the band or the dimension being pulled follows the tip.
+    private var startGround: (point: CanvasPoint, dark: Bool)?
+
+    /// Whether markup starting at a point is drawn in its dark-mode colours.
+    private func darkGround(at point: CanvasPoint) -> Bool {
+        MarkupColour.onDarkGround(dark: isDark, startingAt: point, lightPaper: lightPaper)
+    }
+
+    private func toolDarkGround(at point: CanvasPoint) -> Bool {
+        if let startGround, startGround.point == point { return startGround.dark }
+        let dark = darkGround(at: point)
+        startGround = (point, dark)
+        return dark
     }
 
     enum Item: Hashable {
@@ -300,7 +322,8 @@ final class AnnotationOverlay {
     private func build(_ dimension: CanvasDimension) {
         guard let base else { return }
         let layer = itemLayer(.dimension(dimension.id))
-        Self.draw(dimension, label: editor.label(for: dimension), on: base, into: layer, dark: isDark, alpha: 1)
+        Self.draw(dimension, label: editor.label(for: dimension), on: base, into: layer,
+                  dark: darkGround(at: dimension.start), alpha: 1)
     }
 
     private func build(_ frame: Frame) {
@@ -573,10 +596,12 @@ final class AnnotationOverlay {
             }
 
             // The first point, and the band from it to where the tip is.
+            // A dimension's dot and band take the colours it will be kept in, from where it starts.
+            let markDark = tool.isMeasure ? isDark : tool.firstPoint.map { toolDarkGround(at: $0) } ?? isDark
             if let first = tool.firstPoint {
                 let s = screen(first)
                 firstDot.path = CGPath(ellipseIn: CGRect(x: s.x - 3.5, y: s.y - 3.5, width: 7, height: 7), transform: nil)
-                firstDot.fillColor = (tool.isMeasure ? Palette.measurePill : Palette.ink(editor.colour, dark: isDark))
+                firstDot.fillColor = (tool.isMeasure ? Palette.measurePill : Palette.ink(editor.colour, dark: markDark))
                     .cgColor
             } else {
                 firstDot.path = nil
@@ -586,10 +611,10 @@ final class AnnotationOverlay {
                 if hypot(b.x - a.x, b.y - a.y) > 2 {
                     bandLine.path = Self.tickedLine(a, b)
                     bandLine.strokeColor = (tool.isMeasure ? Palette.measureLine(dark: isDark)
-                        : Palette.ink(editor.colour, dark: isDark)).cgColor
+                        : Palette.ink(editor.colour, dark: markDark)).cgColor
                     bandPill.set(editor.measureText(from: first, to: tip.target.point), size: 12,
-                                 colour: tool.isMeasure ? .white : Palette.ink(editor.colour, dark: isDark),
-                                 fill: tool.isMeasure ? Palette.measurePill : Palette.dimensionBox(dark: isDark),
+                                 colour: tool.isMeasure ? .white : Palette.ink(editor.colour, dark: markDark),
+                                 fill: tool.isMeasure ? Palette.measurePill : Palette.dimensionBox(dark: markDark),
                                  weight: .semibold)
                     bandPill.layer.position = Self.labelPosition(a, b, height: bandPill.layer.bounds.height)
                     bandPill.layer.opacity = 0.9
@@ -606,8 +631,8 @@ final class AnnotationOverlay {
             // The dimension being pulled off, as it will be kept, a little faded.
             pullingLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
             if let pulling = tool.pulling {
-                Self.draw(pulling, label: editor.label(for: pulling), on: viewport, into: pullingLayer, dark: isDark,
-                          alpha: 0.75)
+                Self.draw(pulling, label: editor.label(for: pulling), on: viewport, into: pullingLayer,
+                          dark: toolDarkGround(at: pulling.start), alpha: 0.75)
             }
 
             // A frame being dragged: the drag, and the frame it makes, with its paper and scale.

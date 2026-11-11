@@ -70,7 +70,7 @@ final class SheetRenderer {
     /// The sheets whose paper shows light, for ink colours over them (`SheetDisplay.paperIsLight`,
     /// `MarkupColour.rgb(dark:overLightPaper:)`). Empty in light mode, where the canvas is light anyway.
     var lightPaper: [Sheet] {
-        isDark ? sheets.filter { display(of: $0).paperIsLight } : []
+        SheetDisplay.lightPaper(sheets, dark: isDark)
     }
 
     // MARK: The sheets

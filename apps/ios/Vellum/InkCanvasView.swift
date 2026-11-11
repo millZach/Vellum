@@ -52,7 +52,7 @@ final class InkCanvasUIView: UIView, UIGestureRecognizerDelegate {
         didSet {
             guard isDark != oldValue else { return }
             sheetRenderer.isDark = isDark
-            renderer.lightPaper = sheetRenderer.lightPaper
+            lightPaperDidChange()
             renderer.isDark = isDark
             textOverlay.isDark = isDark
             annotationOverlay.isDark = isDark
@@ -1898,10 +1898,20 @@ extension InkCanvasUIView {
     /// The sheets changed: placed, or taken away or put back by undo and redo.
     fileprivate func sheetsDidChange(_ change: InkChange) {
         sheetRenderer.setSheets(editor.sheets)
-        renderer.lightPaper = sheetRenderer.lightPaper
+        lightPaperDidChange()
         annotationOverlay.sheetsChanged(change)
         // An undo or redo of a turn moves a selected sheet's edge with it.
         updateSelectedSheet()
+    }
+
+    /// Hands the sheets whose paper shows light to the ink, the text boxes and the dimensions, worked out once per change
+    /// of the sheets or the mode, so markup over white paper stays dark (#100, #104). Before the dimensions are drawn
+    /// again, which follows it.
+    fileprivate func lightPaperDidChange() {
+        let lightPaper = sheetRenderer.lightPaper
+        renderer.lightPaper = lightPaper
+        textOverlay.lightPaper = lightPaper
+        annotationOverlay.lightPaper = lightPaper
     }
 
     /// A sheet started or stopped waiting to be placed: its outline shows in the middle of the view until the Pencil

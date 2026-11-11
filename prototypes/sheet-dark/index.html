@@ -1,0 +1,120 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway. How a coloured sheet looks on a dark canvas. Made-up drawing, no client data. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vellum prototype: coloured sheets in dark mode</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #16181c; color: #e8e8ea; font: 15px -apple-system, system-ui, sans-serif; min-height: 100vh; }
+  .banner { padding: 10px 16px; background: #2a2410; color: #f3d98a; font-size: 13px; }
+  .stage { position: relative; margin: 18px auto 120px; width: min(951px, 96vw); aspect-ratio: 951 / 669;
+           background-color: #1d2024;
+           background-image: linear-gradient(#262a2f 1px, transparent 1px), linear-gradient(90deg, #262a2f 1px, transparent 1px);
+           background-size: 48px 48px; border-radius: 14px; overflow: hidden; border: 1px solid #2c3036; }
+  .sheet { position: absolute; left: 12%; top: 14%; width: 76%; }
+  .sheet svg { display: block; width: 100%; height: auto; }
+  .label { position: absolute; left: 12.4%; top: 14.6%; background: #111; color: #fff; font: 600 13px system-ui; padding: 3px 7px; border-radius: 4px; z-index: 2; }
+  .ink { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+  .note { width: min(951px, 96vw); margin: 0 auto; font-size: 14px; line-height: 1.45; color: #c9cbd0; }
+  .note b { color: #fff; }
+  .bar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 6px; background: #24272c;
+         padding: 6px; border-radius: 14px; border: 1px solid #353a41; box-shadow: 0 6px 24px #0008; z-index: 9; flex-wrap: wrap; justify-content: center; }
+  .bar a { color: #dfe2e6; text-decoration: none; padding: 8px 12px; border-radius: 9px; font-size: 14px; white-space: nowrap; }
+  .bar a.on { background: #2f6fd6; color: #fff; }
+  .state { width: min(951px, 96vw); margin: 10px auto 0; font: 12px ui-monospace, monospace; color: #8b9098; }
+</style>
+</head>
+<body>
+<div class="banner">PROTOTYPE · how a <b>coloured</b> sheet (red/purple linework) looks on a dark canvas. Made-up drawing. Pick A–D with the bar at the bottom.</div>
+
+<div class="stage" id="stage">
+  <div class="label">E-0001 · 1" = 50'</div>
+  <div class="sheet" id="sheet">
+    <svg viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica, Arial, sans-serif">
+      <rect width="1100" height="720" fill="#ffffff"/>
+      <rect x="40" y="24" width="1030" height="670" fill="none" stroke="#8a2a9a" stroke-width="2"/>
+      <!-- site linework, black -->
+      <g stroke="#222" stroke-width="1.6" fill="none">
+        <path d="M120 600 L180 240 L420 200 L470 560 Z"/>
+        <path d="M150 560 L430 520"/>
+        <path d="M500 60 L520 690 M515 60 L535 690 M530 60 L550 690 M545 60 L565 690"/>
+        <path d="M620 80 C600 200 580 300 610 420 S660 600 640 690"/>
+        <rect x="760" y="140" width="150" height="110"/>
+        <circle cx="820" cy="95" r="26"/><circle cx="880" cy="95" r="26"/>
+        <rect x="700" y="330" width="320" height="250"/>
+        <path d="M700 330 L1020 580 M700 580 L1020 330" stroke-dasharray="8 6"/>
+        <path d="M760 250 L780 330"/>
+      </g>
+      <path d="M770 300 L960 300 L970 330" stroke="#222" stroke-width="7" fill="none"/>
+      <!-- red detail boxes and callouts -->
+      <g stroke="#d4302b" stroke-width="2" fill="none">
+        <rect x="90" y="150" width="420" height="480"/>
+        <rect x="680" y="60" width="380" height="250"/>
+        <rect x="690" y="320" width="230" height="300"/>
+        <rect x="930" y="150" width="70" height="50"/>
+      </g>
+      <g fill="#d4302b" font-size="30">
+        <text x="250" y="380">E-0005</text>
+        <text x="900" y="105">E-0002</text>
+        <text x="740" y="600">E-0004</text>
+        <text x="935" y="185" font-size="16">E-0003</text>
+      </g>
+      <!-- green scale note -->
+      <g fill="#2a9a3a" stroke="#2a9a3a">
+        <line x1="640" y1="640" x2="800" y2="640" stroke-width="3"/>
+        <text x="650" y="630" font-size="11" stroke="none">2" AT FULL SCALE</text>
+      </g>
+      <!-- north arrow, purple -->
+      <g fill="#8a2a9a" stroke="#8a2a9a"><line x1="70" y1="650" x2="230" y2="650" stroke-width="2"/><polygon points="230,650 200,640 200,660"/><text x="250" y="657" font-size="16" stroke="none">NORTH</text></g>
+      <!-- title block, black with a made-up name -->
+      <g stroke="#222" stroke-width="1.2" fill="none">
+        <rect x="830" y="600" width="240" height="94"/>
+        <line x1="830" y1="625" x2="1070" y2="625"/><line x1="830" y1="650" x2="1070" y2="650"/><line x1="950" y1="650" x2="950" y2="694"/>
+      </g>
+      <g fill="#222" font-size="12"><text x="840" y="617" font-weight="700">EXAMPLE PLANT CO.</text><text x="840" y="642">INSTRUMENT SITE PLAN</text><text x="840" y="675">1" = 50'</text><text x="960" y="675">E-0001</text></g>
+    </svg>
+  </div>
+  <svg class="ink" viewBox="0 0 951 669" preserveAspectRatio="none">
+    <path id="inkpath" d="M300 300 C340 260 400 270 420 320 S470 380 520 350" fill="none" stroke-width="4" stroke-linecap="round"/>
+    <path d="M560 420 l60 0 m-60 0 l18 -10 m-18 10 l18 10" fill="none" stroke="#e5484d" stroke-width="4" stroke-linecap="round"/>
+  </svg>
+</div>
+<div class="state" id="state"></div>
+<div class="note" id="note"></div>
+
+<nav class="bar" id="bar"></nav>
+
+<script>
+const variants = {
+  A: { name: "A · Today: dimmed to 45%", filter: "brightness(0.45)", ink: "#111",
+       note: "<b>What the Duo does now.</b> Coloured sheets aren't flipped; the paper is drawn at 45% brightness, so it reads mid-grey. Colours stay right, but it looks muddy." },
+  B: { name: "B · Dimmed less (70%)", filter: "brightness(0.70)", ink: "#111",
+       note: "<b>Same idea, lighter.</b> Paper at about 70% brightness: clearly paper, easier to read, still not glaring on the dark canvas." },
+  C: { name: "C · Flipped, colours kept", filter: "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.95)", ink: "#f2f2f2",
+       note: "<b>Flip it like a black-and-white sheet.</b> Light lines on dark paper; red stays red-ish, purple stays purple-ish (lightness is flipped, hue kept), the way AutoCAD shows model space." },
+  D: { name: "D · Full white paper", filter: "none", ink: "#111",
+       note: "<b>No change in dark mode.</b> The sheet is bright white paper, exactly as printed, sitting on the dark canvas." },
+};
+const params = new URLSearchParams(location.search);
+let v = (params.get("v") || "A").toUpperCase(); if (!variants[v]) v = "A";
+function show(key) {
+  v = key; const x = variants[key];
+  document.getElementById("sheet").style.filter = x.filter;
+  document.getElementById("inkpath").setAttribute("stroke", x.ink);
+  document.getElementById("note").innerHTML = x.note + " The black stroke and red arrow are Pencil ink drawn over the sheet.";
+  document.getElementById("state").textContent = `variant=${key}  sheet filter: ${x.filter}  ink over sheet: ${x.ink}`;
+  for (const a of document.querySelectorAll(".bar a")) a.classList.toggle("on", a.dataset.v === key);
+  const u = new URL(location); u.searchParams.set("v", key); history.replaceState(null, "", u);
+}
+const bar = document.getElementById("bar");
+for (const k of Object.keys(variants)) {
+  const a = document.createElement("a"); a.href = "?v=" + k; a.dataset.v = k; a.textContent = variants[k].name;
+  a.onclick = e => { e.preventDefault(); show(k); }; bar.appendChild(a);
+}
+show(v);
+</script>
+</body>
+</html>

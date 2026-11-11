@@ -56,6 +56,13 @@ public enum MarkupColour: String, CaseIterable, Hashable, Sendable {
         case (.sketch, true): return InkRGB(hex: 0xE6E6E6)
         }
     }
+
+    /// Whether markup in this mode starting at a point is drawn on a dark ground, so in its dark-mode colour: in dark
+    /// mode, unless it starts over a sheet whose paper shows light (`SheetDisplay.lightPaper`). Ink, text boxes and
+    /// dimensions all follow this rule (ADR-0011, #104).
+    public static func onDarkGround(dark: Bool, startingAt point: CanvasPoint?, lightPaper: [Sheet]) -> Bool {
+        dark && !SheetDisplay.isOverLightPaper(point, in: lightPaper)
+    }
 }
 
 /// An sRGB colour, kept here rather than as a UIColor so the colour rules are testable without a device.

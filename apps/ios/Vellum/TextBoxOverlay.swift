@@ -24,11 +24,12 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
     var isGesturing = false
 
     var isDark = false {
-        didSet {
-            guard isDark != oldValue else { return }
-            for (id, shown) in labels { if let box = editor.text(id) { shown.label.textColor = colour(box) } }
-            editing?.view.textColor = editing.map { Palette.ink($0.colour, dark: isDark) }
-        }
+        didSet { if isDark != oldValue { recolour() } }
+    }
+    /// In dark mode, the sheets whose paper shows light: a text box starting there (its top-left corner) keeps its
+    /// light-mode colour so black text stays dark over the paper, as ink does (`MarkupColour.onDarkGround`, #104).
+    var lightPaper: [Sheet] = [] {
+        didSet { if lightPaper != oldValue { recolour() } }
     }
 
     /// One label and the zoom its text was laid out at.
@@ -89,7 +90,18 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
         for box in editor.texts { place(box) }
     }
 
-    private func colour(_ box: TextBox) -> UIColor { Palette.ink(box.colour, dark: isDark) }
+    /// A text box's colour, worked out when its label is laid out or the mode or the light paper changes, never on a
+    /// pan or a pinch.
+    private func colour(_ colour: MarkupColour, at origin: CanvasPoint) -> UIColor {
+        Palette.ink(colour, dark: MarkupColour.onDarkGround(dark: isDark, startingAt: origin, lightPaper: lightPaper))
+    }
+
+    private func colour(_ box: TextBox) -> UIColor { colour(box.colour, at: box.origin) }
+
+    private func recolour() {
+        for (id, shown) in labels { if let box = editor.text(id) { shown.label.textColor = colour(box) } }
+        if let editing { editing.view.textColor = colour(editing.colour, at: editing.origin) }
+    }
 
     private func place(_ original: TextBox) {
         guard let host, let viewport else { return }
@@ -204,7 +216,7 @@ final class TextBoxOverlay: NSObject, UITextViewDelegate {
         let view = editing.view
         let font = editing.fontSize.inches * editing.pointsPerInch
         view.font = .systemFont(ofSize: font)
-        view.textColor = Palette.ink(editing.colour, dark: isDark)
+        view.textColor = colour(editing.colour, at: editing.origin)
         view.text = text
         host.addSubview(view)
         layOutEditing()

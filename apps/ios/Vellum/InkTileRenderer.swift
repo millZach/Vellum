@@ -53,12 +53,6 @@ final class InkTileRenderer {
         didSet { if lightPaper != oldValue { redrawEverything() } }
     }
 
-    /// Whether a stroke starting at a point is drawn over light paper in dark mode.
-    nonisolated static func isOverLightPaper(_ point: CanvasPoint?, in sheets: [Sheet]) -> Bool {
-        guard let point, !sheets.isEmpty else { return false }
-        return sheets.contains { $0.contains(point) }
-    }
-
     /// Ink is never drawn thinner than this many screen points, so zoomed-out ink never vanishes.
     nonisolated static let minimumWidth = 1.0
 
@@ -311,8 +305,9 @@ final class InkTileRenderer {
             context.saveGState()
             context.translateBy(x: origin.x.inches - job.originX, y: origin.y.inches - job.originY)
             context.setAlpha(stroke.tool.opacity)
-            let overLight = job.dark && isOverLightPaper(stroke.points.first, in: job.lightPaper)
-            context.setStrokeColor(colour(stroke.colour, dark: job.dark && !overLight))
+            let darkGround = MarkupColour.onDarkGround(dark: job.dark, startingAt: stroke.points.first,
+                                                       lightPaper: job.lightPaper)
+            context.setStrokeColor(colour(stroke.colour, dark: darkGround))
             context.setLineWidth(max(stroke.width.inches, thinnest))
             context.addPath(path)
             context.strokePath()

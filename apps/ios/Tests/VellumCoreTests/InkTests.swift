@@ -46,6 +46,47 @@ final class InkTests: XCTestCase {
         }
     }
 
+    /// Text boxes and dimensions take ink's colour rule (#104): in dark mode, markup starting over a sheet shown on
+    /// white paper (one that inverts badly) is drawn in its light-mode colour; over the canvas or an inverted sheet, and
+    /// in light mode, it is drawn as before. Red, green and blue keep their hue either way.
+    func testMarkupStartingOverWhitePaperKeepsItsLightModeColourInDarkMode() {
+        let scale = DrawingScale.architectural(inchesPerFoot: 0.25)
+        // Arch D at 1/4" = 1'-0" covers 144' by 96' of the canvas.
+        let inverted = Sheet(id: SheetID(1), paper: .archD, scale: .drawn(scale))
+        let white = Sheet(id: SheetID(2), paper: .archD, scale: .drawn(scale),
+                          origin: CanvasPoint(x: .feet(200), y: .zero), invertsBadly: true)
+        let sheets = [inverted, white]
+        let overCanvas = CanvasPoint(x: .feet(-50), y: .feet(10))
+        let overInverted = CanvasPoint(x: .feet(10), y: .feet(10))
+        let overWhite = CanvasPoint(x: .feet(210), y: .feet(10))
+
+        XCTAssertEqual(SheetDisplay.lightPaper(sheets, dark: true), [white])
+        XCTAssertEqual(SheetDisplay.lightPaper(sheets, dark: false), [], "light mode: the canvas is light anyway")
+
+        func colour(_ colour: MarkupColour, dark: Bool, at point: CanvasPoint) -> InkRGB {
+            let lightPaper = SheetDisplay.lightPaper(sheets, dark: dark)
+            return colour.rgb(dark: MarkupColour.onDarkGround(dark: dark, startingAt: point, lightPaper: lightPaper))
+        }
+        let sketchDark = MarkupColour.sketch.rgb(dark: true), sketchLight = MarkupColour.sketch.rgb(dark: false)
+        XCTAssertEqual(colour(.sketch, dark: true, at: overCanvas), sketchDark, "over the dark canvas")
+        XCTAssertEqual(colour(.sketch, dark: true, at: overInverted), sketchDark, "over an inverted sheet's dark paper")
+        XCTAssertEqual(colour(.sketch, dark: true, at: overWhite), sketchLight, "over white paper in dark mode")
+        for point in [overCanvas, overInverted, overWhite] {
+            XCTAssertEqual(colour(.sketch, dark: false, at: point), sketchLight, "light mode, at \(point)")
+        }
+        // Black over white paper is readable, as on a printed sheet.
+        XCTAssertGreaterThan(colour(.sketch, dark: true, at: overWhite).contrast(with: InkRGB(hex: 0xFFFFFF)), 4.5)
+        // Red, green and blue take their light-mode shade over white paper: still red, green and blue.
+        for markup in [MarkupColour.red, .green, .blue] {
+            XCTAssertEqual(colour(markup, dark: true, at: overWhite), markup.rgb(dark: false))
+            XCTAssertEqual(colour(markup, dark: true, at: overInverted), markup.rgb(dark: true))
+        }
+        // The rule ink has used since #100 gives the same answer.
+        XCTAssertEqual(colour(.sketch, dark: true, at: overWhite), MarkupColour.sketch.rgb(dark: true, overLightPaper: true))
+        // Markup with no start point (an empty stroke) is drawn on the ground.
+        XCTAssertTrue(MarkupColour.onDarkGround(dark: true, startingAt: nil, lightPaper: [white]))
+    }
+
     // MARK: Widths
 
     func testAStrokesWidthIsItsScreenWeightAtTheZoomItWasDrawnAt() {

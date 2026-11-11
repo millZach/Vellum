@@ -12,7 +12,7 @@ import VellumCore
 /// covering the screen stays up under a new one until the new one's tiles are drawn.
 ///
 /// In dark mode a line drawing is drawn inverted, light lines on the dark ground, and a page that inverts badly is
-/// drawn dimmed (`SheetDisplay`, ADR-0011); changing mode draws the tiles again in the new one.
+/// drawn as printed, on white paper (`SheetDisplay`, ADR-0011, #100); changing mode draws the tiles again in the new one.
 ///
 /// A sheet's angle (#44) is one more transform, on the layer holding its paper and levels. Tiles are keyed by the paper, so
 /// they keep through a turn, a move and a scale change. While one is under way the sheet is a `preview`: each frame moves
@@ -206,14 +206,11 @@ final class SheetRenderer {
         switch display {
         case .asPrinted: UIColor.white.cgColor
         case .inverted: Self.invertedPaper.cgColor
-        case .dimmed: UIColor(white: Self.dimmedBrightness, alpha: 1).cgColor
         }
     }
 
     /// An inverted sheet's paper: a shade lighter than the dark ground, so its edge shows.
     static let invertedPaper = UIColor(hex: 0x232428)
-    /// How bright a dimmed sheet's white paper is drawn: a little under half.
-    static let dimmedBrightness: CGFloat = 0.45
 
     // MARK: Drawing tiles
 
@@ -337,7 +334,7 @@ private struct SheetTileJob: @unchecked Sendable {
     /// The PDF documents open on the tile thread, one per file.
     nonisolated(unsafe) private static var documents: [URL: CGPDFDocument] = [:]
 
-    /// Draws one tile: the page on white paper at the tile's level, then inverted or dimmed for dark mode.
+    /// Draws one tile: the page on white paper at the tile's level, then inverted for dark mode if it is a line drawing.
     static func draw(_ job: SheetTileJob) -> CGImage? {
         guard !job.cancelled.isSet else { return nil }
         let document: CGPDFDocument
@@ -392,10 +389,6 @@ private struct SheetTileJob: @unchecked Sendable {
             context.setBlendMode(.lighten)
             context.setFillColor(SheetRenderer.invertedPaperComponents)
             context.fill(full)
-        case .dimmed:
-            context.setBlendMode(.multiply)
-            context.setFillColor(gray: SheetRenderer.dimmedBrightnessValue, alpha: 1)
-            context.fill(full)
         }
         return context.makeImage()
     }
@@ -405,5 +398,4 @@ extension SheetRenderer {
     /// The inverted paper as a CGColor made off the main thread.
     nonisolated(unsafe) static let invertedPaperComponents = CGColor(srgbRed: 0x23 / 255, green: 0x24 / 255, blue: 0x28 / 255,
                                                              alpha: 1)
-    nonisolated static let dimmedBrightnessValue: CGFloat = 0.45
 }

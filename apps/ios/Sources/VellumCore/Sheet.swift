@@ -166,7 +166,7 @@ public struct Sheet: Hashable, Sendable, Identifiable {
     public var page: SheetPage?
     /// The details drawn at scales other than the sheet's own (#11).
     public var areas: [ScaleArea]
-    /// Whether the page inverts badly (a scan, coloured fills), so dark mode shows it dimmed rather than inverted
+    /// Whether the page inverts badly (a scan, coloured fills), so dark mode shows it as printed rather than inverted
     /// (`SheetDisplay`, `SheetTone`). Decided once, when the sheet is placed.
     public var invertsBadly: Bool
     /// How far the sheet is turned about its centre, in degrees counter-clockwise on screen, from 0 up to 360 (#44).

@@ -65,13 +65,14 @@ final class CanvasToolTests: XCTestCase {
         XCTAssertTrue(AppearanceSetting.dark.isDark(systemIsDark: false))
     }
 
-    func testSheetsInvertInDarkModeAndDimWhenTheyInvertBadly() {
+    func testSheetsInvertInDarkModeAndShowAsPrintedWhenTheyInvertBadly() {
         XCTAssertEqual(SheetDisplay.display(dark: false, invertsBadly: false), .asPrinted)
         XCTAssertEqual(SheetDisplay.display(dark: false, invertsBadly: true), .asPrinted)
         XCTAssertEqual(SheetDisplay.display(dark: true, invertsBadly: false), .inverted)
-        XCTAssertEqual(SheetDisplay.display(dark: true, invertsBadly: true), .dimmed)
+        // A sheet that inverts badly keeps its white paper and true colours in dark mode (#100), so ink over it stays dark.
+        XCTAssertEqual(SheetDisplay.display(dark: true, invertsBadly: true), .asPrinted)
         XCTAssertFalse(SheetDisplay.inverted.paperIsLight)
-        XCTAssertTrue(SheetDisplay.dimmed.paperIsLight)
+        XCTAssertTrue(SheetDisplay.display(dark: true, invertsBadly: true).paperIsLight)
     }
 
     func testTheSaveStateSaysTheCanvasIsOnThisDuoAndNeverClaimsDropbox() {

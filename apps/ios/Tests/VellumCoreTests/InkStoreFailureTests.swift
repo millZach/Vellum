@@ -79,7 +79,8 @@ final class InkStoreFailureTests: XCTestCase {
             let copies = session.duplicate(picked, by: .translation(dx: .feet(1), dy: .zero))
             session.delete(CanvasSelection(dimensions: [DimensionID(2)] + copies.dimensions))
             session.undo()
-            // Sheets (#11): the made-up AS NOTED sheet with its scale areas, an NTS sheet that dims, an undo and a redo.
+            // Sheets (#11): the made-up AS NOTED sheet with its scale areas, an NTS sheet that shows as printed in dark
+            // mode, an undo and a redo.
             let detail = MadeUpSheets.detailSheet
             let reading = SheetReading.read(detail.texts, paper: detail.paper)
             let main = reading.suggestedScale ?? .notToScale

@@ -42,7 +42,7 @@ public enum MarkupColour: String, CaseIterable, Hashable, Sendable {
     /// The colour the ink is drawn in. Red, green and blue stay red, green and blue in both modes, a little brighter
     /// on a dark ground so they read as well. Sketch ink flips between near-black and near-white to stay readable over
     /// whatever is under it, like AutoCAD's colour 7 (ADR-0011). `overLightPaper` is for ink lying on a sheet that is
-    /// drawn light (any sheet in light mode, a dimmed sheet in dark mode); an inverted sheet is dark paper.
+    /// drawn light (any sheet in light mode, a sheet drawn as printed in dark mode); an inverted sheet is dark paper.
     public func rgb(dark: Bool, overLightPaper: Bool = false) -> InkRGB {
         let darkGround = dark && !overLightPaper
         switch (self, darkGround) {
